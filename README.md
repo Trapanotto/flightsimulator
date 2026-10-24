@@ -21,7 +21,13 @@ Three.js · Geodaten von [geo.admin.ch](https://docs.geo.admin.ch/) (swisstopo) 
 
 Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
 
+![Startbildschirm](public/assets/ui/hero.jpg)
+
 ## Was schon geht
+
+- **Flugzeug TR-1 «Alpenfalke»** – komplett per Python-Skript in Blender erzeugt: Rumpf aus Querschnitten,
+  NACA-Profile, bewegliche Ruder, Klappen, Fahrwerk, 4-Blatt-Propeller, Cockpit; Lackierung und
+  Schriftzüge in einer 2048er-Textur; drei Detailstufen; 0,7 MB als GLB. Im Spiel unter **Hangar**.
 
 - **Ganze Schweiz streamen:** Terrain (Quantized-Mesh) und SWISSIMAGE-Luftbilder direkt von geo.admin.ch,
   Detail nach Bildschirmfehler (Quadtree, Zoom 7–15), Vorausladen in Flugrichtung, Speicherbudget
@@ -44,6 +50,25 @@ Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
 | Testflug Genf → St. Moritz | R                                           |
 | Touch                      | Ziehen zum Umschauen, «Vorwärts»-Knopf      |
 
+## Flugzeug neu bauen
+
+Braucht Blender 5.x im `PATH`. Erzeugt Modell, Texturen, Vorschaubilder (`build/`) und
+`public/assets/aircraft/tr1.glb`:
+
+```bash
+npm run assets
+```
+
+Renderbild für Startbildschirm und Link-Vorschau (Hintergrund ist ein Screenshot der eigenen Engine):
+
+```bash
+AFTER=30000 node tools/screenshot.mjs "http://localhost:5180/flightsimulator/" build/hero_bg.png 2000 "document.querySelector('[data-action=preview]').click(); setTimeout(() => document.querySelectorAll('.world-ui').forEach(e => e.style.display='none'), 1500)"
+```
+
+```bash
+blender -b build/tr1.blend -P tools/blender/render_hero.py
+```
+
 ## Entwickeln
 
 ```bash
@@ -60,4 +85,5 @@ Jeder Push auf `main` wird per GitHub Actions gebaut, getestet und auf GitHub Pa
 ## Credits & Lizenz
 
 - Geodaten: © swisstopo (Bundesamt für Landestopografie), gestreamt über geo.admin.ch. Die Daten sind nicht Teil dieses Repos.
-- Code: MIT, siehe [LICENSE](LICENSE). 3D-Modelle und Texturen: CC BY 4.0.
+- Code: MIT, siehe [LICENSE](LICENSE). 3D-Modelle, Texturen und Renderbilder: CC BY 4.0.
+- Schrift im Flugzeug-Schriftzug: Liberation Sans Bold (SIL Open Font License).

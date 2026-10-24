@@ -24,26 +24,45 @@ body {
   font-family: var(--font-body);
 }
 
-#backdrop {
-  position: fixed;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
 #ui {
   position: fixed;
   inset: 0;
 }
 
 .start {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   height: 100%;
   display: grid;
   grid-template-rows: 1fr auto auto;
   gap: 32px;
   padding: max(24px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
     max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+}
+
+/* Hero render behind the menu: slow push-in (transform only, runs on the compositor). */
+.start::before,
+.start::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+}
+.start::before {
+  background: #1a2f5a var(--hero) 62% 50% / cover no-repeat;
+  animation: hero-zoom 40s ease-in-out infinite alternate;
+}
+.start::after {
+  background: radial-gradient(ellipse at 50% 40%, rgba(10, 14, 24, 0.15), rgba(10, 14, 24, 0.7));
+}
+@keyframes hero-zoom {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(1.08) translateX(-1%);
+  }
 }
 
 .brand {
@@ -364,4 +383,98 @@ body {
   background: rgba(0, 0, 0, 0.55);
   border-radius: 8px;
   pointer-events: none;
+}
+
+/* ---------- Hangar ---------- */
+#hangar {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+#hangar[hidden] {
+  display: none;
+}
+.hangar-card {
+  position: absolute;
+  left: 16px;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  width: min(340px, calc(100% - 32px));
+  padding: 18px;
+  border-radius: 14px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.hangar-card h2 {
+  margin: 0;
+  font: 700 30px/1 var(--font-display);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.hangar-card .brand-kicker {
+  font-size: 13px;
+  letter-spacing: 0.4em;
+}
+.hangar-sub {
+  margin: 6px 0 14px;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.hangar-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.hangar-controls .chip[aria-pressed='true'] {
+  background: rgba(213, 43, 30, 0.8);
+  border-color: transparent;
+}
+.hangar-slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.hangar-slider input {
+  flex: 1;
+  accent-color: var(--accent);
+}
+.hangar-info {
+  margin: 4px 0 0;
+  font:
+    12px/1.4 ui-monospace,
+    Menlo,
+    monospace;
+  color: var(--ink-dim);
+}
+
+/* Wide screens: menu on the left, aircraft on the right of the hero image.
+   Kept at the end so it overrides the centred defaults above. */
+@media (min-width: 900px) {
+  .start::after {
+    background: linear-gradient(
+      90deg,
+      rgba(10, 14, 24, 0.82) 0%,
+      rgba(10, 14, 24, 0.45) 34%,
+      rgba(10, 14, 24, 0) 60%
+    );
+  }
+  .start {
+    padding-left: 6vw;
+  }
+  .brand,
+  .menu {
+    justify-self: start;
+    text-align: left;
+  }
+  /* Two lines so the title stays left of the aircraft. */
+  .brand-title {
+    max-width: 6.2em;
+  }
 }

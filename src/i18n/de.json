@@ -5,7 +5,7 @@
   "menu.settings": "Einstellungen",
   "menu.credits": "Credits",
   "menu.soon": "bald",
-  "status.phase": "Phase 2 · Ganze Schweiz",
+  "status.phase": "Phase 3 · Flugzeug",
   "status.webglMissing": "Dein Browser unterstützt kein WebGL 2. Bitte nutze eine aktuelle Version von Chrome, Edge, Firefox oder Safari.",
   "credits.title": "Credits",
   "credits.data": "Geodaten: © swisstopo (Bundesamt für Landestopografie), bereitgestellt über geo.admin.ch",
@@ -19,5 +19,14 @@
   "view.places": "Orte",
   "view.route": "Testflug Genf → St. Moritz",
   "view.routeStop": "Testflug stoppen",
-  "view.forward": "Vorwärts"
+  "view.forward": "Vorwärts",
+  "menu.hangar": "Hangar",
+  "hangar.sub": "Einmotoriger Turboprop-Trainer · Spannweite 9,1 m · Länge 11,4 m",
+  "hangar.gear": "Fahrwerk",
+  "hangar.flaps": "Klappen",
+  "hangar.demo": "Ruder-Demo",
+  "hangar.rotate": "Drehen",
+  "hangar.prop": "Propeller",
+  "hangar.loading": "Lade Flugzeug …",
+  "hangar.tris": "Dreiecke"
 }

@@ -5,7 +5,7 @@
   "menu.settings": "Settings",
   "menu.credits": "Credits",
   "menu.soon": "soon",
-  "status.phase": "Phase 2 · All of Switzerland",
+  "status.phase": "Phase 3 · Aircraft",
   "status.webglMissing": "Your browser does not support WebGL 2. Please use a current version of Chrome, Edge, Firefox or Safari.",
   "credits.title": "Credits",
   "credits.data": "Geodata: © swisstopo (Federal Office of Topography), provided via geo.admin.ch",
@@ -19,5 +19,14 @@
   "view.places": "Places",
   "view.route": "Test flight Geneva → St. Moritz",
   "view.routeStop": "Stop test flight",
-  "view.forward": "Forward"
+  "view.forward": "Forward",
+  "menu.hangar": "Hangar",
+  "hangar.sub": "Single-engine turboprop trainer · span 9.1 m · length 11.4 m",
+  "hangar.gear": "Gear",
+  "hangar.flaps": "Flaps",
+  "hangar.demo": "Control demo",
+  "hangar.rotate": "Rotate",
+  "hangar.prop": "Propeller",
+  "hangar.loading": "Loading aircraft …",
+  "hangar.tris": "triangles"
 }

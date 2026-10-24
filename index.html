@@ -9,6 +9,19 @@
       content="Arcade-Flugsimulator im Browser über einer echten 3D-Schweiz mit swisstopo-Daten."
     />
     <meta name="theme-color" content="#1a2f5a" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Trapanotto Flight Simulator" />
+    <meta
+      property="og:description"
+      content="Fliege mit dem TR-1 Alpenfalke über eine echte, gestreamte 3D-Schweiz – direkt im Browser."
+    />
+    <meta
+      property="og:image"
+      content="https://trapanotto.github.io/flightsimulator/assets/ui/og.jpg"
+    />
+    <meta property="og:url" content="https://trapanotto.github.io/flightsimulator/" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preload" as="image" href="/flightsimulator/assets/ui/hero.jpg" />
     <link rel="icon" href="/flightsimulator/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -18,8 +31,8 @@
     />
   </head>
   <body>
-    <canvas id="backdrop" aria-hidden="true"></canvas>
     <canvas id="world" hidden></canvas>
+    <canvas id="hangar" hidden></canvas>
     <div id="ui"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

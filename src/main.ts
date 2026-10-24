@@ -1,23 +1,24 @@
 import './styles.css';
-import { Backdrop } from './render/Backdrop';
 import { StartScreen } from './ui/StartScreen';
 import { type Lang, detectLang, t } from './i18n';
 import type { World } from './world/World';
 import type { WorldView } from './ui/WorldView';
+import type { Hangar } from './hangar/Hangar';
+import type { HangarView } from './ui/HangarView';
 
 const lang = detectLang();
 document.documentElement.lang = lang;
 
-const backdropCanvas = document.querySelector<HTMLCanvasElement>('#backdrop')!;
 const worldCanvas = document.querySelector<HTMLCanvasElement>('#world')!;
+const hangarCanvas = document.querySelector<HTMLCanvasElement>('#hangar')!;
 const ui = document.querySelector<HTMLElement>('#ui')!;
 
 let world: World | undefined;
 let view: WorldView | undefined;
+let hangar: Hangar | undefined;
+let hangarView: HangarView | undefined;
 
 async function openWorld(currentLang: Lang) {
-  backdrop.stop();
-  backdropCanvas.hidden = true;
   ui.hidden = true;
   worldCanvas.hidden = false;
 
@@ -48,16 +49,44 @@ function closeWorld() {
   view?.destroy();
   view = undefined;
   worldCanvas.hidden = true;
-  backdropCanvas.hidden = false;
   ui.hidden = false;
-  backdrop.start();
 }
 
-const backdrop = new Backdrop(backdropCanvas);
+async function openHangar(currentLang: Lang) {
+  ui.hidden = true;
+  hangarCanvas.hidden = false;
+  const [{ Hangar }, { HangarView }] = await Promise.all([
+    import('./hangar/Hangar'),
+    import('./ui/HangarView'),
+  ]);
+  const first = !hangar;
+  hangar ??= new Hangar(hangarCanvas);
+  if (import.meta.env.DEV || location.search.includes('debug'))
+    (window as unknown as { __hangar: Hangar }).__hangar = hangar;
+  hangarView = new HangarView(document.body, currentLang, hangar, closeHangar);
+  hangar.start();
+  if (first) {
+    hangar.load().catch((err) => {
+      console.error(err);
+      alert(String(err));
+    });
+  }
+}
+
+function closeHangar() {
+  hangar?.stop();
+  hangarView?.destroy();
+  hangarView = undefined;
+  hangarCanvas.hidden = true;
+  ui.hidden = false;
+}
 
 if (!document.createElement('canvas').getContext('webgl2')) {
   ui.innerHTML = `<p class="fatal">${t(lang, 'status.webglMissing')}</p>`;
 } else {
-  backdrop.start();
-  new StartScreen(ui, lang, (l) => void openWorld(l));
+  new StartScreen(ui, lang, {
+    explore: (l) => void openWorld(l),
+    hangar: (l) => void openHangar(l),
+  });
+  if (location.hash === '#hangar') void openHangar(lang);
 }

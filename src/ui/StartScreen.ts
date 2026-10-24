@@ -6,7 +6,7 @@ export class StartScreen {
   constructor(
     private readonly root: HTMLElement,
     private lang: Lang,
-    private readonly onPreview: (lang: Lang) => void,
+    private readonly actions: { explore: (lang: Lang) => void; hangar: (lang: Lang) => void },
   ) {
     this.render();
   }
@@ -16,7 +16,7 @@ export class StartScreen {
     const soon = `<span class="soon">${tr('menu.soon')}</span>`;
 
     this.root.innerHTML = `
-      <main class="start">
+      <main class="start" style="--hero: url('${import.meta.env.BASE_URL}assets/ui/hero.jpg')">
         <header class="brand">
           <p class="brand-kicker">Trapanotto</p>
           <h1 class="brand-title">Flight Simulator</h1>
@@ -25,6 +25,7 @@ export class StartScreen {
 
         <nav class="menu" aria-label="Hauptmenü">
           <button class="btn btn-primary" data-action="preview">${tr('menu.preview')}</button>
+          <button class="btn" data-action="hangar">${tr('menu.hangar')}</button>
           <button class="btn" disabled>${tr('menu.fly')} ${soon}</button>
           <button class="btn" disabled>${tr('menu.challenges')} ${soon}</button>
           <button class="btn" disabled>${tr('menu.settings')} ${soon}</button>
@@ -54,7 +55,10 @@ export class StartScreen {
 
     this.root
       .querySelector('[data-action="preview"]')!
-      .addEventListener('click', () => this.onPreview(this.lang));
+      .addEventListener('click', () => this.actions.explore(this.lang));
+    this.root
+      .querySelector('[data-action="hangar"]')!
+      .addEventListener('click', () => this.actions.hangar(this.lang));
 
     const dialog = this.root.querySelector<HTMLDialogElement>('dialog.credits')!;
     this.root
