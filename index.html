@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Trapanotto Flight Simulator — Die Schweiz aus der Luft</title>
+    <meta
+      name="description"
+      content="Browserbasierter Schweiz-Flugsimulator mit echten swisstopo-Daten, Three.js und Blender-Assets. Kein Download, ein Link genügt."
+    />
+    <meta name="theme-color" content="#070b0f" />
+    <meta property="og:title" content="Trapanotto Flight Simulator" />
+    <meta
+      property="og:description"
+      content="Die Schweiz aus der Luft. Echte swisstopo-Daten, direkt im Browser."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://wmts.geo.admin.ch; connect-src 'self' ws: wss: https://*.geo.admin.ch https://api.open-meteo.com; worker-src 'self' blob:; font-src 'self' data:; media-src 'self' blob:; base-uri 'self';"
+    />
+  </head>
+  <body>
+    <canvas id="scene" aria-label="3D-Welt des Trapanotto Flight Simulators"></canvas>
+    <div id="vignette" aria-hidden="true"></div>
+    <div id="crosshair" aria-hidden="true"></div>
+
+    <header class="brand-bar">
+      <div class="brand">
+        <svg
+          class="brand-mark"
+          viewBox="0 0 64 64"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M5 49 L23 14 L33 33 L41 21 L59 49 Z"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linejoin="round"
+          />
+          <path
+            d="M5 56 H59"
+            stroke="currentColor"
+            stroke-width="1.2"
+            opacity="0.45"
+          />
+          <circle cx="48" cy="13" r="3.2" fill="#da291c" />
+        </svg>
+        <div class="brand-text">
+          <span class="brand-name">TRAPANOTTO</span>
+          <span class="brand-sub">FLIGHT SIMULATOR</span>
+        </div>
+      </div>
+      <div class="phase-pill">
+        <span class="phase-dot"></span>
+        PHASE 1 · WELT-ENGINE
+      </div>
+    </header>
+
+    <div class="telemetry" aria-live="polite">
+      <div class="telemetry-row telemetry-primary">
+        <span id="alt-value">—</span>
+        <span class="telemetry-unit">m MSL</span>
+      </div>
+      <div class="telemetry-row">
+        <span id="coord-value">—</span>
+      </div>
+      <div class="telemetry-row telemetry-muted">
+        <span>HDG <b id="heading-value">—</b>°</span>
+        <span>SPD <b id="speed-value">—</b> kt</span>
+        <span>FPS <b id="fps-value">—</b></span>
+      </div>
+    </div>
+
+    <div id="debug" class="debug hidden" aria-label="Debug-Statistik">
+      <div class="debug-head">
+        <span>WELT-ENGINE</span>
+        <span id="debug-source">swisstopo</span>
+      </div>
+      <div class="debug-grid">
+        <span>Tiles sichtbar</span><b id="dbg-visible">0</b>
+        <span>Tiles geladen</span><b id="dbg-loaded">0</b>
+        <span>Texturiert</span><b id="dbg-textured">0</b>
+        <span>Ausstehend</span><b id="dbg-pending">0</b>
+        <span>Dreiecke</span><b id="dbg-triangles">0</b>
+        <span>Draw Calls</span><b id="dbg-calls">0</b>
+        <span>Knoten</span><b id="dbg-nodes">0</b>
+        <span>Frame</span><b id="dbg-frame">0.0 ms</b>
+      </div>
+      <div class="debug-foot">F3 · Debug ein/aus</div>
+    </div>
+
+    <div id="help" class="help">
+      <div class="help-title">Steuerung</div>
+      <div class="help-row">
+        <kbd>Maus</kbd><span>umsehen</span>
+        <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>fliegen</span>
+      </div>
+      <div class="help-row">
+        <kbd>Q</kbd><kbd>E</kbd><span>Höhe</span>
+        <kbd>Shift</kbd><span>schnell</span>
+        <kbd>Rad</kbd><span>Tempo</span>
+      </div>
+      <div class="help-row">
+        <kbd>R</kbd><span>zurück</span>
+        <kbd>H</kbd><span>Hilfe</span>
+        <kbd>F3</kbd><span>Debug</span>
+      </div>
+      <div class="help-hint" id="pointer-hint">
+        Klick ins Bild für Maussteuerung
+      </div>
+    </div>
+
+    <div class="attribution">
+      <span>© swisstopo</span>
+      <span class="sep">·</span>
+      <a href="https://www.swisstopo.admin.ch" target="_blank" rel="noreferrer"
+        >swissALTI3D / SWISSIMAGE</a
+      >
+      <span class="sep">·</span>
+      <a
+        href="https://github.com/Trapanotto/flightsimulator"
+        target="_blank"
+        rel="noreferrer"
+        >Open Source</a
+      >
+    </div>
+
+    <div id="loading" class="loading">
+      <div class="loading-contours" aria-hidden="true"></div>
+      <div class="loading-card">
+        <svg
+          class="loading-mark"
+          viewBox="0 0 64 64"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M5 49 L23 14 L33 33 L41 21 L59 49 Z"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linejoin="round"
+          />
+          <path
+            d="M5 56 H59"
+            stroke="currentColor"
+            stroke-width="1"
+            opacity="0.4"
+          />
+          <circle cx="48" cy="13" r="3" fill="#da291c" />
+        </svg>
+        <h1>Trapanotto <span>Flight Simulator</span></h1>
+        <p class="loading-claim">Die Schweiz aus der Luft.</p>
+        <div class="progress"><div id="progress-bar"></div></div>
+        <p id="loading-status" class="loading-status">
+          Initialisiere Welt-Engine …
+        </p>
+        <p class="loading-note">
+          Echte swisstopo-Daten · Three.js · Kein Download
+        </p>
+      </div>
+    </div>
+
+    <div id="error" class="error hidden">
+      <div class="error-card">
+        <h2>Die Welt konnte nicht geladen werden.</h2>
+        <p id="error-message">
+          WebGL2 wird benötigt. Bitte aktualisiere deinen Browser oder aktiviere
+          die Hardware-Beschleunigung.
+        </p>
+        <button id="error-retry" type="button">Erneut versuchen</button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

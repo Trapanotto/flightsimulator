@@ -2,7 +2,7 @@
 
 ## Produkt- und Technikkonzept v1.0
 
-> **Status:** Konzeptphase abgeschlossen · **Datum:** 24.10.2026
+> **Status:** Phase 1 (Welt-Engine) live · **Datum:** 24.10.2026
 > **Ziel:** Der beste browserbasierte Schweiz-Flugsimulator mit echten swisstopo-Daten,
 > Three.js-Rendering, Blender-Assets und GitHub-Pages-Deployment.
 > **Arbeitstitel:** „Trapanotto Flight Simulator“ (TFS)
@@ -783,11 +783,16 @@ Die Tests laufen in CI headless (Physik ohne Rendering).
 
 ### 9.8 Flugmodell-Modi
 
-- **Realistisch:** volle Physik, kein Assist.
-- **Standard:** leichte Stabilitätshilfen, Stall-Warnung, Auto-Trim.
-- **Einsteiger:** sanfte Rückstellung, reduzierte Turbulenz, unzerstörbar.
+**Standardmodus: Einsteiger/Arcade.** Das ist eine bewusste Produktentscheidung:
+TFS soll in 20 Sekunden Spaß machen. Realismus ist zuschaltbar, nicht Pflicht.
 
-Der Modus ist jederzeit umschaltbar und wird im Logbuch vermerkt.
+- **Einsteiger (Default):** sanfte Rückstellung, reduzierte Turbulenz,
+  großzügige Stall-Grenzen, Auto-Trim, unzerstörbar, klare visuelle Hilfen.
+- **Standard:** leichte Stabilitätshilfen, Stall-Warnung, Auto-Trim.
+- **Realistisch:** volle Physik, kein Assist, POH-validiert.
+
+Der Modus ist jederzeit umschaltbar und wird im Logbuch vermerkt. Missionen
+können einen Modus empfehlen oder erzwingen (z. B. „Realistisch“-Abzeichen).
 
 ---
 
@@ -1279,9 +1284,14 @@ Jede Phase endet mit einem öffentlichen, spielbaren Build auf GitHub Pages.
 **Lieferobjekte:** dieses Dokument, verifizierte Datenquellen, Repo-Setup.
 **Abnahme:** Konzept reviewt, Endpunkte getestet, CORS bestätigt.
 
-### Phase 1 — Fundament & Welt (M1)
+### Phase 1 — Fundament & Welt (M1) · **Status: live**
 
 **Ziel:** Vom leeren Repo zum fliegenden Kameraflug über die Schweiz.
+
+**Umgesetzt:** Vite/TypeScript/Three.js, Quantized-Mesh-Decoder, Quadtree,
+SWISSIMAGE-Draping, Worker, freie Kamera, Debug-Overlay, Unit-Tests, CI/CD
+und GitHub Pages. **Offen:** Mini-Map, Airport-Marker, IndexedDB-Cache und
+LOD-Nahtstellen-Feinschliff.
 
 **Lieferobjekte:**
 - Vite + TypeScript + Three.js Grundgerüst.
@@ -1443,8 +1453,8 @@ Jede Phase endet mit einem öffentlichen, spielbaren Build auf GitHub Pages.
 
 | # | Frage | Empfehlung | Auswirkung |
 |---|---|---|---|
-| 1 | Weltumfang v1 | Schweiz + 30 km Rand | Fokus, Datenqualität |
-| 2 | Realismus | Standard + Realistisch umschaltbar | Zielgruppe |
+| 1 | Weltumfang v1 | **Entschieden:** Schweiz + 30 km Rand | Fokus, Datenqualität |
+| 2 | Realismus | **Entschieden:** Arcade/Einsteiger als Default, Realistisch zuschaltbar | Zielgruppe |
 | 3 | Multiplayer v1 | nein, Architektur vorbereiten | Scope |
 | 4 | UI-Sprachen | DE default, EN/FR/IT | Aufwand |
 | 5 | Lizenz Code | MIT | Offenheit |
@@ -1556,6 +1566,26 @@ export function lonLatToImageryTile(lon: number, lat: number, z: number) {
 | OGD | Open Government Data |
 
 ---
+
+## Umsetzungsstand (24.10.2026)
+
+| Baustein | Stand |
+|---|---|
+| Konzept & Datenquellen | ✅ abgeschlossen, Endpunkte/CORS verifiziert |
+| Terrain-Streaming (swissALTI3D) | ✅ Quantized-Mesh-Decoder, Worker, Quadtree |
+| Orthofotos (SWISSIMAGE) | ✅ Canvas-Draping, adaptives Texturformat |
+| Freie Kamera | ✅ Maus, Tastatur, Pointer Lock, Drag-Fallback |
+| Atmosphäre | ✅ Sky-Shader, Sonne, Wolken, Nebel |
+| Debug & Telemetrie | ✅ F3-Overlay, Live-Stats, URL-Teleport |
+| Tests | ✅ 17 Unit-Tests (Geodäsie, Decoder, Mesh) |
+| Deployment | ✅ GitHub Actions → GitHub Pages |
+| Mini-Map / Marker | ⏳ Phase 1.1 |
+| IndexedDB-Cache | ⏳ Phase 1.1 |
+| Flugzeug & Physik | ⏳ Phase 2 |
+
+**Referenzmessung Phase 1:** 5.500 m über dem Berner Oberland,
+275 sichtbare Terrain-Kacheln, 2,7 Mio. Dreiecke, 180 Draw Calls,
+~60–66 fps auf dem Referenzsystem, ~143 kB gzip Initial-JS.
 
 ## Schlussgedanke
 

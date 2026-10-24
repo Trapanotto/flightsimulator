@@ -1,0 +1,26 @@
+{
+  "name": "trapanotto-flight-simulator",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Browser-based Switzerland flight simulator with swisstopo data, Three.js and Blender assets.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "proj4": "^2.22.0",
+    "three": "^0.186.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/three": "^0.186.0",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}
