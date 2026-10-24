@@ -37,3 +37,7 @@ Thumbs.db
 
 # Blender build output (regenerate with npm run assets)
 build/
+
+# Python
+__pycache__/
+*.pyc
