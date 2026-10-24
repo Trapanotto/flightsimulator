@@ -21,6 +21,15 @@ Three.js · Geodaten von [geo.admin.ch](https://docs.geo.admin.ch/) (swisstopo) 
 
 Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
 
+## Was Phase 1 kann
+
+- Terrain von swisstopo (Quantized-Mesh) und SWISSIMAGE-Luftbilder, beides direkt von geo.admin.ch gestreamt
+- Dekodieren und Umprojizieren der Luftbilder (Web Mercator → geografisch) in Web Workern
+- Fester Ausschnitt Berner Alpen: 64 Detailkacheln + 32 Fernkacheln
+- Himmel, Sonne, Dunst; Orbit-Kamera (Maus/Touch)
+- Debug-Anzeige mit `F3` (oder `?debug` in der URL)
+- GPU-Zeit auf Intel UHD bei 1080p: ~9 ms pro Frame
+
 ## Entwickeln
 
 ```bash

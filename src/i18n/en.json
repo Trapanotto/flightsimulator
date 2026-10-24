@@ -5,11 +5,15 @@
   "menu.settings": "Settings",
   "menu.credits": "Credits",
   "menu.soon": "soon",
-  "status.phase": "Phase 0 · Foundation",
+  "status.phase": "Phase 1 · First terrain",
   "status.webglMissing": "Your browser does not support WebGL 2. Please use a current version of Chrome, Edge, Firefox or Safari.",
   "credits.title": "Credits",
   "credits.data": "Geodata: © swisstopo (Federal Office of Topography), provided via geo.admin.ch",
   "credits.code": "Code: MIT licence · 3D models and textures: CC BY 4.0",
   "credits.libs": "Built with Three.js and Vite",
-  "credits.close": "Close"
+  "credits.close": "Close",
+  "menu.preview": "Terrain preview",
+  "view.back": "Menu",
+  "view.loading": "Loading terrain",
+  "view.help": "Drag: rotate · Right-click/two fingers: pan · Wheel/pinch: zoom · F3: debug"
 }

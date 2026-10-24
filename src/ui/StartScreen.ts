@@ -6,6 +6,7 @@ export class StartScreen {
   constructor(
     private readonly root: HTMLElement,
     private lang: Lang,
+    private readonly onPreview: (lang: Lang) => void,
   ) {
     this.render();
   }
@@ -23,7 +24,8 @@ export class StartScreen {
         </header>
 
         <nav class="menu" aria-label="Hauptmenü">
-          <button class="btn btn-primary" disabled>${tr('menu.fly')} ${soon}</button>
+          <button class="btn btn-primary" data-action="preview">${tr('menu.preview')}</button>
+          <button class="btn" disabled>${tr('menu.fly')} ${soon}</button>
           <button class="btn" disabled>${tr('menu.challenges')} ${soon}</button>
           <button class="btn" disabled>${tr('menu.settings')} ${soon}</button>
           <button class="btn" data-action="credits">${tr('menu.credits')}</button>
@@ -49,6 +51,10 @@ export class StartScreen {
         </dialog>
       </main>
     `;
+
+    this.root
+      .querySelector('[data-action="preview"]')!
+      .addEventListener('click', () => this.onPreview(this.lang));
 
     const dialog = this.root.querySelector<HTMLDialogElement>('dialog.credits')!;
     this.root
