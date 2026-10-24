@@ -129,3 +129,18 @@ describe('quantized-mesh decoder', () => {
     expect(out[0]).toBeGreaterThan(0.99);
   });
 });
+
+describe('height grid', () => {
+  it('reproduces the synthetic peak', async () => {
+    const { buildHeightGrid, sampleHeightGrid, GRID } = await import('../src/terrain/heightGrid');
+    const b = geoTileBounds({ z: 12, x: 4276, y: 3108 });
+    const center = geodeticToEcef((b.west + b.east) / 2, (b.south + b.north) / 2, 2000);
+    const qm = decodeQuantizedMesh(encode({ center, minH: 1000, maxH: 3000, ...grid }));
+    const g = buildHeightGrid(qm);
+    expect(g).toHaveLength(GRID * GRID);
+    expect(sampleHeightGrid(g, 0.5, 0.5)).toBeCloseTo(3000, 0);
+    expect(sampleHeightGrid(g, 0, 0)).toBeCloseTo(1000, 0);
+    // Halfway between the peak and the west edge the faces are planar: ~2000 m.
+    expect(sampleHeightGrid(g, 0.25, 0.5)).toBeCloseTo(2000, -1);
+  });
+});

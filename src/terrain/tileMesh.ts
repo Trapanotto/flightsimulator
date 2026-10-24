@@ -6,6 +6,7 @@ import {
   geodeticToEcef,
 } from '../geo/ellipsoid';
 import type { GeoBounds } from '../geo/tiles';
+import { buildHeightGrid } from './heightGrid';
 import { QM_MAX, type QuantizedMesh, octDecode } from './quantizedMesh';
 
 /** GPU-ready arrays for one terrain tile, positioned relative to `offset`. */
@@ -21,6 +22,8 @@ export interface TileMeshData {
   sphereRadius: number;
   minHeight: number;
   maxHeight: number;
+  /** GRID x GRID heights in metres, row 0 = south. See heightGrid.ts. */
+  heights: Float32Array;
 }
 
 /**
@@ -143,6 +146,7 @@ export function buildTileMesh(qm: QuantizedMesh, bounds: GeoBounds, frame: EnuFr
     sphereRadius: qm.boundingSphere.radius + skirt,
     minHeight: qm.minHeight,
     maxHeight: qm.maxHeight,
+    heights: buildHeightGrid(qm),
   };
 }
 

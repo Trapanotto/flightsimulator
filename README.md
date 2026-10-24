@@ -21,14 +21,28 @@ Three.js · Geodaten von [geo.admin.ch](https://docs.geo.admin.ch/) (swisstopo) 
 
 Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
 
-## Was Phase 1 kann
+## Was schon geht
 
-- Terrain von swisstopo (Quantized-Mesh) und SWISSIMAGE-Luftbilder, beides direkt von geo.admin.ch gestreamt
-- Dekodieren und Umprojizieren der Luftbilder (Web Mercator → geografisch) in Web Workern
-- Fester Ausschnitt Berner Alpen: 64 Detailkacheln + 32 Fernkacheln
-- Himmel, Sonne, Dunst; Orbit-Kamera (Maus/Touch)
+- **Ganze Schweiz streamen:** Terrain (Quantized-Mesh) und SWISSIMAGE-Luftbilder direkt von geo.admin.ch,
+  Detail nach Bildschirmfehler (Quadtree, Zoom 7–15), Vorausladen in Flugrichtung, Speicherbudget
+- **Freie Flugkamera** mit Startorten (Genf, Bern, Zürich, Lauterbrunnen, Matterhorn, St. Moritz)
+  und automatischem Testflug Genf → St. Moritz
+- **Floating Origin:** keine Zitterbewegungen, egal wo man in der Schweiz ist
+- **Höhe über Grund** aus einem Höhenraster pro Kachel; die Kamera kann nicht mehr durch Berge fliegen
+- **Dynamische Auflösung:** wird es eng, rechnet das Spiel mit etwas weniger Pixeln
 - Debug-Anzeige mit `F3` (oder `?debug` in der URL)
-- GPU-Zeit auf Intel UHD bei 1080p: ~9 ms pro Frame
+
+### Steuerung (freie Kamera)
+
+| Aktion                     | Eingabe                                     |
+| -------------------------- | ------------------------------------------- |
+| Umschauen                  | Maus ziehen / Pfeiltasten                   |
+| Vor / zurück / seitwärts   | W / S / A / D                               |
+| Hoch / runter              | E oder Leertaste / Q                        |
+| Schneller / langsamer      | Shift / Ctrl, Mausrad ändert das Grundtempo |
+| Orte                       | 1–6                                         |
+| Testflug Genf → St. Moritz | R                                           |
+| Touch                      | Ziehen zum Umschauen, «Vorwärts»-Knopf      |
 
 ## Entwickeln
 
@@ -38,6 +52,7 @@ npm run dev      # Entwicklungsserver
 npm run lint     # ESLint
 npm test         # Vitest
 npm run build    # Produktions-Build nach dist/
+npm run test:route   # 2-Minuten-Testflug in headless Edge/Chrome, braucht laufenden Dev-Server auf Port 5180
 ```
 
 Jeder Push auf `main` wird per GitHub Actions gebaut, getestet und auf GitHub Pages veröffentlicht.

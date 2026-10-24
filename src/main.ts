@@ -28,20 +28,19 @@ async function openWorld(currentLang: Lang) {
   ]);
   const first = !world;
   world ??= new World(worldCanvas);
-  if (import.meta.env.DEV) (window as unknown as { __world: World }).__world = world;
+  if (import.meta.env.DEV || location.search.includes('debug'))
+    (window as unknown as { __world: World }).__world = world;
   view = new WorldView(document.body, currentLang, world, closeWorld);
   world.start();
   if (first) {
-    const v = view;
-    world
-      .init((loaded, total) => v.setProgress(loaded, total))
-      .catch((err) => {
-        console.error(err);
-        alert(String(err));
-      });
-  } else {
-    view.setProgress(1, 1);
+    world.init().catch((err) => {
+      console.error(err);
+      alert(String(err));
+    });
   }
+  // ?route starts the Geneva -> St. Moritz test flight right away (optionally ?route=900 km/h).
+  const route = new URLSearchParams(location.search).get('route');
+  if (route !== null) world.startRoute(Number(route) || 500);
 }
 
 function closeWorld() {

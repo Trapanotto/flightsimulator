@@ -10,8 +10,8 @@ interface Pending<J, R> {
 
 export interface JobHandle<R> {
   promise: Promise<R>;
-  /** Removes the job if it has not started yet. */
-  cancel(): void;
+  /** Removes the job if it has not started yet; returns false if it is already running or done. */
+  cancel(): boolean;
   /** Higher runs first. Can be changed while queued. */
   setPriority(p: number): void;
 }
@@ -59,10 +59,10 @@ export class WorkerPool<J, R> {
       promise,
       cancel: () => {
         const i = this.queue.indexOf(pending);
-        if (i >= 0) {
-          this.queue.splice(i, 1);
-          pending.reject(new Error('cancelled'));
-        }
+        if (i < 0) return false;
+        this.queue.splice(i, 1);
+        pending.reject(new Error('cancelled'));
+        return true;
       },
       setPriority: (p) => {
         pending.priority = p;

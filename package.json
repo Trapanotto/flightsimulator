@@ -1,7 +1,7 @@
 {
   "name": "trapanotto-flight-simulator",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "Arcade flight simulator over a streamed 3D Switzerland (swisstopo data, Three.js, Blender assets).",
   "license": "MIT",
@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:route": "node tools/route-test.mjs"
   },
   "dependencies": {
     "three": "^0.186.1"
@@ -23,6 +24,7 @@
     "eslint": "^10.13.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.13.0",
+    "playwright-core": "^1.64.1",
     "prettier": "^3.9.10",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.72.0",

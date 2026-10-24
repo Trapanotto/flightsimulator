@@ -4,6 +4,7 @@ node_modules/
 
 # Build
 dist/
+dist-test/
 dist-ssr/
 *.local
 

@@ -3,49 +3,83 @@ import {
   Color,
   DirectionalLight,
   FogExp2,
+  Frustum,
   HemisphereLight,
+  Matrix4,
   PerspectiveCamera,
   Scene,
   Vector3,
   WebGLRenderer,
 } from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import {
   DEG,
-  enuFrame,
+  type EnuFrame,
+  ecefDirToLocal,
   ecefToGeodetic,
   ecefToLocal,
+  enuFrame,
   geodeticToEcef,
   localToEcef,
 } from '../geo/ellipsoid';
 import { wgs84ToLv95 } from '../geo/lv95';
-import { TerrainLoader } from '../terrain/TerrainLoader';
-import { regionCenter, regionTiles } from '../terrain/region';
+import { DEFAULT_TERRAIN, TerrainEngine } from '../terrain/TerrainEngine';
 import { loadTerrainSource } from '../terrain/sources';
+import { type Basis, FreeCamera } from './FreeCamera';
+import { PLACES, type Place, TEST_ROUTE } from './places';
 
-/** Sun for phase 1: fixed late afternoon light from the west-south-west. */
+/** Sun for now: fixed late afternoon light from the west-south-west. */
 const SUN_AZIMUTH = 240 * DEG;
 const SUN_ELEVATION = 22 * DEG;
-
-const LOOK_AT = { lon: 7.9625, lat: 46.5367, h: 2600 }; // Jungfrau
-const START = { lon: 7.9, lat: 46.665, h: 4200 }; // above Interlaken
+/** Base frame: centre of Switzerland. Its axes stay fixed; only the origin moves (floating origin). */
+const BASE = { lon: 8.2275, lat: 46.8182 };
+/** Re-centre the render origin when the camera is this far from it. */
+const REBASE_DISTANCE = 5000;
+/** Lowest dynamic render scale (share of the base pixel ratio). */
+const MIN_RENDER_SCALE = 0.6;
 
 export interface WorldStats {
   fps: number;
   frameMs: number;
+  worstFrameMs: number;
+  renderScale: number;
+  /** CPU ms per frame: our update / three.js render call. */
+  tickMs: number;
+  renderMs: number;
   calls: number;
   triangles: number;
   textures: number;
   geometries: number;
-  tilesLoaded: number;
-  tilesTotal: number;
+  tilesRendered: number;
+  tilesReady: number;
+  tilesLoading: number;
   tilesFailed: number;
+  maxZoom: number;
+  /** Share of drawn tiles already at their wanted detail (1 = nothing pending). */
+  coverage: number;
+  uploads: number;
   requestsInFlight: number;
   queued: number;
   altitude: number;
+  agl: number | undefined;
+  speedKmh: number;
   lv95: [number, number];
+  originKm: number;
   reversedDepth: boolean;
+  route?: RouteStats;
+}
+
+export interface RouteStats {
+  leg: number;
+  legs: number;
+  distanceKm: number;
+  seconds: number;
+  frames: number;
+  /** Frames where some drawn tile was still waiting for more detail. */
+  pendingFrames: number;
+  minCoverage: number;
+  worstFrameMs: number;
+  done: boolean;
 }
 
 function supportsClipControl(): boolean {
@@ -57,12 +91,12 @@ function supportsClipControl(): boolean {
 
 export class World {
   readonly renderer: WebGLRenderer;
-  private readonly scene = new Scene();
-  private readonly camera: PerspectiveCamera;
-  private readonly controls: OrbitControls;
-  private readonly sky = new Sky();
-  private readonly frame = enuFrame(...regionCenter(), 0);
-  private terrain?: TerrainLoader;
+  readonly scene = new Scene();
+  readonly camera: PerspectiveCamera;
+  readonly fly: FreeCamera;
+  readonly sky = new Sky();
+  readonly frame: EnuFrame = enuFrame(BASE.lon, BASE.lat, 0);
+  terrain?: TerrainEngine;
   private running = false;
   private active = false;
   private raf = 0;
@@ -71,7 +105,24 @@ export class World {
   private fpsFrames = 0;
   private fps = 0;
   private frameMs = 0;
+  private worstMs = 0;
+  private worstAcc = 0;
+  private renderScale = 1;
+  private lastDownscale = 0;
+  private lastUpscale = 0;
+  private readonly basePixelRatio = Math.min(window.devicePixelRatio, 1.5);
+  private tickMs = 0;
+  private renderMs = 0;
   private readonly reversedDepth: boolean;
+  private readonly frustum = new Frustum();
+  private readonly projView = new Matrix4();
+  private readonly basis: Basis = { up: new Vector3(), north: new Vector3(), east: new Vector3() };
+  private readonly forward = new Vector3();
+  /** Render origin relative to the base frame origin: render = base - shift. */
+  private readonly shift = new Vector3();
+  private geo: [number, number, number] = [0, 0, 0];
+  private ground: number | undefined;
+  private route?: { leg: number; stats: RouteStats; speed: number };
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.reversedDepth = supportsClipControl();
@@ -84,12 +135,12 @@ export class World {
       reversedDepthBuffer: this.reversedDepth,
       logarithmicDepthBuffer: !this.reversedDepth,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.renderer.setPixelRatio(this.basePixelRatio);
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.85;
 
-    this.camera = new PerspectiveCamera(55, 1, 3, 600_000);
-    this.camera.position.copy(this.local(START.lon, START.lat, START.h));
+    this.camera = new PerspectiveCamera(60, 1, 3, 600_000);
+    this.fly = new FreeCamera(this.camera, canvas);
 
     const sunDir = new Vector3(
       Math.cos(SUN_ELEVATION) * Math.sin(SUN_AZIMUTH),
@@ -116,45 +167,30 @@ export class World {
     this.scene.add(sun, sun.target);
     this.scene.add(new HemisphereLight(0xdfe9ff, 0x8a7a66, 2.6));
 
-    // Haze for distance; colour close to the sky near the horizon.
     const haze = new Color(0x9fb3c8);
     this.scene.fog = new FogExp2(haze, 1 / 65_000);
     this.scene.background = haze;
 
-    this.controls = new OrbitControls(this.camera, canvas);
-    this.controls.target.copy(this.local(LOOK_AT.lon, LOOK_AT.lat, LOOK_AT.h));
-    this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.08;
-    this.controls.minDistance = 300;
-    this.controls.maxDistance = 120_000;
-    this.controls.maxPolarAngle = 88 * DEG;
-    this.controls.zoomSpeed = 1.2;
-    this.controls.update();
-
     window.addEventListener('resize', this.resize);
     document.addEventListener('visibilitychange', this.onVisibility);
     this.resize();
+    this.goTo(PLACES[3]!);
   }
 
-  /** Starts streaming the phase 1 region. onProgress gets (loaded, total). */
-  async init(onProgress: (loaded: number, total: number) => void) {
+  async init() {
     const source = await loadTerrainSource();
     const anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
-    this.terrain = new TerrainLoader(source, this.frame, anisotropy);
+    // Tuning knobs for testing, e.g. ?tau=8&uploads=2&tiles=300
+    const q = new URLSearchParams(location.search);
+    const num = (k: string, d: number) => (q.has(k) ? Number(q.get(k)) : d);
+    this.terrain = new TerrainEngine(source, this.frame, anisotropy, {
+      ...DEFAULT_TERRAIN,
+      tau: num('tau', DEFAULT_TERRAIN.tau),
+      uploadsPerFrame: num('uploads', DEFAULT_TERRAIN.uploadsPerFrame),
+      maxTiles: num('tiles', DEFAULT_TERRAIN.maxTiles),
+    });
+    this.terrain.rebase(this.shift);
     this.scene.add(this.terrain.group);
-
-    const target = this.controls.target;
-    const tiles = regionTiles().map((key) => {
-      const span = 180 / 2 ** key.z;
-      const c = this.local(-180 + (key.x + 0.5) * span, -90 + (key.y + 0.5) * span, 0);
-      const km = Math.hypot(c.x - target.x, c.z - target.z) / 1000;
-      // Close tiles first; coarse far tiles get a boost so the horizon fills in early.
-      return { key, priority: -(key.z >= 12 ? km : km * 0.35) };
-    });
-    this.terrain.load(tiles, () => {
-      const s = this.terrain!.stats;
-      onProgress(s.loaded + s.failed, s.total);
-    });
   }
 
   /** Shows the world: renders until stop(). Pauses by itself while the tab is hidden. */
@@ -168,6 +204,83 @@ export class World {
     this.halt();
   }
 
+  goTo(p: Place) {
+    this.route = undefined;
+    this.fly.autoForward = false;
+    this.camera.position.copy(this.fromGeo(p.lon, p.lat, p.h));
+    this.fly.yaw = p.heading * DEG;
+    this.fly.pitch = (p.pitch ?? -8) * DEG;
+    this.rebaseIfNeeded(true);
+    this.updateBasis();
+    this.fly.aim(this.basis);
+  }
+
+  /** Autopilot along TEST_ROUTE at `kmh` (default 500 km/h) to check streaming. */
+  startRoute(kmh = 500) {
+    const a = TEST_ROUTE[0]!;
+    this.goTo({ name: 'route', lon: a.lon, lat: a.lat, h: a.h, heading: 45 });
+    this.route = {
+      leg: 1,
+      speed: kmh / 3.6,
+      stats: {
+        leg: 1,
+        legs: TEST_ROUTE.length - 1,
+        distanceKm: 0,
+        seconds: 0,
+        frames: 0,
+        pendingFrames: 0,
+        minCoverage: 1,
+        worstFrameMs: 0,
+        done: false,
+      },
+    };
+  }
+
+  stopRoute() {
+    this.route = undefined;
+  }
+
+  get routeActive() {
+    return !!this.route && !this.route.stats.done;
+  }
+
+  stats(): WorldStats {
+    const info = this.renderer.info;
+    const t = this.terrain;
+    const ts = t?.tree.stats;
+    const rendered = ts?.rendered ?? 0;
+    return {
+      fps: this.fps,
+      frameMs: this.frameMs,
+      worstFrameMs: this.worstMs,
+      renderScale: this.renderScale,
+      tickMs: this.tickMs,
+      renderMs: this.renderMs,
+      calls: info.render.calls,
+      triangles: info.render.triangles,
+      textures: info.memory.textures,
+      geometries: info.memory.geometries,
+      tilesRendered: rendered,
+      tilesReady: ts?.ready ?? 0,
+      tilesLoading: ts?.loading ?? 0,
+      tilesFailed: t?.failed ?? 0,
+      maxZoom: ts?.maxZoomRendered ?? 0,
+      coverage: rendered ? 1 - (ts?.pending ?? 0) / rendered : 0,
+      uploads: t?.pendingUploads ?? 0,
+      requestsInFlight: t?.inFlight ?? 0,
+      queued: t?.queued ?? 0,
+      altitude: this.geo[2],
+      agl: this.ground === undefined ? undefined : this.geo[2] - this.ground,
+      speedKmh: (this.route ? this.route.speed : this.fly.velocity.length()) * 3.6,
+      lv95: wgs84ToLv95(this.geo[0], this.geo[1]),
+      originKm: this.shift.length() / 1000,
+      reversedDepth: this.reversedDepth,
+      route: this.route?.stats,
+    };
+  }
+
+  // ---- loop ----
+
   private run() {
     if (this.running) return;
     this.running = true;
@@ -175,21 +288,121 @@ export class World {
     const loop = (now: number) => {
       if (!this.running) return;
       this.raf = requestAnimationFrame(loop);
-      const dt = now - this.lastTime;
+      const dtMs = now - this.lastTime;
       this.lastTime = now;
-      this.fpsAcc += dt;
-      this.fpsFrames++;
-      if (this.fpsAcc >= 500) {
-        this.fps = (this.fpsFrames * 1000) / this.fpsAcc;
-        this.frameMs = this.fpsAcc / this.fpsFrames;
-        this.fpsAcc = 0;
-        this.fpsFrames = 0;
-      }
-      this.controls.update();
-      this.sky.position.copy(this.camera.position);
+      this.measure(dtMs);
+      const t0 = performance.now();
+      this.tick(Math.min(dtMs, 100) / 1000, dtMs);
+      const t1 = performance.now();
       this.renderer.render(this.scene, this.camera);
+      const t2 = performance.now();
+      // Smoothed CPU cost of our update and of three.js render submission.
+      this.tickMs += (t1 - t0 - this.tickMs) * 0.05;
+      this.renderMs += (t2 - t1 - this.renderMs) * 0.05;
     };
     this.raf = requestAnimationFrame(loop);
+  }
+
+  private tick(dt: number, dtMs: number) {
+    this.updateBasis();
+    if (this.route) this.flyRoute(dt, dtMs);
+    else this.fly.update(dt, this.basis, this.geo[2], this.ground);
+    this.rebaseIfNeeded();
+    this.sky.position.copy(this.camera.position);
+
+    this.camera.updateMatrixWorld();
+    this.projView.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.projView);
+    this.camera.getWorldDirection(this.forward);
+    this.terrain?.update(
+      this.camera.position,
+      this.forward,
+      this.frustum,
+      // LOD uses the full-resolution height so dynamic resolution does not change detail.
+      this.canvas.clientHeight * this.basePixelRatio,
+      this.camera.fov * DEG,
+    );
+  }
+
+  private flyRoute(dt: number, dtMs: number) {
+    const r = this.route!;
+    const s = r.stats;
+    if (s.done) return;
+    const wp = TEST_ROUTE[r.leg]!;
+    const toTarget = this.fromGeo(wp.lon, wp.lat, wp.h).sub(this.camera.position);
+    const up = this.basis.up;
+    const horizontal = toTarget.addScaledVector(up, -toTarget.dot(up));
+    const dist = horizontal.length();
+
+    if (dist < 1500) {
+      r.leg++;
+      s.leg = Math.min(r.leg, s.legs);
+      if (r.leg >= TEST_ROUTE.length) s.done = true;
+      return;
+    }
+    // Head for the waypoint and look slightly down at the terrain.
+    const dir = horizontal.normalize();
+    this.fly.yaw = Math.atan2(dir.dot(this.basis.east), dir.dot(this.basis.north));
+    this.fly.pitch = -10 * DEG;
+    const step = r.speed * dt;
+    this.camera.position.addScaledVector(dir, step);
+    // Climb/descend towards the waypoint height, but stay 300 m above ground.
+    const want = Math.max(wp.h, (this.ground ?? 0) + 300);
+    this.camera.position.addScaledVector(up, Math.max(-15, Math.min(25, want - this.geo[2])) * dt);
+    this.fly.aim(this.basis);
+
+    s.distanceKm += step / 1000;
+    s.seconds += dt;
+    s.frames++;
+    const ts = this.terrain?.tree.stats;
+    // Ignore the first seconds while the start area loads.
+    if (ts && ts.rendered && s.seconds > 10) {
+      if (ts.pending > 0) s.pendingFrames++;
+      s.minCoverage = Math.min(s.minCoverage, 1 - ts.pending / ts.rendered);
+      s.worstFrameMs = Math.max(s.worstFrameMs, dtMs);
+    }
+  }
+
+  private measure(dtMs: number) {
+    this.fpsAcc += dtMs;
+    this.fpsFrames++;
+    this.worstAcc = Math.max(this.worstAcc, dtMs);
+    if (this.fpsAcc >= 500) {
+      this.fps = (this.fpsFrames * 1000) / this.fpsAcc;
+      this.frameMs = this.fpsAcc / this.fpsFrames;
+      this.worstMs = this.worstAcc;
+      this.fpsAcc = 0;
+      this.fpsFrames = 0;
+      this.worstAcc = 0;
+      this.adaptResolution();
+    }
+  }
+
+  /**
+   * Dynamic resolution (concept ch. 16): drop render scale by 5 % when frames are too slow,
+   * raise it again after a few seconds at full frame rate. rAF is capped by the display,
+   * so "fast enough" means frames land at the refresh interval.
+   */
+  private adaptResolution() {
+    const now = performance.now();
+    if (this.frameMs > 18.5 && this.renderScale > MIN_RENDER_SCALE) {
+      this.setRenderScale(this.renderScale - 0.05);
+      this.lastDownscale = now;
+    } else if (
+      this.frameMs < 17.2 &&
+      this.renderScale < 1 &&
+      now - this.lastDownscale > 6000 &&
+      now - this.lastUpscale > 3000
+    ) {
+      this.setRenderScale(this.renderScale + 0.05);
+      this.lastUpscale = now;
+    }
+  }
+
+  private setRenderScale(scale: number) {
+    this.renderScale = Math.min(1, Math.max(MIN_RENDER_SCALE, Math.round(scale * 100) / 100));
+    this.renderer.setPixelRatio(this.basePixelRatio * this.renderScale);
+    this.resize();
   }
 
   private halt() {
@@ -197,36 +410,41 @@ export class World {
     cancelAnimationFrame(this.raf);
   }
 
-  stats(): WorldStats {
-    const info = this.renderer.info;
-    const ecef = localToEcef(
-      this.frame,
-      this.camera.position.x,
-      this.camera.position.y,
-      this.camera.position.z,
-    );
-    const [lon, lat, h] = ecefToGeodetic(...ecef);
-    const t = this.terrain?.stats;
-    return {
-      fps: this.fps,
-      frameMs: this.frameMs,
-      calls: info.render.calls,
-      triangles: info.render.triangles,
-      textures: info.memory.textures,
-      geometries: info.memory.geometries,
-      tilesLoaded: t?.loaded ?? 0,
-      tilesTotal: t?.total ?? 0,
-      tilesFailed: t?.failed ?? 0,
-      requestsInFlight: (t?.terrainInFlight ?? 0) + (t?.imageryInFlight ?? 0),
-      queued: t?.queued ?? 0,
-      altitude: h,
-      lv95: wgs84ToLv95(lon, lat),
-      reversedDepth: this.reversedDepth,
-    };
+  // ---- coordinates ----
+
+  /** Geodetic -> render coordinates. */
+  fromGeo(lon: number, lat: number, h: number): Vector3 {
+    return new Vector3(...ecefToLocal(this.frame, ...geodeticToEcef(lon, lat, h))).sub(this.shift);
   }
 
-  private local(lon: number, lat: number, h: number): Vector3 {
-    return new Vector3(...ecefToLocal(this.frame, ...geodeticToEcef(lon, lat, h)));
+  /** Render coordinates -> [lon, lat, h]. */
+  toGeo(p: Vector3): [number, number, number] {
+    const s = this.shift;
+    return ecefToGeodetic(...localToEcef(this.frame, p.x + s.x, p.y + s.y, p.z + s.z));
+  }
+
+  private updateBasis() {
+    this.geo = this.toGeo(this.camera.position);
+    const lon = this.geo[0] * DEG;
+    const lat = this.geo[1] * DEG;
+    const sl = Math.sin(lon);
+    const cl = Math.cos(lon);
+    const sp = Math.sin(lat);
+    const cp = Math.cos(lat);
+    this.basis.up.set(...ecefDirToLocal(this.frame, cp * cl, cp * sl, sp));
+    this.basis.north.set(...ecefDirToLocal(this.frame, -sp * cl, -sp * sl, cp));
+    this.basis.east.set(...ecefDirToLocal(this.frame, -sl, cl, 0));
+    this.ground = this.terrain?.tree.heightAt(this.geo[0], this.geo[1]);
+  }
+
+  /** Floating origin: move everything so the camera sits at (0,0,0) again. */
+  private rebaseIfNeeded(force = false) {
+    const p = this.camera.position;
+    if (!force && p.length() < REBASE_DISTANCE) return;
+    const delta = p.clone();
+    this.shift.add(delta);
+    this.terrain?.rebase(delta);
+    p.set(0, 0, 0);
   }
 
   private readonly resize = () => {
