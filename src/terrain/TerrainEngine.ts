@@ -4,7 +4,7 @@ import {
   type Frustum,
   Group,
   Mesh,
-  MeshLambertMaterial,
+  type MeshLambertMaterial,
   SRGBColorSpace,
   Sphere,
   Texture,
@@ -14,7 +14,9 @@ import { type JobHandle, WorkerPool } from '../core/WorkerPool';
 import type { EnuFrame } from '../geo/ellipsoid';
 import { tileId } from '../geo/tiles';
 import { Quadtree, type QuadtreeOptions, type TileNode, type TileProvider } from './Quadtree';
+import type { AtmosphereUniforms } from '../render/Atmosphere';
 import { SWISSIMAGE_TEMPLATE, type TerrainSource } from './sources';
+import { type TerrainLook, createTerrainMaterial, setTerrainDefines } from './terrainMaterial';
 import type { ImageryJob, ImageryResult, TerrainJob, TerrainResult } from './workerTypes';
 
 export interface TerrainSettings {
@@ -34,9 +36,6 @@ export const DEFAULT_TERRAIN: TerrainSettings = {
   maxTiles: 400,
   uploadsPerFrame: 4,
 };
-
-/** Terrain albedo boost: orthophotos are darker than the PBR lighting expects. */
-export const TERRAIN_GAIN = 2.0;
 
 /** Switzerland plus a margin; outside, terrain stays coarse (no SWISSIMAGE coverage). */
 const SWISS_BOUNDS = { west: 5.85, south: 45.75, east: 10.6, north: 47.9 };
@@ -72,10 +71,15 @@ export class TerrainEngine implements TileProvider {
   private readonly shift = new Vector3();
   failed = 0;
 
+  /** Tiles receive the aircraft shadow (set from the quality preset). */
+  receiveShadow = false;
+
   constructor(
     private readonly source: TerrainSource,
     private readonly frame: EnuFrame,
     private readonly anisotropy: number,
+    private readonly atmosphere: AtmosphereUniforms,
+    readonly look: TerrainLook = { detail: true, cloudShadows: true },
     readonly settings: TerrainSettings = { ...DEFAULT_TERRAIN },
   ) {
     const opts: QuadtreeOptions = {
@@ -150,6 +154,38 @@ export class TerrainEngine implements TileProvider {
     }
   }
 
+  /** Applies a quality preset: detail threshold, max zoom, tile budget and shader features. */
+  applyQuality(q: {
+    tau: number;
+    maxZoom: number;
+    maxTiles: number;
+    terrainDetail: boolean;
+    cloudShadows: boolean;
+    shadowMap: number;
+  }) {
+    this.settings.tau = q.tau;
+    this.settings.maxZoom = q.maxZoom;
+    this.settings.maxTiles = q.maxTiles;
+    this.tree.setTau(q.tau);
+    this.tree.setMaxZoom(Math.min(q.maxZoom, this.source.maxZoom));
+    if (this.look.detail !== q.terrainDetail || this.look.cloudShadows !== q.cloudShadows) {
+      this.look.detail = q.terrainDetail;
+      this.look.cloudShadows = q.cloudShadows;
+      for (const t of this.gpu.values()) {
+        const m = t.mesh.material as MeshLambertMaterial;
+        setTerrainDefines(m, this.look);
+        m.needsUpdate = true;
+      }
+    }
+    this.setReceiveShadow(q.shadowMap > 0);
+  }
+
+  /** Turns shadow receiving on or off for all tiles (quality preset). */
+  setReceiveShadow(on: boolean) {
+    this.receiveShadow = on;
+    for (const t of this.gpu.values()) t.mesh.receiveShadow = on;
+  }
+
   /** Moves the render origin by `delta` (render coordinates) to keep numbers small. */
   rebase(delta: Vector3) {
     this.shift.add(delta);
@@ -222,6 +258,7 @@ export class TerrainEngine implements TileProvider {
     geometry.setAttribute('position', new BufferAttribute(mesh.positions, 3));
     geometry.setAttribute('normal', new BufferAttribute(mesh.normals, 3));
     geometry.setAttribute('uv', new BufferAttribute(mesh.uvs, 2));
+    geometry.setAttribute('elevation', new BufferAttribute(mesh.elevations, 1));
     geometry.setIndex(new BufferAttribute(mesh.indices, 1));
     geometry.boundingSphere = new Sphere(new Vector3(...mesh.sphereCenter), mesh.sphereRadius);
 
@@ -233,9 +270,8 @@ export class TerrainEngine implements TileProvider {
     // The GPU has its own copy after upload; free the CPU-side bitmap.
     texture.onUpdate = () => img.bitmap.close();
 
-    const mat = new MeshLambertMaterial({ map: texture });
-    mat.color.setScalar(TERRAIN_GAIN);
-    const m = new Mesh(geometry, mat);
+    const m = new Mesh(geometry, createTerrainMaterial(texture, this.atmosphere, this.look));
+    m.receiveShadow = this.receiveShadow;
     m.name = tileId(node.key);
     m.matrixAutoUpdate = false;
     m.visible = false;

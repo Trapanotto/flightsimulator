@@ -10,6 +10,7 @@ export class StartScreen {
       fly: (lang: Lang) => void;
       explore: (lang: Lang) => void;
       hangar: (lang: Lang) => void;
+      settings: (lang: Lang) => void;
     },
   ) {
     this.render();
@@ -32,7 +33,7 @@ export class StartScreen {
           <button class="btn" data-action="preview">${tr('menu.preview')}</button>
           <button class="btn" data-action="hangar">${tr('menu.hangar')}</button>
           <button class="btn" disabled>${tr('menu.challenges')} ${soon}</button>
-          <button class="btn" disabled>${tr('menu.settings')} ${soon}</button>
+          <button class="btn" data-action="settings">${tr('menu.settings')}</button>
           <button class="btn" data-action="credits">${tr('menu.credits')}</button>
         </nav>
 
@@ -63,6 +64,9 @@ export class StartScreen {
     this.root
       .querySelector('[data-action="fly"]')!
       .addEventListener('click', () => this.actions.fly(this.lang));
+    this.root
+      .querySelector('[data-action="settings"]')!
+      .addEventListener('click', () => this.actions.settings(this.lang));
     this.root
       .querySelector('[data-action="hangar"]')!
       .addEventListener('click', () => this.actions.hangar(this.lang));

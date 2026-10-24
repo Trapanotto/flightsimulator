@@ -173,15 +173,13 @@ await page.waitForTimeout(500);
 await log('Sion final 8 km');
 const final = await autopilot(
   150,
-  approach.at
-    .slice(1)
-    .map((p) => ({
-      lon: p.lon,
-      lat: p.lat,
-      h: glide(p.m),
-      kmh: p.m > 1500 ? 175 : 150,
-      radius: 250,
-    })),
+  approach.at.slice(1).map((p) => ({
+    lon: p.lon,
+    lat: p.lat,
+    h: glide(p.m),
+    kmh: p.m > 1500 ? 175 : 150,
+    radius: 250,
+  })),
 );
 await log('over threshold');
 // Flare and roll-out: idle, nose slightly up, then brake.

@@ -720,3 +720,69 @@ body {
     bottom: 12px;
   }
 }
+
+/* ---------- Sun glare overlay ---------- */
+.sun-flare {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0;
+}
+.sun-glow,
+.sun-ghost {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: 50%;
+  will-change: transform;
+}
+.sun-glow {
+  width: 520px;
+  height: 520px;
+  margin: -260px 0 0 -260px;
+  background: radial-gradient(
+    circle,
+    rgba(255, 250, 235, 0.32) 0%,
+    rgba(255, 220, 170, 0.1) 18%,
+    rgba(255, 200, 150, 0.03) 45%,
+    transparent 70%
+  );
+}
+.sun-ghost {
+  margin: 0;
+  translate: -50% -50%;
+}
+
+/* ---------- Settings dialog ---------- */
+.settings {
+  max-width: min(560px, calc(100% - 32px));
+}
+.settings fieldset {
+  border: 0;
+  margin: 0 0 14px;
+  padding: 0;
+}
+.settings legend {
+  font: 700 13px/1 var(--font-display);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  color: var(--ink-dim);
+}
+.settings .chip[aria-pressed='true'] {
+  background: rgba(213, 43, 30, 0.8);
+  border-color: transparent;
+}
+.toggle {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 14px;
+  cursor: pointer;
+}
+.toggle input {
+  accent-color: var(--accent);
+  width: 18px;
+  height: 18px;
+}

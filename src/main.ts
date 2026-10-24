@@ -29,7 +29,13 @@ async function openWorld(currentLang: Lang) {
   // The 3D engine is loaded on demand so the menu appears fast.
   const [, { WorldView }] = await Promise.all([import('./world/World'), import('./ui/WorldView')]);
   const w = await ensureWorld();
-  view = new WorldView(document.body, currentLang, w, closeWorld);
+  view = new WorldView(
+    document.body,
+    currentLang,
+    w,
+    closeWorld,
+    () => void showSettings(currentLang),
+  );
   w.start();
   // ?route starts the Geneva -> St. Moritz test flight right away (optionally ?route=900 km/h).
   const route = new URLSearchParams(location.search).get('route');
@@ -42,6 +48,14 @@ function closeWorld() {
   view = undefined;
   worldCanvas.hidden = true;
   ui.hidden = false;
+}
+
+async function showSettings(currentLang: Lang) {
+  const { openSettings } = await import('./ui/SettingsDialog');
+  openSettings(currentLang, (s) => {
+    world?.applySettings(s);
+    if (game) game.controls.invertPitch = s.invertPitch;
+  });
 }
 
 /** Creates the world once; explore and flight mode share it (and its tile cache). */
@@ -72,7 +86,15 @@ async function openFlight(currentLang: Lang) {
   if (import.meta.env.DEV || location.search.includes('debug'))
     (window as unknown as { __game: FlightGame }).__game = game;
   w.game = game;
-  flightView = new FlightView(document.body, currentLang, w, game, closeFlight);
+  game.controls.invertPitch = w.settings.invertPitch;
+  flightView = new FlightView(
+    document.body,
+    currentLang,
+    w,
+    game,
+    closeFlight,
+    () => void showSettings(currentLang),
+  );
   w.start();
   game.start(FLIGHT_PLACES[0]!.place);
   game.load().catch((err) => console.error(err));
@@ -128,6 +150,7 @@ if (!document.createElement('canvas').getContext('webgl2')) {
     fly: (l) => void openFlight(l),
     explore: (l) => void openWorld(l),
     hangar: (l) => void openHangar(l),
+    settings: (l) => void showSettings(l),
   });
   if (location.hash === '#hangar') void openHangar(lang);
   if (location.hash === '#fly') void openFlight(lang);

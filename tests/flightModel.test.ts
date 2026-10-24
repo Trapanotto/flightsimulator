@@ -177,3 +177,19 @@ describe('ground handling', () => {
     expect(events.length).toBe(0);
   });
 });
+
+describe('load factor limit', () => {
+  it('keeps a full pull at high speed below ~9 g', () => {
+    const m = new FlightModel(flat);
+    m.gearDown = false;
+    m.reset(new Vector3(0, 3000, 0), NORTH, 130, false);
+    m.gearDown = false;
+    let maxG = 0;
+    run(m, 2, () => {
+      maxG = Math.max(maxG, m.gLoad);
+      return { ...idle(), throttle: 1, pitch: 1 };
+    });
+    expect(maxG).toBeLessThan(9);
+    expect(maxG).toBeGreaterThan(4);
+  });
+});

@@ -1,10 +1,9 @@
 import {
-  ACESFilmicToneMapping,
   Color,
   DirectionalLight,
-  FogExp2,
   Frustum,
   HemisphereLight,
+  PCFSoftShadowMap,
   Matrix4,
   PerspectiveCamera,
   Scene,
@@ -23,15 +22,26 @@ import {
   localToEcef,
 } from '../geo/ellipsoid';
 import { wgs84ToLv95 } from '../geo/lv95';
+import {
+  type Quality,
+  type QualityLevel,
+  type Settings,
+  WEATHER_COVERAGE,
+  loadSettings,
+  resolveQuality,
+  timeSpec,
+} from '../core/settings';
+import { Atmosphere } from '../render/Atmosphere';
+import { CloudLayer } from '../render/CloudLayer';
+import { PostFX } from '../render/PostFX';
+import { SunFlare } from '../render/SunFlare';
+import { resolveTime } from '../render/sun';
 import { DEFAULT_TERRAIN, TerrainEngine } from '../terrain/TerrainEngine';
 import { loadTerrainSource } from '../terrain/sources';
 import type { FlightGame } from '../game/FlightGame';
 import { type Basis, FreeCamera } from './FreeCamera';
 import { PLACES, type Place, TEST_ROUTE } from './places';
 
-/** Sun for now: fixed late afternoon light from the west-south-west. */
-const SUN_AZIMUTH = 240 * DEG;
-const SUN_ELEVATION = 22 * DEG;
 /** Base frame: centre of Switzerland. Its axes stay fixed; only the origin moves (floating origin). */
 const BASE = { lon: 8.2275, lat: 46.8182 };
 /** Re-centre the render origin when the camera is this far from it. */
@@ -67,6 +77,8 @@ export interface WorldStats {
   lv95: [number, number];
   originKm: number;
   reversedDepth: boolean;
+  quality: QualityLevel;
+  sunElevation: number;
   route?: RouteStats;
 }
 
@@ -84,6 +96,8 @@ export interface RouteStats {
 }
 
 function supportsClipControl(): boolean {
+  // ?depth=log forces the logarithmic depth buffer (debugging).
+  if (location.search.includes('depth=log')) return false;
   const gl = document.createElement('canvas').getContext('webgl2');
   const ok = !!gl?.getExtension('EXT_clip_control');
   gl?.getExtension('WEBGL_lose_context')?.loseContext();
@@ -96,6 +110,17 @@ export class World {
   readonly camera: PerspectiveCamera;
   readonly fly: FreeCamera;
   readonly sky = new Sky();
+  readonly atmosphere: Atmosphere;
+  readonly clouds: CloudLayer;
+  readonly sun: DirectionalLight;
+  readonly hemi: HemisphereLight;
+  readonly post: PostFX;
+  readonly flare: SunFlare;
+  settings: Settings;
+  quality: Quality;
+  qualityLevel: QualityLevel;
+  private flareOcclusion = 0;
+  private frameCount = 0;
   readonly frame: EnuFrame = enuFrame(BASE.lon, BASE.lat, 0);
   terrain?: TerrainEngine;
   private running = false;
@@ -111,7 +136,7 @@ export class World {
   private renderScale = 1;
   private lastDownscale = 0;
   private lastUpscale = 0;
-  private readonly basePixelRatio = Math.min(window.devicePixelRatio, 1.5);
+  private basePixelRatio = 1;
   private tickMs = 0;
   private renderMs = 0;
   private readonly reversedDepth: boolean;
@@ -138,42 +163,45 @@ export class World {
       reversedDepthBuffer: this.reversedDepth,
       logarithmicDepthBuffer: !this.reversedDepth,
     });
+    this.settings = loadSettings();
+    const { level, quality } = resolveQuality(this.settings);
+    this.qualityLevel = level;
+    this.quality = quality;
+    this.basePixelRatio = Math.min(window.devicePixelRatio, quality.maxPixelRatio);
     this.renderer.setPixelRatio(this.basePixelRatio);
-    this.renderer.toneMapping = ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.85;
+    this.renderer.shadowMap.type = PCFSoftShadowMap;
 
     this.camera = new PerspectiveCamera(60, 1, 3, 600_000);
     this.fly = new FreeCamera(this.camera, canvas);
 
-    const sunDir = new Vector3(
-      Math.cos(SUN_ELEVATION) * Math.sin(SUN_AZIMUTH),
-      Math.sin(SUN_ELEVATION),
-      -Math.cos(SUN_ELEVATION) * Math.cos(SUN_AZIMUTH),
-    );
+    this.atmosphere = new Atmosphere(resolveTime(timeSpec(this.settings)), BASE.lat, BASE.lon);
 
     // Sky dome: drawn first (renderOrder) and without depth writes, so terrain always covers it.
     this.sky.scale.setScalar(450_000);
     this.sky.renderOrder = -1;
-    const u = this.sky.material.uniforms;
-    u.turbidity!.value = 3;
-    u.rayleigh!.value = 1.2;
-    u.mieCoefficient!.value = 0.004;
-    u.mieDirectionalG!.value = 0.85;
-    // The built-in sky clouds cost ~6 ms per frame on Intel UHD; own cheap clouds follow in phase 5.
-    u.cloudCoverage!.value = 0;
-    u.sunPosition!.value.copy(sunDir);
+    // The built-in sky clouds cost ~6 ms per frame on Intel UHD; we draw our own cloud deck.
+    this.sky.material.uniforms.cloudCoverage!.value = 0;
     this.scene.add(this.sky);
 
     // Lights are tuned for PBR materials (aircraft). The orthophotos are dark and already contain
     // shadows, so the terrain material brightens itself instead (TERRAIN_GAIN).
-    const sun = new DirectionalLight(0xfff1dc, 1.1);
-    sun.position.copy(sunDir).multiplyScalar(10_000);
-    this.scene.add(sun, sun.target);
-    this.scene.add(new HemisphereLight(0xdfe9ff, 0x8a7a66, 1.3));
+    this.sun = new DirectionalLight(0xfff1dc, 1.1);
+    this.sun.shadow.camera.left = this.sun.shadow.camera.bottom = -14;
+    this.sun.shadow.camera.right = this.sun.shadow.camera.top = 14;
+    this.sun.shadow.camera.near = 1;
+    this.sun.shadow.camera.far = 800;
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.04;
+    this.scene.add(this.sun, this.sun.target);
+    this.hemi = new HemisphereLight(0xdfe9ff, 0x8a7a66, 1.3);
+    this.scene.add(this.hemi);
+    this.scene.background = new Color(0x9fb3c8);
 
-    const haze = new Color(0x9fb3c8);
-    this.scene.fog = new FogExp2(haze, 1 / 65_000);
-    this.scene.background = haze;
+    this.clouds = new CloudLayer(this.atmosphere.uniforms, quality.cloudLayers);
+    this.scene.add(this.clouds.group);
+    this.post = new PostFX(this.renderer, this.scene, this.camera);
+    this.flare = new SunFlare(document.body);
+    this.applySettings(this.settings);
 
     window.addEventListener('resize', this.resize);
     document.addEventListener('visibilitychange', this.onVisibility);
@@ -187,12 +215,22 @@ export class World {
     // Tuning knobs for testing, e.g. ?tau=8&uploads=2&tiles=300
     const q = new URLSearchParams(location.search);
     const num = (k: string, d: number) => (q.has(k) ? Number(q.get(k)) : d);
-    this.terrain = new TerrainEngine(source, this.frame, anisotropy, {
-      ...DEFAULT_TERRAIN,
-      tau: num('tau', DEFAULT_TERRAIN.tau),
-      uploadsPerFrame: num('uploads', DEFAULT_TERRAIN.uploadsPerFrame),
-      maxTiles: num('tiles', DEFAULT_TERRAIN.maxTiles),
-    });
+    const q2 = this.quality;
+    this.terrain = new TerrainEngine(
+      source,
+      this.frame,
+      anisotropy,
+      this.atmosphere.uniforms,
+      { detail: q2.terrainDetail, cloudShadows: q2.cloudShadows },
+      {
+        ...DEFAULT_TERRAIN,
+        tau: num('tau', q2.tau),
+        maxZoom: q2.maxZoom,
+        uploadsPerFrame: num('uploads', DEFAULT_TERRAIN.uploadsPerFrame),
+        maxTiles: num('tiles', q2.maxTiles),
+      },
+    );
+    this.terrain.setReceiveShadow(q2.shadowMap > 0);
     this.terrain.rebase(this.shift);
     this.scene.add(this.terrain.group);
   }
@@ -200,12 +238,42 @@ export class World {
   /** Shows the world: renders until stop(). Pauses by itself while the tab is hidden. */
   start() {
     this.active = true;
+    this.flare.el.hidden = false;
     this.run();
   }
 
   stop() {
     this.active = false;
+    this.flare.el.hidden = true;
     this.halt();
+  }
+
+  /** Applies settings: quality preset, time of day, weather. Safe to call at any time. */
+  applySettings(s: Settings) {
+    this.settings = s;
+    const { level, quality } = resolveQuality(s);
+    this.qualityLevel = level;
+    this.quality = quality;
+    this.basePixelRatio = Math.min(window.devicePixelRatio, quality.maxPixelRatio);
+    this.renderScale = Math.min(this.renderScale, quality.maxRenderScale);
+    this.renderer.setPixelRatio(this.basePixelRatio * this.renderScale);
+    this.renderer.shadowMap.enabled = quality.shadowMap > 0;
+    if (quality.shadowMap > 0) {
+      this.sun.shadow.mapSize.set(quality.shadowMap, quality.shadowMap);
+      this.sun.shadow.map?.dispose();
+      this.sun.shadow.map = null;
+    }
+    this.sun.castShadow = quality.shadowMap > 0;
+    this.atmosphere.setDate(resolveTime(timeSpec(s)));
+    this.atmosphere.apply(this.sun, this.hemi, this.sky);
+    this.renderer.toneMappingExposure = this.atmosphere.exposure;
+    this.atmosphere.uniforms.uCloudCoverage.value = WEATHER_COVERAGE[s.weather];
+    this.clouds.setLayers(quality.cloudLayers);
+    this.post.configure(quality);
+    this.flare.enabled = quality.flare;
+    this.terrain?.applyQuality(quality);
+    this.game?.applyQuality(quality);
+    this.resize();
   }
 
   goTo(p: Place) {
@@ -279,6 +347,8 @@ export class World {
       lv95: wgs84ToLv95(this.geo[0], this.geo[1]),
       originKm: this.shift.length() / 1000,
       reversedDepth: this.reversedDepth,
+      quality: this.qualityLevel,
+      sunElevation: this.atmosphere.sunElevation,
       route: this.route?.stats,
     };
   }
@@ -294,11 +364,12 @@ export class World {
       this.raf = requestAnimationFrame(loop);
       const dtMs = now - this.lastTime;
       this.lastTime = now;
+      const dt = Math.min(dtMs, 100) / 1000;
       this.measure(dtMs);
       const t0 = performance.now();
-      this.tick(Math.min(dtMs, 100) / 1000, dtMs);
+      this.tick(dt, dtMs);
       const t1 = performance.now();
-      this.renderer.render(this.scene, this.camera);
+      this.post.render(dt);
       const t2 = performance.now();
       // Smoothed CPU cost of our update and of three.js render submission.
       this.tickMs += (t1 - t0 - this.tickMs) * 0.05;
@@ -314,6 +385,7 @@ export class World {
     else this.fly.update(dt, this.basis, this.geo[2], this.ground);
     this.rebaseIfNeeded();
     this.sky.position.copy(this.camera.position);
+    this.updateEnvironment(dt);
 
     this.camera.updateMatrixWorld();
     this.projView.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
@@ -368,6 +440,53 @@ export class World {
     }
   }
 
+  /** Clouds, shadow camera, sun glare: everything that follows the camera or the aircraft. */
+  private updateEnvironment(dt: number) {
+    const camGeo = this.toGeo(this.camera.position);
+    this.atmosphere.tick(dt, this.shift, camGeo[2]);
+    const u = this.atmosphere.uniforms;
+    const sunDir = u.uSunDir.value;
+
+    const cloudBase = this.fromGeo(camGeo[0], camGeo[1], u.uCloudAltitude.value);
+    this.clouds.update(cloudBase, this.upAt(this.camera.position, new Vector3()), camGeo[2]);
+
+    // The shadow map only covers the aircraft and its surroundings.
+    if (this.sun.castShadow) {
+      const anchor =
+        this.game && !this.game.waitingForTerrain ? this.game.anchor : this.camera.position;
+      this.sun.target.position.copy(anchor);
+      this.sun.position.copy(anchor).addScaledVector(sunDir, 300);
+      this.sun.target.updateMatrixWorld();
+    } else {
+      this.sun.position.copy(sunDir).multiplyScalar(10_000);
+      this.sun.target.position.set(0, 0, 0);
+    }
+
+    // Sun glare: hidden behind mountains or clouds (checked every few frames).
+    if (this.flare.enabled && this.frameCount++ % 6 === 0)
+      this.flareOcclusion = this.sunOcclusion(camGeo[2]);
+    this.flare.update(dt, this.camera, sunDir, this.flareOcclusion);
+  }
+
+  private sunOcclusion(cameraElevation: number): number {
+    const sunDir = this.atmosphere.uniforms.uSunDir.value;
+    if (this.atmosphere.sunElevation < -1) return 1;
+    const p = new Vector3();
+    for (const d of [150, 400, 900, 1800, 3500, 6000, 10_000, 16_000, 25_000, 40_000]) {
+      p.copy(this.camera.position).addScaledVector(sunDir, d);
+      const h = this.heightAboveGround(p);
+      if (h !== undefined && h < 0) return 1;
+    }
+    const u = this.atmosphere.uniforms;
+    const toCloud = (u.uCloudAltitude.value - cameraElevation) / Math.max(sunDir.y, 0.05);
+    if (toCloud > 0 && u.uCloudCoverage.value > 0) {
+      p.copy(this.camera.position).addScaledVector(sunDir, toCloud);
+      const s = this.shift;
+      return Math.min(1, this.atmosphere.cloudDensityAt(p.x + s.x, p.z + s.z) * 1.2);
+    }
+    return 0;
+  }
+
   private measure(dtMs: number) {
     this.fpsAcc += dtMs;
     this.fpsFrames++;
@@ -389,13 +508,14 @@ export class World {
    * so "fast enough" means frames land at the refresh interval.
    */
   private adaptResolution() {
+    if (location.search.includes('fixedscale')) return;
     const now = performance.now();
     if (this.frameMs > 18.5 && this.renderScale > MIN_RENDER_SCALE) {
       this.setRenderScale(this.renderScale - 0.05);
       this.lastDownscale = now;
     } else if (
       this.frameMs < 17.2 &&
-      this.renderScale < 1 &&
+      this.renderScale < this.quality.maxRenderScale &&
       now - this.lastDownscale > 6000 &&
       now - this.lastUpscale > 3000
     ) {
@@ -405,7 +525,10 @@ export class World {
   }
 
   private setRenderScale(scale: number) {
-    this.renderScale = Math.min(1, Math.max(MIN_RENDER_SCALE, Math.round(scale * 100) / 100));
+    this.renderScale = Math.min(
+      this.quality.maxRenderScale,
+      Math.max(MIN_RENDER_SCALE, Math.round(scale * 100) / 100),
+    );
     this.renderer.setPixelRatio(this.basePixelRatio * this.renderScale);
     this.resize();
   }
@@ -517,6 +640,7 @@ export class World {
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
     this.renderer.setSize(w, h, false);
+    this.post?.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   };

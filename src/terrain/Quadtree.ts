@@ -25,7 +25,8 @@ export class TileNode {
   constructor(
     readonly key: TileKey,
     readonly parent: TileNode | undefined,
-    readonly maxZoom: number,
+    /** Inside the detail area (Switzerland): may refine up to the full max zoom. */
+    readonly inside: boolean,
     frame: EnuFrame,
     minH: number,
     maxH: number,
@@ -121,13 +122,17 @@ export class Quadtree {
     for (let y = r.y0; y <= r.y1; y++) {
       for (let x = r.x0; x <= r.x1; x++) {
         const key = { z: r.z, x, y };
-        this.roots.push(new TileNode(key, undefined, this.maxZoomFor(key), enu, -100, 4800));
+        this.roots.push(new TileNode(key, undefined, this.isInside(key), enu, -100, 4800));
       }
     }
   }
 
   setTau(tau: number) {
     this.opts.tau = tau;
+  }
+
+  setMaxZoom(z: number) {
+    this.opts.maxZoom = z;
   }
 
   /**
@@ -255,7 +260,8 @@ export class Quadtree {
 
   private select(node: TileNode) {
     const sse = this.sse(node);
-    const wantsMore = node.key.z < node.maxZoom && sse > this.opts.tau && !node.childrenFailed;
+    const maxZoom = node.inside ? this.opts.maxZoom : this.opts.maxZoomOutside;
+    const wantsMore = node.key.z < maxZoom && sse > this.opts.tau && !node.childrenFailed;
 
     if (wantsMore) {
       const children = this.ensureChildren(node);
@@ -310,16 +316,15 @@ export class Quadtree {
       const { z, x, y } = node.key;
       node.children = [0, 1, 2, 3].map((i) => {
         const key = { z: z + 1, x: x * 2 + (i & 1), y: y * 2 + (i >> 1) };
-        return new TileNode(key, node, this.maxZoomFor(key), this.enu, node.minH, node.maxH);
+        return new TileNode(key, node, this.isInside(key), this.enu, node.minH, node.maxH);
       });
     }
     return node.children;
   }
 
-  private maxZoomFor(key: TileKey): number {
+  private isInside(key: TileKey): boolean {
     const b = geoTileBounds(key);
     const d = this.opts.detailBounds;
-    const inside = b.east > d.west && b.west < d.east && b.north > d.south && b.south < d.north;
-    return inside ? this.opts.maxZoom : this.opts.maxZoomOutside;
+    return b.east > d.west && b.west < d.east && b.north > d.south && b.south < d.north;
   }
 }

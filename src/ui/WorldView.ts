@@ -18,12 +18,14 @@ export class WorldView {
     private readonly lang: Lang,
     private readonly world: World,
     onBack: () => void,
+    onSettings?: () => void,
   ) {
     this.el = document.createElement('div');
     this.el.className = 'world-ui';
     this.el.innerHTML = `
       <div class="topbar">
         <button class="btn btn-small" data-action="back">← ${t(lang, 'view.back')}</button>
+        <button class="btn btn-small" data-action="settings" aria-label="${t(lang, 'menu.settings')}">⚙</button>
         <div class="places" role="group" aria-label="${t(lang, 'view.places')}">
           ${PLACES.map((p, i) => `<button class="chip" data-place="${i}" title="${i + 1}">${p.name}</button>`).join('')}
           <button class="chip chip-accent" data-action="route">${t(lang, 'view.route')}</button>
@@ -44,6 +46,9 @@ export class WorldView {
     this.forwardBtn = this.el.querySelector('[data-action="forward"]')!;
 
     this.el.querySelector('[data-action="back"]')!.addEventListener('click', onBack);
+    this.el
+      .querySelector('[data-action="settings"]')!
+      .addEventListener('click', () => onSettings?.());
     this.el.querySelectorAll<HTMLButtonElement>('[data-place]').forEach((b) =>
       b.addEventListener('click', () => {
         world.goTo(PLACES[Number(b.dataset.place)]!);

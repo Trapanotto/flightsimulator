@@ -16,6 +16,8 @@ export interface TileMeshData {
   positions: Float32Array;
   normals: Float32Array;
   uvs: Float32Array;
+  /** Height above sea level per vertex (m), for altitude-dependent shading (snow, haze). */
+  elevations: Float32Array;
   indices: Uint16Array | Uint32Array;
   /** Bounding sphere relative to offset. */
   sphereCenter: Vec3;
@@ -31,7 +33,19 @@ export interface TileMeshData {
  * Vertices are stored relative to the tile centre so float32 keeps cm precision.
  * Skirts (short walls hanging down from every edge) hide cracks between LODs.
  */
-export function buildTileMesh(qm: QuantizedMesh, bounds: GeoBounds, frame: EnuFrame): TileMeshData {
+/** Reduces triangles to a target error in metres; must keep border vertices fixed. */
+export type SimplifyFn = (
+  indices: Uint32Array,
+  positions: Float32Array,
+  maxErrorM: number,
+) => Uint32Array;
+
+export function buildTileMesh(
+  qm: QuantizedMesh,
+  bounds: GeoBounds,
+  frame: EnuFrame,
+  simplify?: SimplifyFn,
+): TileMeshData {
   const n = qm.vertexCount;
   const edges = [
     sortEdge(qm.west, qm.v),
@@ -45,6 +59,7 @@ export function buildTileMesh(qm: QuantizedMesh, bounds: GeoBounds, frame: EnuFr
   const positions = new Float32Array(total * 3);
   const normals = new Float32Array(total * 3);
   const uvs = new Float32Array(total * 2);
+  const elevations = new Float32Array(total);
 
   const offset = ecefToLocal(frame, ...qm.center);
   const lonSpan = bounds.east - bounds.west;
@@ -64,6 +79,7 @@ export function buildTileMesh(qm: QuantizedMesh, bounds: GeoBounds, frame: EnuFr
     const lon = lonLat[src * 3]!;
     const lat = lonLat[src * 3 + 1]!;
     const h = lonLat[src * 3 + 2]! - heightDrop;
+    elevations[dst] = h;
     geodeticToEcef(lon, lat, h, ecef);
     ecefToLocal(frame, ecef[0], ecef[1], ecef[2], local);
     positions[dst * 3] = local[0] - offset[0];
@@ -87,6 +103,17 @@ export function buildTileMesh(qm: QuantizedMesh, bounds: GeoBounds, frame: EnuFr
   }
   if (!qm.octNormals) computeNormals(positions, qm.indices, n, normals);
 
+  // swisstopo tiles carry more detail than our LOD needs on screen. Simplify each tile to an
+  // error of ~1/128 of its width (half of the error budget the quadtree assumes per level).
+  let tileIndices: Uint16Array | Uint32Array = qm.indices;
+  if (simplify) {
+    tileIndices = simplify(
+      Uint32Array.from(qm.indices),
+      positions.subarray(0, n * 3),
+      widthMeters / 128,
+    );
+  }
+
   // Skirt vertices copy their edge vertex, lowered by `skirt`.
   let next = n;
   const skirtIndexOf: Uint32Array[] = [];
@@ -103,12 +130,13 @@ export function buildTileMesh(qm: QuantizedMesh, bounds: GeoBounds, frame: EnuFr
     skirtIndexOf.push(map);
   }
 
-  // Each skirt quad is emitted with both windings so it is visible from either side.
-  const skirtTris = edges.reduce((s, e) => s + Math.max(0, e.length - 1) * 4, 0);
-  const indexCount = qm.indices.length + skirtTris * 3;
+  // Skirt quads face outwards (away from the tile centre), one winding only.
+  const skirtTris = edges.reduce((s, e) => s + Math.max(0, e.length - 1) * 2, 0);
+  const indexCount = tileIndices.length + skirtTris * 3;
   const indices = total > 65535 ? new Uint32Array(indexCount) : new Uint16Array(indexCount);
-  indices.set(qm.indices);
-  let w = qm.indices.length;
+  indices.set(tileIndices);
+  let w = tileIndices.length;
+  const P = (i: number, k: number) => positions[i * 3 + k]!;
   edges.forEach((edge, ei) => {
     const map = skirtIndexOf[ei]!;
     for (let k = 0; k + 1 < edge.length; k++) {
@@ -116,18 +144,31 @@ export function buildTileMesh(qm: QuantizedMesh, bounds: GeoBounds, frame: EnuFr
       const b = edge[k + 1]!;
       const as = map[k]!;
       const bs = map[k + 1]!;
-      indices[w++] = a;
-      indices[w++] = b;
-      indices[w++] = as;
-      indices[w++] = b;
-      indices[w++] = bs;
-      indices[w++] = as;
-      indices[w++] = a;
-      indices[w++] = as;
-      indices[w++] = b;
-      indices[w++] = b;
-      indices[w++] = as;
-      indices[w++] = bs;
+      // Normal of (a, b, as) vs. direction from the tile centre (origin) to the edge.
+      const ux = P(b, 0) - P(a, 0),
+        uy = P(b, 1) - P(a, 1),
+        uz = P(b, 2) - P(a, 2);
+      const vx = P(as, 0) - P(a, 0),
+        vy = P(as, 1) - P(a, 1),
+        vz = P(as, 2) - P(a, 2);
+      const nx = uy * vz - uz * vy;
+      const nz = ux * vy - uy * vx;
+      const outward = nx * P(a, 0) + nz * P(a, 2) > 0;
+      if (outward) {
+        indices[w++] = a;
+        indices[w++] = b;
+        indices[w++] = as;
+        indices[w++] = b;
+        indices[w++] = bs;
+        indices[w++] = as;
+      } else {
+        indices[w++] = a;
+        indices[w++] = as;
+        indices[w++] = b;
+        indices[w++] = b;
+        indices[w++] = as;
+        indices[w++] = bs;
+      }
     }
   });
 
@@ -141,6 +182,7 @@ export function buildTileMesh(qm: QuantizedMesh, bounds: GeoBounds, frame: EnuFr
     positions,
     normals,
     uvs,
+    elevations,
     indices,
     sphereCenter,
     sphereRadius: qm.boundingSphere.radius + skirt,

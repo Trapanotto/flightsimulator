@@ -1,7 +1,9 @@
 import { PMREMGenerator, Scene, Vector3 } from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { Aircraft } from '../aircraft/Aircraft';
+import { WingTrails } from '../aircraft/WingTrails';
 import { CameraRig } from '../camera/CameraRig';
+import type { Quality } from '../core/settings';
 import { AIRCRAFT_URL } from '../hangar/Hangar';
 import { FlightControls } from '../input/FlightControls';
 import { MouseAim } from '../input/MouseAim';
@@ -33,6 +35,7 @@ export class FlightGame {
   readonly aim: MouseAim;
   readonly rig: CameraRig;
   aircraft?: Aircraft;
+  readonly trails = new WingTrails();
   paused = false;
   /** Waiting for terrain under the start place. */
   waitingForTerrain = true;
@@ -61,21 +64,31 @@ export class FlightGame {
     this.world.scene.environment = env;
     this.aircraft = await Aircraft.load(AIRCRAFT_URL, env);
     this.aircraft.root.traverse((o) => {
-      o.castShadow = false;
-      o.receiveShadow = false;
       // The sky is very bright; full-strength reflections wash the white paint out.
       const m = (o as { material?: { envMapIntensity?: number; name?: string } }).material;
       if (m && m.envMapIntensity !== undefined && m.name !== 'Glass') m.envMapIntensity = 0.45;
     });
-    this.world.scene.add(this.aircraft.root);
+    this.world.scene.add(this.aircraft.root, this.trails.group);
+    this.applyQuality(this.world.quality);
     this.syncModel();
+  }
+
+  /** Shadows and trails follow the graphics preset. */
+  applyQuality(q: Quality) {
+    this.trails.enabled = q.trails;
+    this.aircraft?.root.traverse((o) => {
+      const m = (o as { material?: { name?: string } }).material;
+      const glass = m?.name === 'Glass' || m?.name === 'PropDisc';
+      o.castShadow = q.shadowMap > 0 && !glass;
+      o.receiveShadow = q.shadowMap > 0 && !glass;
+    });
   }
 
   dispose() {
     this.controls.dispose();
     this.aim.dispose();
     this.rig.dispose();
-    if (this.aircraft) this.world.scene.remove(this.aircraft.root);
+    if (this.aircraft) this.world.scene.remove(this.aircraft.root, this.trails.group);
     this.world.scene.environment = null;
   }
 
@@ -156,6 +169,7 @@ export class FlightGame {
   rebase(delta: Vector3) {
     this.fm.position.sub(delta);
     this.rig.rebase(delta);
+    this.trails.rebase(delta);
   }
 
   /** The point the floating origin follows. */
@@ -219,6 +233,18 @@ export class FlightGame {
     a.controls.gear = this.fm.gearDown ? 1 : 0;
     a.controls.rpm = this.fm.crashed ? 0 : 0.3 + 0.7 * this.fm.throttle;
     a.update(dt);
+    // Vortex trails at high load or high angle of attack while fast enough.
+    const f = this.fm;
+    const load = Math.max(0, (Math.abs(f.gLoad) - 2.2) / 2);
+    const slowHigh = f.speed > 45 ? Math.max(0, (f.angleOfAttack - 0.12) / 0.1) : 0;
+    if (dt > 0)
+      this.trails.update(
+        dt,
+        f.position,
+        f.quaternion,
+        f.up,
+        f.crashed ? 0 : Math.min(1, load + slowHigh),
+      );
   }
 
   private onAction(a: string) {

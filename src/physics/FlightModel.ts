@@ -67,6 +67,8 @@ export const TR1 = {
   gearHeight: 1.53, // model origin above ground with gear down
   bellyHeight: 0.62,
   maxSinkRate: 4.5,
+  /** Highest load factor a full pull can produce (arcade: generous, but no 15 g turns). */
+  maxG: 8,
   /** Angle of attack: aoaRef at aoaSpeed, growing with 1/v², capped at aoaMax. */
   aoaRef: 5 * (Math.PI / 180),
   aoaSpeed: 40,
@@ -224,7 +226,9 @@ export class FlightModel {
   private stepAir(dt: number, input: FlightInput, eff: number) {
     // Body rates.
     let roll = input.roll * TR1.rollRate * eff;
-    let pitch = input.pitch * TR1.pitchRate * eff;
+    // Pitch rate limited so the load factor stays below ~maxG at high speed.
+    const pitchLimit = Math.min(TR1.pitchRate, (TR1.maxG * G) / Math.max(this.speed, 1));
+    let pitch = input.pitch * pitchLimit * eff;
     const yaw = input.yaw * TR1.yawRate * eff;
     const bank = this.bank;
     const upright = this.up.dot(this.worldUp) > 0;

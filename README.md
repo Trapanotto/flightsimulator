@@ -25,6 +25,12 @@ Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
 
 ## Was schon geht
 
+![Goldene Stunde über Lauterbrunnen](docs/screenshots/golden-hour.png)
+
+- **Grafik:** Sonnenstand nach Datum und Uhrzeit, Luftperspektive, Wolkendecke mit Wolkenschatten,
+  Schnee in der Höhe, Flugzeugschatten, Kondensstreifen, Bloom, SMAA, Sonnen-Glanzlicht;
+  vier Qualitätsstufen (automatisch nach GPU), Einstellungen für Grafik, Tageszeit und Wetter.
+  Messwerte: [docs/BENCHMARK.md](docs/BENCHMARK.md).
 - **Fliegen** mit dem TR-1: Arcade-Flugmodell (Start, Kurvenflug, sanfter Strömungsabriss, Landung
   mit Bewertung, Absturz mit Neustart in der Luft), Start auf sechs echten Pisten
   (Bern-Belp, Sion, Zürich, Samedan, Lugano, Genf) oder in der Luft über Lauterbrunnen und am Matterhorn.

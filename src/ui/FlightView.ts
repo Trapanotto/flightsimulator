@@ -42,6 +42,7 @@ export class FlightView {
     private readonly world: World,
     private readonly game: FlightGame,
     onBack: () => void,
+    onSettings?: () => void,
   ) {
     const tr = (k: MessageKey) => t(lang, k);
     this.el = document.createElement('div');
@@ -49,6 +50,7 @@ export class FlightView {
     this.el.innerHTML = `
       <div class="topbar">
         <button class="btn btn-small" data-action="back">← ${tr('view.back')}</button>
+        <button class="btn btn-small" data-action="settings" aria-label="${tr('menu.settings')}">⚙</button>
         <div class="places" role="group" aria-label="${tr('view.places')}">
           ${FLIGHT_PLACES.map((p, i) => `<button class="chip" data-place="${i}">${p.label}</button>`).join('')}
         </div>
@@ -96,6 +98,7 @@ export class FlightView {
     parent.appendChild(this.el);
 
     this.q('[data-action="back"]').addEventListener('click', onBack);
+    this.q('[data-action="settings"]').addEventListener('click', () => onSettings?.());
     this.el.querySelectorAll<HTMLButtonElement>('[data-place]').forEach((b) =>
       b.addEventListener('click', () => {
         game.start(FLIGHT_PLACES[Number(b.dataset.place)]!.place);
