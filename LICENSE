@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 Trapanotto
+Copyright (c) 2026 Riccardo Trapanotto
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,9 +20,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----
-
-The MIT license applies to the source code of this repository. Geodata,
-imagery and third-party assets remain subject to their own terms, documented
-in ATTRIBUTION.md. Original 3D models and textures created for this project
-will be released under CC BY 4.0 unless a file states otherwise.
+3D models and textures in public/assets are licensed under CC BY 4.0
+(https://creativecommons.org/licenses/by/4.0/). Geodata is not part of this
+repository; it is streamed from geo.admin.ch, © swisstopo.

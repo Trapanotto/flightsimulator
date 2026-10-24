@@ -1,0 +1,15 @@
+{
+  "tagline": "Die Schweiz aus der Luft",
+  "menu.fly": "Fliegen",
+  "menu.challenges": "Challenges",
+  "menu.settings": "Einstellungen",
+  "menu.credits": "Credits",
+  "menu.soon": "bald",
+  "status.phase": "Phase 0 · Fundament",
+  "status.webglMissing": "Dein Browser unterstützt kein WebGL 2. Bitte nutze eine aktuelle Version von Chrome, Edge, Firefox oder Safari.",
+  "credits.title": "Credits",
+  "credits.data": "Geodaten: © swisstopo (Bundesamt für Landestopografie), bereitgestellt über geo.admin.ch",
+  "credits.code": "Code: MIT-Lizenz · 3D-Modelle und Texturen: CC BY 4.0",
+  "credits.libs": "Mit Three.js und Vite gebaut",
+  "credits.close": "Schliessen"
+}

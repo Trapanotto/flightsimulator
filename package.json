@@ -3,23 +3,29 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Browser-based Switzerland flight simulator with swisstopo data, Three.js and Blender assets.",
+  "description": "Arcade flight simulator over a streamed 3D Switzerland (swisstopo data, Three.js, Blender assets).",
+  "license": "MIT",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "test": "vitest run"
   },
   "dependencies": {
-    "proj4": "^2.22.0",
-    "three": "^0.186.0"
+    "three": "^0.186.1"
   },
   "devDependencies": {
-    "@types/node": "^26.6.5",
+    "@eslint/js": "^10.0.1",
     "@types/three": "^0.186.0",
-    "typescript": "~5.9.3",
+    "eslint": "^10.13.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.0",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
   }
