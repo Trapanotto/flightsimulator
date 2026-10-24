@@ -1,6 +1,6 @@
 // Takes screenshots of the running app in headless Edge/Chrome (real GPU).
 // Usage: node tools/screenshot.mjs <url> <out.png> [waitMs=6000] [js-to-run-before]
-// Env: VIEWPORT=1600x900, AFTER=ms to wait after the script (default 1500)
+// Env: VIEWPORT=1600x900, AFTER=ms to wait after the script (default 1500), MOBILE=1 (touch device)
 import { chromium } from 'playwright-core';
 
 const [url, out, wait = '6000', script] = process.argv.slice(2);
@@ -10,7 +10,12 @@ const browser = await chromium.launch({
   args: ['--enable-gpu', '--ignore-gpu-blocklist'],
 });
 const [vw, vh] = (process.env.VIEWPORT ?? '1600x900').split('x').map(Number);
-const page = await browser.newPage({ viewport: { width: vw, height: vh } });
+const mobile = process.env.MOBILE === '1';
+const page = await browser.newPage({
+  viewport: { width: vw, height: vh },
+  hasTouch: mobile,
+  isMobile: mobile,
+});
 const errors = [];
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 page.on('pageerror', (e) => errors.push(String(e)));

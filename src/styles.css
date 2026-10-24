@@ -478,3 +478,245 @@ body {
     max-width: 6.2em;
   }
 }
+
+/* ---------- Flight HUD ---------- */
+.fhud {
+  position: absolute;
+  left: 50%;
+  bottom: 70px;
+  transform: translateX(-50%);
+  width: min(640px, calc(100% - 32px));
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+  font-family: var(--font-display);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.75);
+}
+.fhud-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 150px;
+}
+.fhud-col.right {
+  align-items: flex-end;
+  text-align: right;
+}
+.fhud-big {
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+.fhud-unit {
+  font-size: 12px;
+  color: var(--ink-dim);
+  letter-spacing: 0.1em;
+  margin-bottom: 4px;
+}
+.fhud-small {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+}
+.fhud-small b {
+  font-weight: 700;
+}
+.bar {
+  width: 150px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.2);
+  overflow: hidden;
+  margin: 2px 0;
+}
+.bar span {
+  display: block;
+  height: 100%;
+  background: var(--ink);
+  transform-origin: left;
+  transform: scaleX(0);
+}
+.bar.boost span {
+  background: #ffb02e;
+}
+.fstatus {
+  position: absolute;
+  left: 50%;
+  bottom: 44px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 16px;
+  font: 500 12px/1 var(--font-display);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.75);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.warning {
+  position: absolute;
+  top: 28%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 18px;
+  border: 2px solid #ff3b30;
+  border-radius: 6px;
+  color: #ff3b30;
+  font: 700 28px/1 var(--font-display);
+  letter-spacing: 0.15em;
+  background: rgba(0, 0, 0, 0.35);
+  animation: blink 0.6s steps(2, start) infinite;
+  pointer-events: none;
+}
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+.fmessage {
+  position: absolute;
+  top: 38%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 22px;
+  border-radius: 10px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  font: 700 22px/1.2 var(--font-display);
+  letter-spacing: 0.06em;
+  text-align: center;
+  pointer-events: none;
+}
+.fmessage[data-kind='good'] {
+  border-color: #34c759;
+}
+.fmessage[data-kind='bad'] {
+  border-color: #ff3b30;
+  color: #ffd6d3;
+}
+.pause-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(10, 14, 24, 0.45);
+  font: 700 26px/1 var(--font-display);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+.pause-overlay[hidden],
+.warning[hidden],
+.fmessage[hidden] {
+  display: none;
+}
+.reticle {
+  position: absolute;
+  left: -14px;
+  top: -14px;
+  width: 28px;
+  height: 28px;
+  pointer-events: none;
+  will-change: transform;
+}
+.reticle.aim {
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+}
+.reticle.nose::before,
+.reticle.nose::after {
+  content: '';
+  position: absolute;
+  background: #9cf59c;
+}
+.reticle.nose::before {
+  left: 0;
+  right: 0;
+  top: 13px;
+  height: 2px;
+}
+.reticle.nose::after {
+  top: 0;
+  bottom: 0;
+  left: 13px;
+  width: 2px;
+}
+
+/* Touch controls only on touch screens */
+.touch-stick,
+.touch-right {
+  display: none;
+}
+@media (pointer: coarse) {
+  .flight-ui .hint {
+    display: none;
+  }
+  .touch-stick {
+    display: block;
+    position: absolute;
+    left: 24px;
+    bottom: 120px;
+    width: 130px;
+    height: 130px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.35);
+    background: rgba(10, 14, 24, 0.25);
+    touch-action: none;
+  }
+  .knob {
+    position: absolute;
+    left: 40px;
+    top: 40px;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.75);
+  }
+  .touch-right {
+    display: flex;
+    position: absolute;
+    right: 20px;
+    bottom: 120px;
+    gap: 12px;
+    align-items: flex-end;
+  }
+  .touch-throttle {
+    writing-mode: vertical-lr;
+    direction: rtl;
+    height: 150px;
+    width: 34px;
+    accent-color: var(--accent);
+  }
+  .touch-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  /* Instruments move to the top centre so thumbs and controls never cover them. */
+  .fhud {
+    top: 100px;
+    bottom: auto;
+    width: min(380px, calc(100% - 300px));
+  }
+  .fhud-col {
+    min-width: 0;
+  }
+  .fhud-big {
+    font-size: 28px;
+  }
+  .bar {
+    width: 110px;
+  }
+  .touch-stick {
+    bottom: 24px;
+  }
+  .touch-right {
+    bottom: 24px;
+  }
+  .fstatus {
+    bottom: 12px;
+  }
+}

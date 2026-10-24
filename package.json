@@ -1,7 +1,7 @@
 {
   "name": "trapanotto-flight-simulator",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "description": "Arcade flight simulator over a streamed 3D Switzerland (swisstopo data, Three.js, Blender assets).",
   "license": "MIT",
@@ -15,7 +15,8 @@
     "test": "vitest run",
     "test:route": "node tools/route-test.mjs",
     "assets": "blender -b --factory-startup -P tools/blender/build_tr1.py && node tools/optimize-aircraft.mjs",
-    "assets:optimize": "node tools/optimize-aircraft.mjs"
+    "assets:optimize": "node tools/optimize-aircraft.mjs",
+    "test:flight": "node tools/flight-test.mjs"
   },
   "dependencies": {
     "three": "^0.186.1"

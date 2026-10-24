@@ -35,6 +35,9 @@ export const DEFAULT_TERRAIN: TerrainSettings = {
   uploadsPerFrame: 4,
 };
 
+/** Terrain albedo boost: orthophotos are darker than the PBR lighting expects. */
+export const TERRAIN_GAIN = 2.0;
+
 /** Switzerland plus a margin; outside, terrain stays coarse (no SWISSIMAGE coverage). */
 const SWISS_BOUNDS = { west: 5.85, south: 45.75, east: 10.6, north: 47.9 };
 /** Zoom 7 roots over Switzerland: 4 x 3 tiles of 1.4°. */
@@ -230,7 +233,9 @@ export class TerrainEngine implements TileProvider {
     // The GPU has its own copy after upload; free the CPU-side bitmap.
     texture.onUpdate = () => img.bitmap.close();
 
-    const m = new Mesh(geometry, new MeshLambertMaterial({ map: texture }));
+    const mat = new MeshLambertMaterial({ map: texture });
+    mat.color.setScalar(TERRAIN_GAIN);
+    const m = new Mesh(geometry, mat);
     m.name = tileId(node.key);
     m.matrixAutoUpdate = false;
     m.visible = false;

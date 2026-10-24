@@ -6,7 +6,11 @@ export class StartScreen {
   constructor(
     private readonly root: HTMLElement,
     private lang: Lang,
-    private readonly actions: { explore: (lang: Lang) => void; hangar: (lang: Lang) => void },
+    private readonly actions: {
+      fly: (lang: Lang) => void;
+      explore: (lang: Lang) => void;
+      hangar: (lang: Lang) => void;
+    },
   ) {
     this.render();
   }
@@ -24,9 +28,9 @@ export class StartScreen {
         </header>
 
         <nav class="menu" aria-label="Hauptmenü">
-          <button class="btn btn-primary" data-action="preview">${tr('menu.preview')}</button>
+          <button class="btn btn-primary" data-action="fly">${tr('menu.fly')}</button>
+          <button class="btn" data-action="preview">${tr('menu.preview')}</button>
           <button class="btn" data-action="hangar">${tr('menu.hangar')}</button>
-          <button class="btn" disabled>${tr('menu.fly')} ${soon}</button>
           <button class="btn" disabled>${tr('menu.challenges')} ${soon}</button>
           <button class="btn" disabled>${tr('menu.settings')} ${soon}</button>
           <button class="btn" data-action="credits">${tr('menu.credits')}</button>
@@ -56,6 +60,9 @@ export class StartScreen {
     this.root
       .querySelector('[data-action="preview"]')!
       .addEventListener('click', () => this.actions.explore(this.lang));
+    this.root
+      .querySelector('[data-action="fly"]')!
+      .addEventListener('click', () => this.actions.fly(this.lang));
     this.root
       .querySelector('[data-action="hangar"]')!
       .addEventListener('click', () => this.actions.hangar(this.lang));

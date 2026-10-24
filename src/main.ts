@@ -5,6 +5,8 @@ import type { World } from './world/World';
 import type { WorldView } from './ui/WorldView';
 import type { Hangar } from './hangar/Hangar';
 import type { HangarView } from './ui/HangarView';
+import type { FlightGame } from './game/FlightGame';
+import type { FlightView } from './ui/FlightView';
 
 const lang = detectLang();
 document.documentElement.lang = lang;
@@ -17,37 +19,75 @@ let world: World | undefined;
 let view: WorldView | undefined;
 let hangar: Hangar | undefined;
 let hangarView: HangarView | undefined;
+let game: FlightGame | undefined;
+let flightView: FlightView | undefined;
 
 async function openWorld(currentLang: Lang) {
   ui.hidden = true;
   worldCanvas.hidden = false;
 
   // The 3D engine is loaded on demand so the menu appears fast.
-  const [{ World }, { WorldView }] = await Promise.all([
-    import('./world/World'),
-    import('./ui/WorldView'),
-  ]);
-  const first = !world;
-  world ??= new World(worldCanvas);
-  if (import.meta.env.DEV || location.search.includes('debug'))
-    (window as unknown as { __world: World }).__world = world;
-  view = new WorldView(document.body, currentLang, world, closeWorld);
-  world.start();
-  if (first) {
-    world.init().catch((err) => {
-      console.error(err);
-      alert(String(err));
-    });
-  }
+  const [, { WorldView }] = await Promise.all([import('./world/World'), import('./ui/WorldView')]);
+  const w = await ensureWorld();
+  view = new WorldView(document.body, currentLang, w, closeWorld);
+  w.start();
   // ?route starts the Geneva -> St. Moritz test flight right away (optionally ?route=900 km/h).
   const route = new URLSearchParams(location.search).get('route');
-  if (route !== null) world.startRoute(Number(route) || 500);
+  if (route !== null) w.startRoute(Number(route) || 500);
 }
 
 function closeWorld() {
   world?.stop();
   view?.destroy();
   view = undefined;
+  worldCanvas.hidden = true;
+  ui.hidden = false;
+}
+
+/** Creates the world once; explore and flight mode share it (and its tile cache). */
+async function ensureWorld() {
+  const { World } = await import('./world/World');
+  const first = !world;
+  world ??= new World(worldCanvas);
+  if (import.meta.env.DEV || location.search.includes('debug'))
+    (window as unknown as { __world: World }).__world = world;
+  if (first) {
+    world.init().catch((err) => {
+      console.error(err);
+      alert(String(err));
+    });
+  }
+  return world;
+}
+
+async function openFlight(currentLang: Lang) {
+  ui.hidden = true;
+  worldCanvas.hidden = false;
+  const [{ FlightGame }, { FlightView, FLIGHT_PLACES }] = await Promise.all([
+    import('./game/FlightGame'),
+    import('./ui/FlightView'),
+  ]);
+  const w = await ensureWorld();
+  game = new FlightGame(w);
+  if (import.meta.env.DEV || location.search.includes('debug'))
+    (window as unknown as { __game: FlightGame }).__game = game;
+  w.game = game;
+  flightView = new FlightView(document.body, currentLang, w, game, closeFlight);
+  w.start();
+  game.start(FLIGHT_PLACES[0]!.place);
+  game.load().catch((err) => console.error(err));
+}
+
+function closeFlight() {
+  flightView?.destroy();
+  flightView = undefined;
+  if (world) {
+    world.stop();
+    world.game = undefined;
+  }
+  game?.dispose();
+  game = undefined;
+  if (document.pointerLockElement) document.exitPointerLock();
   worldCanvas.hidden = true;
   ui.hidden = false;
 }
@@ -85,8 +125,10 @@ if (!document.createElement('canvas').getContext('webgl2')) {
   ui.innerHTML = `<p class="fatal">${t(lang, 'status.webglMissing')}</p>`;
 } else {
   new StartScreen(ui, lang, {
+    fly: (l) => void openFlight(l),
     explore: (l) => void openWorld(l),
     hangar: (l) => void openHangar(l),
   });
   if (location.hash === '#hangar') void openHangar(lang);
+  if (location.hash === '#fly') void openFlight(lang);
 }

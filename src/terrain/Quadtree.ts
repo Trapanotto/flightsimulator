@@ -242,6 +242,17 @@ export class Quadtree {
     );
   }
 
+  /** Zoom of the most detailed loaded tile containing lon/lat (0 if none). */
+  detailAt(lon: number, lat: number): number {
+    let node: TileNode | undefined = this.roots.find((r) => r.contains(lon, lat));
+    if (!node || node.state !== 'ready') return 0;
+    for (;;) {
+      const child: TileNode | undefined = node.children?.find((c) => c.contains(lon, lat));
+      if (!child || child.state !== 'ready') return node.key.z;
+      node = child;
+    }
+  }
+
   private select(node: TileNode) {
     const sse = this.sse(node);
     const wantsMore = node.key.z < node.maxZoom && sse > this.opts.tau && !node.childrenFailed;

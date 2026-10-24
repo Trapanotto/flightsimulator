@@ -25,6 +25,7 @@ import {
 import { wgs84ToLv95 } from '../geo/lv95';
 import { DEFAULT_TERRAIN, TerrainEngine } from '../terrain/TerrainEngine';
 import { loadTerrainSource } from '../terrain/sources';
+import type { FlightGame } from '../game/FlightGame';
 import { type Basis, FreeCamera } from './FreeCamera';
 import { PLACES, type Place, TEST_ROUTE } from './places';
 
@@ -123,8 +124,10 @@ export class World {
   private geo: [number, number, number] = [0, 0, 0];
   private ground: number | undefined;
   private route?: { leg: number; stats: RouteStats; speed: number };
+  /** When set, the world is in flight mode: the game moves the camera and anchors the origin. */
+  game?: FlightGame;
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
+  constructor(readonly canvas: HTMLCanvasElement) {
     this.reversedDepth = supportsClipControl();
     this.renderer = new WebGLRenderer({
       canvas,
@@ -161,11 +164,12 @@ export class World {
     u.sunPosition!.value.copy(sunDir);
     this.scene.add(this.sky);
 
-    // The orthophotos already contain real shadows, so direct light stays soft and ambient high.
-    const sun = new DirectionalLight(0xfff1dc, 2.2);
+    // Lights are tuned for PBR materials (aircraft). The orthophotos are dark and already contain
+    // shadows, so the terrain material brightens itself instead (TERRAIN_GAIN).
+    const sun = new DirectionalLight(0xfff1dc, 1.1);
     sun.position.copy(sunDir).multiplyScalar(10_000);
     this.scene.add(sun, sun.target);
-    this.scene.add(new HemisphereLight(0xdfe9ff, 0x8a7a66, 2.6));
+    this.scene.add(new HemisphereLight(0xdfe9ff, 0x8a7a66, 1.3));
 
     const haze = new Color(0x9fb3c8);
     this.scene.fog = new FogExp2(haze, 1 / 65_000);
@@ -305,7 +309,8 @@ export class World {
 
   private tick(dt: number, dtMs: number) {
     this.updateBasis();
-    if (this.route) this.flyRoute(dt, dtMs);
+    if (this.game) this.game.update(dt);
+    else if (this.route) this.flyRoute(dt, dtMs);
     else this.fly.update(dt, this.basis, this.geo[2], this.ground);
     this.rebaseIfNeeded();
     this.sky.position.copy(this.camera.position);
@@ -437,14 +442,75 @@ export class World {
     this.ground = this.terrain?.tree.heightAt(this.geo[0], this.geo[1]);
   }
 
-  /** Floating origin: move everything so the camera sits at (0,0,0) again. */
+  /**
+   * Floating origin: move everything so the anchor (camera, or the aircraft in flight mode)
+   * sits at (0,0,0) again.
+   */
   private rebaseIfNeeded(force = false) {
-    const p = this.camera.position;
-    if (!force && p.length() < REBASE_DISTANCE) return;
-    const delta = p.clone();
+    const anchor =
+      this.game && !this.game.waitingForTerrain ? this.game.anchor : this.camera.position;
+    if (!force && anchor.length() < REBASE_DISTANCE) return;
+    const delta = anchor.clone();
     this.shift.add(delta);
     this.terrain?.rebase(delta);
-    p.set(0, 0, 0);
+    this.camera.position.sub(delta);
+    this.game?.rebase(delta);
+  }
+
+  // ---- queries for the flight game (render coordinates) ----
+
+  /** Local vertical at a point. */
+  upAt(p: Vector3, out: Vector3): Vector3 {
+    const [lon, lat] = this.toGeo(p);
+    const l = lon * DEG;
+    const b = lat * DEG;
+    return out.set(
+      ...ecefDirToLocal(
+        this.frame,
+        Math.cos(b) * Math.cos(l),
+        Math.cos(b) * Math.sin(l),
+        Math.sin(b),
+      ),
+    );
+  }
+
+  /** Local up/north/east at a point. */
+  basisAt(p: Vector3): Basis {
+    const [lon, lat] = this.toGeo(p);
+    const sl = Math.sin(lon * DEG);
+    const cl = Math.cos(lon * DEG);
+    const sp = Math.sin(lat * DEG);
+    const cp = Math.cos(lat * DEG);
+    return {
+      up: new Vector3(...ecefDirToLocal(this.frame, cp * cl, cp * sl, sp)),
+      north: new Vector3(...ecefDirToLocal(this.frame, -sp * cl, -sp * sl, cp)),
+      east: new Vector3(...ecefDirToLocal(this.frame, -sl, cl, 0)),
+    };
+  }
+
+  /** Terrain height (m) at lon/lat from the loaded tiles. */
+  groundAt(lon: number, lat: number): number | undefined {
+    return this.terrain?.tree.heightAt(lon, lat);
+  }
+
+  /** Zoom level of the most detailed loaded tile at lon/lat (0 if none). */
+  terrainDetailAt(lon: number, lat: number): number {
+    return this.terrain?.tree.detailAt(lon, lat) ?? 0;
+  }
+
+  heightAboveGround(p: Vector3): number | undefined {
+    const [lon, lat, h] = this.toGeo(p);
+    const g = this.groundAt(lon, lat);
+    return g === undefined ? undefined : h - g;
+  }
+
+  /** Moves the camera (and with it the streaming focus) to a place. */
+  moveCameraTo(lon: number, lat: number, h: number) {
+    this.camera.position.copy(this.fromGeo(lon, lat, h));
+    this.rebaseIfNeeded(true);
+    const b = this.basisAt(this.camera.position);
+    this.camera.up.copy(b.up);
+    this.camera.lookAt(this.camera.position.clone().add(b.north).addScaledVector(b.up, -0.3));
   }
 
   private readonly resize = () => {
