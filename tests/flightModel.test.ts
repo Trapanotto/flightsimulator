@@ -54,13 +54,13 @@ function inAir(type: AircraftType, speed: number, height = 1500) {
  */
 function holdVs(m: FlightModel, vs: number, throttle: number): FlightInput {
   const gamma = Math.asin(Math.max(-1, Math.min(1, vs / Math.max(m.speed, 1))));
-  const correction = Math.max(-0.05, Math.min(0.05, (vs - m.verticalSpeed) * 0.01));
+  const correction = Math.max(-0.15, Math.min(0.15, (vs - m.verticalSpeed) * 0.03));
   const theta = gamma + m.alpha + correction;
   const pitchRate = -m.omega.x;
   return {
     ...idle(),
     throttle,
-    pitch: Math.max(-1, Math.min(1, (theta - m.pitch) * 4 - pitchRate * 2)),
+    pitch: Math.max(-1, Math.min(1, (theta - m.pitch) * 2.5 - pitchRate * 3)),
     roll: Math.max(-1, Math.min(1, -m.bank * 2 - m.omega.z * 0.5)),
   };
 }
@@ -156,6 +156,7 @@ describe('fleet performance (published figures)', () => {
     phenom100: { vs: [48, 58], top: [180, 260] },
     f35: { vs: [62, 80], top: [300, 380] },
     a320: { vs: [70, 82], top: [240, 320] },
+    b747: { vs: [75, 88], top: [230, 320] },
   };
   for (const type of AIRCRAFT) {
     const ref = published[type.id];
@@ -199,8 +200,9 @@ describe('fleet performance (published figures)', () => {
       const flare = Math.max(8, type.length * 0.4);
       const ev = run(l, 120, () => {
         const h = l.position.y - p.gearHeight;
-        const target = h > flare ? -v * 0.052 : -0.6;
-        return l.onGround ? { ...idle(), brake: true } : holdVs(l, target, h > flare ? 0.35 : 0.1);
+        // Exponential flare: the sink rate shrinks with the height (like an autoland).
+        const target = h > flare ? -v * 0.052 : -Math.max(0.4, (h * v * 0.052) / flare);
+        return l.onGround ? { ...idle(), brake: true } : holdVs(l, target, h > flare ? 0.35 : 0.25);
       });
       expect(
         ev.some((e) => e.type === 'crash'),

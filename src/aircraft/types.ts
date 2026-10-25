@@ -494,7 +494,86 @@ export const A320: AircraftType = {
   span: 35.8,
 };
 
-export const AIRCRAFT: AircraftType[] = [C172, PC12, PHENOM100, F35, A320];
+export const B747: AircraftType = {
+  id: 'b747',
+  name: 'Boeing 747-400',
+  info: {
+    de: 'Jumbo-Jet · 4 × 252 kN · über 400 Sitze · Oberdeck',
+    en: 'Jumbo jet · 4 × 252 kN · over 400 seats · upper deck',
+  },
+  registration: 'HB-JTB',
+  url: `${base}assets/aircraft/b747.glb`,
+  physics: {
+    mass: 300_000,
+    wingArea: 525,
+    span: 64.4,
+    chord: 8.32,
+    // NASA CR-2144 (747 at 288 t): roll 24.7e6, pitch 44.9e6, yaw 67.4e6 kg m².
+    inertia: [44.9e6, 67.4e6, 24.7e6],
+    cg: [0, -1.0, -1.1],
+    aero: {
+      ...LIGHT,
+      CL0: 0.2,
+      CLa: 5.5,
+      CLmax: 1.4,
+      CLflaps: 1.4,
+      CD0: 0.019,
+      CDgear: 0.02,
+      CDflaps: 0.09,
+      e: 0.8,
+      Cm0: 0.05,
+      Cma: -1.45,
+      Cmq: -21,
+      Cmde: 0.4,
+      Cmflaps: -0.12,
+      Clb: -0.2,
+      Clp: -0.42,
+      Clda: 0.025,
+      Cnb: 0.15,
+      Cnr: -0.25,
+      Cnp: -0.02,
+      Cndr: 0.04,
+      Cnda: -0.002,
+      CYb: -0.9,
+      CYdr: 0.14,
+      CLde: 0.3,
+      CLq: 5.5,
+    },
+    propulsion: { kind: 'jet', staticThrust: 1_008_000, afterburner: 1, afterburnerSeconds: 0 },
+    vne: 365 * KT,
+    controlRate: 1.5,
+    wheels: [
+      { pos: [0, -5.42, 27.8], share: 0.06, steer: true },
+      { pos: [5.85, -5.42, -2.1], share: 0.24, brake: true },
+      { pos: [-5.85, -5.42, -2.1], share: 0.24, brake: true },
+      { pos: [1.95, -5.42, -5.1], share: 0.23, brake: true },
+      { pos: [-1.95, -5.42, -5.1], share: 0.23, brake: true },
+    ],
+    gearStroke: 0.3,
+    rollFriction: 0.02,
+    brakeFriction: 0.45,
+    gearHeight: 5.42, // model
+    bellyHeight: 3.6,
+    maxSinkRate: 3.0,
+    fixedGear: false,
+    maxFlapDeg: 30,
+    hull: {
+      nose: [0, 0.4, 35.3],
+      wingL: [31.5, 2.0, -16.0],
+      wingR: [-31.5, 2.0, -16.0],
+      tail: [0, 13.9, -32.0],
+    }, // model
+  },
+  engine: { kind: 'jet', display: 'n1', idle: 22, max: 100, blades: 38, maxRps: 40 },
+  eye: [0.55, 4.2, 31.9], // model
+  wingCam: [16.0, 1.5, -6.0],
+  chaseDistance: 95,
+  chaseHeight: 20,
+  length: 70.66,
+  span: 64.44,
+};
+
+export const AIRCRAFT: AircraftType[] = [C172, PC12, PHENOM100, F35, A320, B747];
 export const DEFAULT_AIRCRAFT = C172;
 
 /** The type with this id, if it is in the fleet already. */
