@@ -27,6 +27,8 @@ export interface FlightInput {
   throttle: number;
   boost: boolean;
   brake: boolean;
+  /** Trim wheel: -1 nose down .. 1 nose up (rate while held). */
+  trim?: number;
 }
 
 export type Assist = 'easy' | 'normal' | 'pro';
@@ -73,6 +75,11 @@ export const TR1 = {
   aoaRef: 5 * (Math.PI / 180),
   aoaSpeed: 40,
   aoaMax: 12 * (Math.PI / 180),
+  /** Hands-off pitch attitude range of the trim, radians. */
+  trimMin: -20 * (Math.PI / 180),
+  trimMax: 25 * (Math.PI / 180),
+  /** Trim wheel speed, radians of hands-off attitude per second. */
+  trimRate: 4 * (Math.PI / 180),
 };
 
 const G = 9.81;
@@ -111,6 +118,11 @@ export class FlightModel {
   boostLeft = TR1.boostSeconds;
   boosting = false;
   assist: Assist = 'easy';
+  /**
+   * Pitch trim as the attitude held hands-off (radians). It follows the nose while the stick is
+   * moved, so letting go holds the current attitude; the trim wheel moves it from there.
+   */
+  trim = 0;
   /** Load factor (g), smoothed, for the HUD. */
   gLoad = 1;
   /** Seconds since the last touchdown or liftoff (to debounce events). */
@@ -144,6 +156,7 @@ export class FlightModel {
     this.boostLeft = TR1.boostSeconds;
     this.sinceGroundChange = 10;
     this.updateAxes();
+    this.trim = this.pitch;
     this.velocity.copy(this.direction).multiplyScalar(speed);
     this.lastVelocity.copy(this.velocity);
   }
@@ -232,6 +245,17 @@ export class FlightModel {
     const yaw = input.yaw * TR1.yawRate * eff;
     const bank = this.bank;
     const upright = this.up.dot(this.worldUp) > 0;
+
+    // Trim: hands off, the nose eases towards the trimmed attitude.
+    const handsOff = Math.abs(input.pitch) < 0.05;
+    if (!handsOff || !upright) this.trim = this.pitch;
+    this.trim = Math.max(
+      TR1.trimMin,
+      Math.min(TR1.trimMax, this.trim + (input.trim ?? 0) * TR1.trimRate * dt),
+    );
+    if (handsOff && upright && !this.stalled) {
+      pitch += Math.max(-0.25, Math.min(0.25, (this.trim - this.pitch) * 1.5)) * eff;
+    }
 
     if (
       this.assist === 'easy' &&

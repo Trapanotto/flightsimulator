@@ -480,80 +480,6 @@ body {
 }
 
 /* ---------- Flight HUD ---------- */
-.fhud {
-  position: absolute;
-  left: 50%;
-  bottom: 70px;
-  transform: translateX(-50%);
-  width: min(640px, calc(100% - 32px));
-  display: flex;
-  justify-content: space-between;
-  pointer-events: none;
-  font-family: var(--font-display);
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.75);
-}
-.fhud-col {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 150px;
-}
-.fhud-col.right {
-  align-items: flex-end;
-  text-align: right;
-}
-.fhud-big {
-  font-size: 36px;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: 0.02em;
-}
-.fhud-unit {
-  font-size: 12px;
-  color: var(--ink-dim);
-  letter-spacing: 0.1em;
-  margin-bottom: 4px;
-}
-.fhud-small {
-  font-size: 13px;
-  letter-spacing: 0.06em;
-}
-.fhud-small b {
-  font-weight: 700;
-}
-.bar {
-  width: 150px;
-  height: 5px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.2);
-  overflow: hidden;
-  margin: 2px 0;
-}
-.bar span {
-  display: block;
-  height: 100%;
-  background: var(--ink);
-  transform-origin: left;
-  transform: scaleX(0);
-}
-.bar.boost span {
-  background: #ffb02e;
-}
-.fstatus {
-  position: absolute;
-  left: 50%;
-  bottom: 44px;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 16px;
-  font: 500 12px/1 var(--font-display);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--ink-dim);
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.75);
-  pointer-events: none;
-  white-space: nowrap;
-}
 .warning {
   position: absolute;
   top: 28%;
@@ -695,29 +621,11 @@ body {
     flex-direction: column;
     gap: 8px;
   }
-  /* Instruments move to the top centre so thumbs and controls never cover them. */
-  .fhud {
-    top: 100px;
-    bottom: auto;
-    width: min(380px, calc(100% - 300px));
-  }
-  .fhud-col {
-    min-width: 0;
-  }
-  .fhud-big {
-    font-size: 28px;
-  }
-  .bar {
-    width: 110px;
-  }
   .touch-stick {
     bottom: 24px;
   }
   .touch-right {
     bottom: 24px;
-  }
-  .fstatus {
-    bottom: 12px;
   }
 }
 
@@ -787,147 +695,7 @@ body {
   height: 18px;
 }
 
-/* ---------- Instruments, minimap, search ---------- */
-.instruments {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-.instruments[hidden] {
-  display: none;
-}
-.hdg-window {
-  position: absolute;
-  top: 64px;
-  left: 50%;
-  width: 360px;
-  height: 30px;
-  margin-left: -180px;
-  overflow: hidden;
-  mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
-}
-.hdg-tape {
-  position: absolute;
-  left: 180px;
-  top: 0;
-  height: 100%;
-  will-change: transform;
-}
-.hdg-tape .tick {
-  position: absolute;
-  bottom: 0;
-  width: 1px;
-  height: 7px;
-  background: rgba(255, 255, 255, 0.7);
-}
-.hdg-tape .tick.major {
-  height: 12px;
-  background: #fff;
-}
-.hdg-tape .tick b {
-  position: absolute;
-  bottom: 13px;
-  left: 50%;
-  transform: translateX(-50%);
-  font: 700 12px/1 var(--font-display);
-  color: #fff;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
-}
-.hdg-caret {
-  position: absolute;
-  left: 50%;
-  bottom: 0;
-  width: 2px;
-  height: 16px;
-  margin-left: -1px;
-  background: #9cf59c;
-}
-.hdg-readout {
-  position: absolute;
-  top: 98px;
-  left: 50%;
-  transform: translateX(-50%);
-  font: 700 14px/1 var(--font-display);
-  color: #9cf59c;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
-}
-.adi {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 260px;
-  height: 260px;
-  margin: -130px 0 0 -130px;
-  overflow: hidden;
-  border-radius: 50%;
-  mask-image: radial-gradient(circle, #000 55%, transparent 72%);
-  -webkit-mask-image: radial-gradient(circle, #000 55%, transparent 72%);
-}
-.adi-ladder {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 0;
-  will-change: transform;
-}
-.horizon {
-  position: absolute;
-  left: -200px;
-  right: -200px;
-  top: -1px;
-  height: 2px;
-  background: rgba(156, 245, 156, 0.6);
-}
-.rung {
-  position: absolute;
-  left: 50%;
-  width: 120px;
-  margin-left: -60px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  transform: translateY(-50%);
-  font: 600 10px/1 var(--font-display);
-  color: rgba(156, 245, 156, 0.9);
-}
-.rung i {
-  flex: 1;
-  height: 1px;
-  background: rgba(156, 245, 156, 0.55);
-}
-.rung.down i {
-  background: repeating-linear-gradient(
-    90deg,
-    rgba(156, 245, 156, 0.8) 0 6px,
-    transparent 6px 10px
-  );
-}
-.aircraft-symbol {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 90px;
-  margin-left: -45px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.aircraft-symbol i {
-  width: 32px;
-  height: 3px;
-  background: #ffcf3a;
-  box-shadow: 0 0 3px rgba(0, 0, 0, 0.6);
-}
-.aircraft-symbol b {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  border: 2px solid #ffcf3a;
-}
-
+/* ---------- Minimap, search ---------- */
 .minimap {
   position: absolute;
   right: 16px;
@@ -1288,4 +1056,194 @@ body {
   gap: 8px;
   justify-content: center;
   margin-top: 14px;
+}
+
+/* ---- Flight HUD (layout after MSFS): map top left, menu top right, values bottom ---- */
+
+.fmap {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.fmap-heading {
+  padding: 3px 10px;
+  font: 700 17px/1 var(--font-display);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  background: rgba(10, 16, 28, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 4px;
+  pointer-events: none;
+}
+.fmap .minimap {
+  position: relative;
+  inset: auto;
+  width: 190px;
+  height: 190px;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+}
+.fmap .minimap.large {
+  width: min(460px, 62vmin);
+  height: min(460px, 62vmin);
+}
+.minimap.heading-up .mm-north {
+  display: none;
+}
+/* Aircraft symbol: fixed, nose up. */
+.minimap.heading-up .mm-arrow {
+  border-bottom-color: #ffffff;
+  filter: drop-shadow(0 0 2px #000);
+}
+
+.fmenu {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: calc(100% - 32px);
+}
+.fmenu-panel {
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 90px);
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(14, 22, 40, 0.9);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.fmenu-panel[hidden] {
+  display: none;
+}
+.fmenu-label {
+  margin: 6px 0 0;
+  font: 600 12px/1 var(--font-display);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.fmenu-help {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+.fmenu .place-search {
+  margin: 0;
+  width: 100%;
+}
+
+.fstrip {
+  position: absolute;
+  bottom: max(14px, env(safe-area-inset-bottom));
+  display: flex;
+  gap: 4px;
+  pointer-events: none;
+}
+.fstrip.left {
+  left: 16px;
+}
+.fstrip.right {
+  right: 16px;
+}
+.fcell {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  min-width: 84px;
+  padding: 6px 10px 7px;
+  background: rgba(8, 12, 20, 0.62);
+}
+.fcell span {
+  font: 600 13px/1 var(--font-display);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+}
+.fcell b {
+  font: 600 19px/1 var(--font-display);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fcell i {
+  font-style: normal;
+}
+.fcell small {
+  margin-left: 3px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-dim);
+}
+.fcell.boost b {
+  color: #ffb02e;
+}
+
+/* Challenge clock: top centre (map and menu own the corners). */
+.flight-ui .chud {
+  top: max(12px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  justify-items: center;
+  text-align: center;
+}
+.flight-ui .loading-dot {
+  left: 50%;
+  bottom: auto;
+  top: 45%;
+  transform: translateX(-50%);
+  font-size: 14px;
+}
+.flight-ui .world-attribution {
+  right: auto;
+  left: 50%;
+  bottom: 4px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .fcell {
+    min-width: 0;
+    padding: 5px 7px;
+  }
+  .fcell span {
+    font-size: 10px;
+  }
+  .fcell b {
+    font-size: 15px;
+  }
+  .fcell small {
+    display: none;
+  }
+  .fmap .minimap {
+    width: 120px;
+    height: 120px;
+  }
+  .fstrip.right {
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 52px);
+  }
+}
+@media (pointer: coarse) {
+  .fmap .minimap {
+    width: 120px;
+    height: 120px;
+  }
+  /* Thumbs own the bottom corners: values sit above the touch controls. */
+  .flight-ui .fstrip {
+    bottom: 200px;
+  }
+  .flight-ui .fstrip.right {
+    bottom: 200px;
+  }
 }

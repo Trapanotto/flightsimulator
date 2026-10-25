@@ -29,6 +29,8 @@ const KEYS = {
   throttleDown: ['ControlLeft', 'ControlRight', 'KeyF'],
   boost: ['Space'],
   brake: ['KeyB'],
+  trimDown: ['PageUp', 'Numpad7'],
+  trimUp: ['PageDown', 'Numpad1'],
 } as const;
 
 const ACTION_KEYS: Record<string, FlightAction> = {
@@ -70,6 +72,7 @@ export class FlightControls {
     throttle: 0,
     boost: false,
     brake: false,
+    trim: 0,
   };
   /** Set by the touch UI (already shaped). */
   readonly touch = { pitch: 0, roll: 0, active: false, boost: false, throttle: -1 };
@@ -171,6 +174,7 @@ export class FlightControls {
     this.input.throttle = Math.max(0, Math.min(1, throttle));
     this.input.boost = boost;
     this.input.brake = brake;
+    this.input.trim = (this.anyKey(KEYS.trimUp) ? 1 : 0) - (this.anyKey(KEYS.trimDown) ? 1 : 0);
   }
 
   rumble(strength: number, ms: number) {
@@ -190,7 +194,12 @@ export class FlightControls {
     if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
     if (!e.repeat && ACTION_KEYS[e.code]) this.actions.push(ACTION_KEYS[e.code]!);
     this.keys.add(e.code);
-    if (e.code === 'Space' || e.code.startsWith('Arrow') || e.code === 'Backspace')
+    if (
+      e.code === 'Space' ||
+      e.code.startsWith('Arrow') ||
+      e.code.startsWith('Page') ||
+      e.code === 'Backspace'
+    )
       e.preventDefault();
   };
 

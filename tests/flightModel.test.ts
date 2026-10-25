@@ -159,6 +159,29 @@ describe('flight model', () => {
   });
 });
 
+describe('trim', () => {
+  const DEG = Math.PI / 180;
+  it('holds the attitude at release hands-off', () => {
+    const m = inAir(90);
+    run(m, 0.6, { ...idle(), throttle: 0.8, pitch: 0.5 });
+    const held = m.pitch;
+    expect(held).toBeGreaterThan(5 * DEG);
+    run(m, 4, { ...idle(), throttle: 0.8 });
+    expect(Math.abs(m.pitch - held)).toBeLessThan(2 * DEG);
+    expect(m.trim).toBeCloseTo(held, 2);
+  });
+
+  it('the trim wheel moves the hands-off attitude', () => {
+    const m = inAir(90);
+    run(m, 1, { ...idle(), throttle: 0.8 });
+    const before = m.pitch;
+    run(m, 2, { ...idle(), throttle: 0.8, trim: 1 });
+    run(m, 3, { ...idle(), throttle: 0.8 });
+    expect(m.pitch - before).toBeGreaterThan(5 * DEG);
+    expect(m.trim).toBeLessThanOrEqual(TR1.trimMax);
+  });
+});
+
 describe('ground handling', () => {
   it('stays on the runway when the terrain under it drops (detail refinement)', () => {
     let ground = 0;

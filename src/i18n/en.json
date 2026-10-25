@@ -39,7 +39,7 @@
   "camera.orbit": "Orbit",
   "flight.waiting": "Loading terrain at the start …",
   "flight.paused": "Paused – press P to continue",
-  "flight.help": "Click: mouse flight (N on/off) · W/S: nose down/up · A/D: roll · Q/E: yaw · Shift/Ctrl: throttle · Space: boost · G: gear · V: flaps · B: brake · C: camera · M: map · O: sound · P: pause · ⌫: restart",
+  "flight.help": "Click: mouse flight (N on/off) · W/S: nose down/up · A/D: roll · Q/E: yaw · Shift/Ctrl: throttle · Space: boost · PgUp/PgDn: trim · G: gear · V: flaps · B: brake · C: camera · M: map · O: sound · P: pause · ⌫: restart",
   "gearDown": "Gear down",
   "gearUp": "Gear up",
   "landing.butter": "Butter-smooth landing",
@@ -96,5 +96,13 @@
   "challenge.help": "Fly through the rings in order. The orange ring is next, the green one is the finish. After a crash you continue at the last ring, the clock keeps running. ⌫ restarts.",
   "medal.gold": "Gold",
   "medal.silver": "Silver",
-  "medal.bronze": "Bronze"
+  "medal.bronze": "Bronze",
+  "flight.mainMenu": "Main menu",
+  "flight.controls": "Controls",
+  "hud.airspeed": "Airspeed",
+  "hud.engine": "Engine",
+  "hud.rpm": "rpm",
+  "hud.trim": "Trim",
+  "hud.altitude": "Altitude",
+  "hud.vs": "Vertical speed"
 }

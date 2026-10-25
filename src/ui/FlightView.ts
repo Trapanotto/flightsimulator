@@ -7,10 +7,10 @@ import { PLACES } from '../world/places';
 import type { ChallengeEvent } from '../game/ChallengeRun';
 import { formatTime, loadBestTimes } from '../game/challenges';
 import { medalBadge, openChallengePicker } from './ChallengePicker';
-import { Instruments } from './Instruments';
 import { type MapMarker, Minimap } from './Minimap';
 import { PlaceSearch } from './PlaceSearch';
 import type { World } from '../world/World';
+import { TR1 } from '../physics/FlightModel';
 
 /** Start places in flight mode: all runways, plus two air starts in the Alps. */
 export const FLIGHT_PLACES: Array<{ label: string; place: StartPlace }> = [
@@ -41,9 +41,7 @@ export class FlightView {
   readonly el: HTMLElement;
   private readonly q = <T extends HTMLElement>(sel: string) => this.el.querySelector<T>(sel)!;
   private raf = 0;
-  private readonly instruments: Instruments;
   private readonly minimap: Minimap;
-  private placeTimer = 0;
 
   constructor(
     parent: HTMLElement,
@@ -57,14 +55,26 @@ export class FlightView {
     this.el = document.createElement('div');
     this.el.className = 'world-ui flight-ui';
     this.el.innerHTML = `
-      <div class="topbar">
-        <button class="btn btn-small" data-action="back">← ${tr('view.back')}</button>
-        <button class="btn btn-small" data-action="settings" aria-label="${tr('menu.settings')}">⚙</button>
-        <button class="chip chip-accent" data-action="challenges">${tr('menu.challenges')}</button>
-        <div class="places" role="group" aria-label="${tr('view.places')}">
-          ${FLIGHT_PLACES.map((p, i) => `<button class="chip" data-place="${i}">${p.label}</button>`).join('')}
+      <div class="fmap">
+        <div class="fmap-heading" data-v="hdg">000°</div>
+      </div>
+
+      <div class="fmenu">
+        <button class="btn btn-small fmenu-toggle" data-action="menu" aria-expanded="false">☰ ${tr('view.back')}</button>
+        <div class="fmenu-panel" hidden>
+          <button class="btn btn-small" data-action="back">← ${tr('flight.mainMenu')}</button>
+          <button class="btn btn-small btn-primary" data-action="challenges">${tr('menu.challenges')}</button>
+          <button class="btn btn-small" data-action="settings">${tr('menu.settings')}</button>
+          <p class="fmenu-label">${tr('view.places')}</p>
+          <div class="places" role="group" aria-label="${tr('view.places')}">
+            ${FLIGHT_PLACES.map((p, i) => `<button class="chip" data-place="${i}">${p.label}</button>`).join('')}
+          </div>
+          <div class="fmenu-search"></div>
+          <p class="fmenu-label">${tr('flight.controls')}</p>
+          <p class="fmenu-help">${tr('flight.help')}</p>
         </div>
       </div>
+
       <div class="chud" data-v="chud" hidden>
         <span class="chud-name" data-v="cname"></span>
         <span class="chud-time" data-v="ctime">0:00.0</span>
@@ -74,26 +84,18 @@ export class FlightView {
       <div class="cresult" hidden></div>
       <div class="reticle aim" hidden></div>
       <div class="reticle nose" hidden></div>
-      <div class="fhud">
-        <div class="fhud-col">
-          <span class="fhud-big" data-v="speed">0</span><span class="fhud-unit">km/h</span>
-          <div class="bar"><span data-v="throttle"></span></div>
-          <span class="fhud-small">${tr('hud.throttle')} <b data-v="thr">0</b> %</span>
-          <div class="bar boost"><span data-v="boost"></span></div>
-        </div>
-        <div class="fhud-col right">
-          <span class="fhud-big" data-v="alt">0</span><span class="fhud-unit">m ü. M.</span>
-          <span class="fhud-small">AGL <b data-v="agl">–</b> m</span>
-          <span class="fhud-small">↕ <b data-v="vs">0</b> m/s</span>
-          <span class="fhud-small"><b data-v="g">1.0</b> G</span>
-        </div>
+
+      <div class="fstrip left">
+        <div class="fcell"><span>${tr('hud.airspeed')}</span><b><i data-v="speed">0</i><small>km/h</small></b></div>
+        <div class="fcell" data-v="engineCell"><span>${tr('hud.engine')}</span><b><i data-v="rpm">0</i><small>${tr('hud.rpm')}</small></b></div>
       </div>
-      <div class="fstatus">
-        <span data-v="gear">${tr('hud.gear')}</span>
-        <span data-v="flaps">${tr('hud.flaps')} 0 %</span>
-        <span data-v="cam"></span>
+      <div class="fstrip right">
+        <div class="fcell"><span>${tr('hud.flaps')}</span><b><i data-v="flaps">0°</i></b></div>
+        <div class="fcell"><span>${tr('hud.trim')}</span><b><i data-v="trim">0 %</i></b></div>
+        <div class="fcell"><span>${tr('hud.altitude')}</span><b><i data-v="alt">0</i><small>m</small></b></div>
+        <div class="fcell"><span>${tr('hud.vs')}</span><b><i data-v="vs">0.0</i><small>m/s</small></b></div>
       </div>
-      <div class="near-place" data-v="place"></div>
+
       <div class="warning" data-v="warn" hidden></div>
       <div class="fmessage" data-v="msg" hidden></div>
       <div class="loading-dot" data-v="wait" hidden>${tr('flight.waiting')}</div>
@@ -110,15 +112,21 @@ export class FlightView {
         </div>
       </div>
 
-      <p class="hint">${tr('flight.help')}</p>
       <span class="attribution world-attribution">${ATTRIBUTION}</span>
     `;
     parent.appendChild(this.el);
 
-    this.q('[data-action="back"]').addEventListener('click', onBack);
-    this.q('[data-action="settings"]').addEventListener('click', () => onSettings?.());
-    this.q('[data-action="challenges"]').addEventListener('click', (e) => {
+    this.q('[data-action="menu"]').addEventListener('click', (e) => {
       (e.currentTarget as HTMLElement).blur();
+      this.toggleMenu();
+    });
+    this.q('[data-action="back"]').addEventListener('click', onBack);
+    this.q('[data-action="settings"]').addEventListener('click', () => {
+      this.toggleMenu(false);
+      onSettings?.();
+    });
+    this.q('[data-action="challenges"]').addEventListener('click', () => {
+      this.toggleMenu(false);
       this.pickChallenge();
     });
     game.onChallengeEvent = (e) => this.onChallengeEvent(e);
@@ -126,6 +134,7 @@ export class FlightView {
       b.addEventListener('click', () => {
         game.start(FLIGHT_PLACES[Number(b.dataset.place)]!.place);
         b.blur();
+        this.toggleMenu(false);
       }),
     );
     this.el.querySelectorAll<HTMLButtonElement>('[data-act]').forEach((b) => {
@@ -143,12 +152,12 @@ export class FlightView {
     const thr = this.q<HTMLInputElement>('.touch-throttle');
     thr.addEventListener('input', () => (game.controls.touch.throttle = Number(thr.value) / 100));
     this.setupStick();
-    this.instruments = new Instruments(this.el);
-    this.minimap = new Minimap(this.el);
+    this.minimap = new Minimap(this.q('.fmap'), true);
     game.onToggleMap = () => this.minimap.toggle();
-    new PlaceSearch(this.q('.topbar'), lang, (hit) =>
-      game.start({ kind: 'air', name: hit.name, lon: hit.lon, lat: hit.lat, h: 0, heading: 0 }),
-    );
+    new PlaceSearch(this.q('.fmenu-search'), lang, (hit) => {
+      this.toggleMenu(false);
+      game.start({ kind: 'air', name: hit.name, lon: hit.lon, lat: hit.lat, h: 0, heading: 0 });
+    });
 
     const loop = () => {
       this.raf = requestAnimationFrame(loop);
@@ -161,6 +170,14 @@ export class FlightView {
     cancelAnimationFrame(this.raf);
     this.game.onChallengeEvent = undefined;
     this.el.remove();
+  }
+
+  /** Menu top right: start places, search, challenges, settings, controls help. */
+  private toggleMenu(open?: boolean) {
+    const panel = this.q('.fmenu-panel');
+    const show = open ?? panel.hidden;
+    panel.hidden = !show;
+    this.q('[data-action="menu"]').setAttribute('aria-expanded', String(show));
   }
 
   /** Course list; the game pauses while it is open. */
@@ -326,40 +343,29 @@ export class FlightView {
   private refresh() {
     const g = this.game;
     const fm = g.fm;
-    // Attitude and heading every frame; map and place name a few times per second.
     const b = this.world.basisAt(fm.position);
     const heading = (Math.atan2(fm.forward.dot(b.east), fm.forward.dot(b.north)) * 180) / Math.PI;
-    this.instruments.update(heading, (fm.pitch * 180) / Math.PI, (fm.bank * 180) / Math.PI);
-    this.instruments.visible = !g.waitingForTerrain && g.rig.mode !== 'orbit';
+    const hdg = Math.round((heading + 360) % 360) % 360;
+    // Map a few times per second, numbers at ~20 Hz, reticles every frame.
     if (this.frame % 6 === 0) {
       const [lon, lat, alt] = this.world.toGeo(fm.position);
       const hag = g.heightAboveGround ?? alt;
       this.minimap.update(lon, lat, heading, hag, this.markers());
-      if (performance.now() > this.placeTimer) {
-        this.placeTimer = performance.now() + 1000;
-        const near = this.world.buildings?.nearestPlace(lon, lat);
-        this.set(
-          'place',
-          near ? (near.km < 1 ? near.name : `${this.tr('hud.near')} ${near.name}`) : '',
-        );
-      }
+      this.set('hdg', `${String(hdg).padStart(3, '0')}°`);
     }
-    const tr = (k: MessageKey) => t(this.lang, k);
-    // Numbers at ~20 Hz, reticles every frame.
     if (this.frame++ % 3 === 0) {
       const [, , alt] = this.world.toGeo(fm.position);
-      const hag = g.heightAboveGround;
       this.set('speed', String(Math.round(fm.speed * 3.6)));
+      // TR-1 turboprop: 30 % idle to 100 % at 2700 rpm.
+      const rpm = fm.crashed ? 0 : Math.round(((0.3 + 0.7 * fm.throttle) * 2700) / 10) * 10;
+      this.set('rpm', String(rpm));
+      this.q('[data-v="engineCell"]').classList.toggle('boost', fm.boosting);
+      this.set('flaps', `${Math.round(fm.flaps * 30)}°`);
+      const trimRange = fm.trim >= 0 ? TR1.trimMax : -TR1.trimMin;
+      this.set('trim', `${Math.round((fm.trim / trimRange) * 100)} %`);
       this.set('alt', String(Math.round(alt)));
-      this.set('agl', hag === undefined ? '–' : String(Math.max(0, Math.round(hag - 1.53))));
-      this.set('vs', fm.verticalSpeed.toFixed(1));
-      this.set('g', fm.gLoad.toFixed(1));
-      this.set('thr', String(Math.round(fm.throttle * 100)));
-      this.q('[data-v="throttle"]').style.transform = `scaleX(${fm.throttle})`;
-      this.q('[data-v="boost"]').style.transform = `scaleX(${fm.boostLeft / 5})`;
-      this.set('gear', `${tr('hud.gear')} ${fm.gearDown ? '▼' : '▲'}`);
-      this.set('flaps', `${tr('hud.flaps')} ${Math.round(fm.flaps * 100)} %`);
-      this.set('cam', `${tr('hud.camera')}: ${tr(`camera.${g.rig.mode}` as MessageKey)}`);
+      const vs = fm.verticalSpeed;
+      this.set('vs', `${vs > 0.05 ? '+' : ''}${vs.toFixed(1)}`);
 
       const warn =
         fm.crashed || g.waitingForTerrain ? '' : g.pullUp ? 'PULL UP' : fm.stalled ? 'STALL' : '';

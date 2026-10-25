@@ -29,9 +29,16 @@ export class Minimap {
   private readonly tiles = new Map<string, HTMLImageElement>();
   private large = false;
 
-  constructor(parent: HTMLElement) {
+  /**
+   * `headingUp`: the map turns with the aircraft (flight mode) and gets a compass ring;
+   * otherwise north is up and the arrow turns.
+   */
+  constructor(
+    parent: HTMLElement,
+    private readonly headingUp = false,
+  ) {
     this.el = document.createElement('div');
-    this.el.className = 'minimap';
+    this.el.className = headingUp ? 'minimap heading-up' : 'minimap';
     this.el.innerHTML = `<canvas></canvas><div class="mm-north">N</div><div class="mm-arrow"></div>`;
     parent.appendChild(this.el);
     this.canvas = this.el.querySelector('canvas')!;
@@ -86,10 +93,17 @@ export class Minimap {
     c.fillStyle = '#d9d6cc';
     c.fillRect(0, 0, size, size);
     const half = size / 2;
-    const x0 = Math.floor((px - half) / TILE);
-    const x1 = Math.floor((px + half) / TILE);
-    const y0 = Math.floor((py - half) / TILE);
-    const y1 = Math.floor((py + half) / TILE);
+    if (this.headingUp) {
+      c.translate(half, half);
+      c.rotate((-headingDeg * Math.PI) / 180);
+      c.translate(-half, -half);
+    }
+    // A turned map needs tiles out to the corners of the square.
+    const reach = this.headingUp ? half * Math.SQRT2 : half;
+    const x0 = Math.floor((px - reach) / TILE);
+    const x1 = Math.floor((px + reach) / TILE);
+    const y0 = Math.floor((py - reach) / TILE);
+    const y1 = Math.floor((py + reach) / TILE);
     for (let ty = y0; ty <= y1; ty++) {
       for (let tx = x0; tx <= x1; tx++) {
         const img = this.tile(z, tx, ty);
@@ -97,7 +111,53 @@ export class Minimap {
       }
     }
     if (markers.length) this.drawMarkers(markers, n, px - half, py - half);
-    this.el.style.setProperty('--heading', `${headingDeg}deg`);
+    if (this.headingUp) {
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      this.drawCompass(size, headingDeg);
+    }
+    this.el.style.setProperty('--heading', `${this.headingUp ? 0 : headingDeg}deg`);
+  }
+
+  /** Compass ring at the edge: ticks every 5°, N/E/S/W and every 30° numbered. */
+  private drawCompass(size: number, headingDeg: number) {
+    const c = this.ctx;
+    const half = size / 2;
+    const band = Math.max(14, size * 0.11);
+    c.save();
+    c.beginPath();
+    c.arc(half, half, half, 0, Math.PI * 2);
+    c.arc(half, half, half - band, 0, Math.PI * 2, true);
+    c.fillStyle = 'rgba(10, 16, 28, 0.55)';
+    c.fill();
+    c.translate(half, half);
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.font = `700 ${Math.round(band * 0.62)}px Rajdhani, system-ui, sans-serif`;
+    for (let d = 0; d < 360; d += 5) {
+      const a = ((d - headingDeg) * Math.PI) / 180;
+      const sin = Math.sin(a);
+      const cos = -Math.cos(a);
+      const major = d % 30 === 0;
+      if (major) {
+        const label = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' }[d] ?? String(d / 10);
+        const r = half - band / 2;
+        c.fillStyle = d === 0 ? '#ff6b5e' : '#ffffff';
+        c.save();
+        c.translate(sin * r, cos * r);
+        c.rotate(a);
+        c.fillText(label, 0, 0);
+        c.restore();
+      } else {
+        const r0 = half - (d % 10 === 0 ? band * 0.4 : band * 0.25);
+        c.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+        c.lineWidth = 1;
+        c.beginPath();
+        c.moveTo(sin * r0, cos * r0);
+        c.lineTo(sin * (half - 1), cos * (half - 1));
+        c.stroke();
+      }
+    }
+    c.restore();
   }
 
   private drawMarkers(markers: MapMarker[], n: number, ox: number, oy: number) {

@@ -41,9 +41,12 @@ Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
 - **Ton:** komplett synthetisch mit WebAudio – Turboprop, Wind, Boost, PULL-UP/STALL-Warnungen,
   Aufsetzen und Absturz, Doppler in den Aussenkameras (O = Ton aus).
 
-- **HUD:** Kompassband, künstlicher Horizont mit Nickleiter, nächster Ortsname, Minimap aus der
-  Landeskarte (M = gross), Suche nach jedem Ort der Schweiz (geo.admin.ch SearchServer).
-  ![Lauterbrunnen mit Chalets und Wald](docs/screenshots/lauterbrunnen-forest.png)
+- **HUD** im Stil des Microsoft Flight Simulator: oben links die Landeskarte in Flugrichtung mit
+  Kompassring und Kurs (M = gross), unten links Fahrt und Motordrehzahl, unten rechts Klappen,
+  Trimm, Höhe und Steigrate, oben rechts das Menü mit Startorten, Ortssuche (geo.admin.ch
+  SearchServer), Challenges, Einstellungen und Tastenbelegung.
+  ![HUD über Lauterbrunnen](docs/screenshots/hud.png)
+- **Trimm:** Knüppel loslassen hält die aktuelle Nicklage; Bild↑/Bild↓ verstellt sie freihändig.
 
 - **Regionstypische Gebäude und Bäume**, in Blender modelliert und auf die swisstopo-Grundrisse
   und Waldflächen gesetzt: Berner Bauernhaus, Chalet, Walliser Holzhaus, Engadiner Haus, Tessiner
@@ -75,20 +78,21 @@ Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
 
 ### Steuerung (Fliegen)
 
-| Aktion                | Tastatur                         | Gamepad                     |
-| --------------------- | -------------------------------- | --------------------------- |
-| Nase runter / rauf    | W / S oder ↑ / ↓                 | linker Stick vor / zurück   |
-| Rollen                | A / D oder ← / →                 | linker Stick links / rechts |
-| Gieren                | Q / E                            | LB / RB                     |
-| Schub + / −           | Shift / Ctrl (oder R / F)        | RT / LT                     |
-| Boost                 | Leertaste                        | A                           |
-| Fahrwerk / Klappen    | G / V                            | X / Steuerkreuz             |
-| Bremse                | B                                | B                           |
-| Kamera                | C                                | Y                           |
-| Maus-Steuerung an/aus | N (Klick ins Bild aktiviert sie) | –                           |
-| Karte gross / klein   | M                                | –                           |
-| Ton an / aus          | O                                | –                           |
-| Pause / Neustart      | P / Backspace                    | Start / Back                |
+| Aktion                   | Tastatur                           | Gamepad                     |
+| ------------------------ | ---------------------------------- | --------------------------- |
+| Nase runter / rauf       | W / S oder ↑ / ↓                   | linker Stick vor / zurück   |
+| Rollen                   | A / D oder ← / →                   | linker Stick links / rechts |
+| Gieren                   | Q / E                              | LB / RB                     |
+| Schub + / −              | Shift / Ctrl (oder R / F)          | RT / LT                     |
+| Boost                    | Leertaste                          | A                           |
+| Fahrwerk / Klappen       | G / V                              | X / Steuerkreuz             |
+| Trimm Nase runter / rauf | Bild↑ / Bild↓ (Ziffernblock 7 / 1) | –                           |
+| Bremse                   | B                                  | B                           |
+| Kamera                   | C                                  | Y                           |
+| Maus-Steuerung an/aus    | N (Klick ins Bild aktiviert sie)   | –                           |
+| Karte gross / klein      | M                                  | –                           |
+| Ton an / aus             | O                                  | –                           |
+| Pause / Neustart         | P / Backspace                      | Start / Back                |
 
 ![Tiefflug im Lauterbrunnental](docs/screenshots/lauterbrunnen.png)
 

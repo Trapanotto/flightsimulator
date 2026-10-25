@@ -39,7 +39,7 @@
   "camera.orbit": "Orbit",
   "flight.waiting": "Lade Gelände am Startort …",
   "flight.paused": "Pause – P zum Fortsetzen",
-  "flight.help": "Klick: Maus-Steuerung (N an/aus) · W/S: Nase runter/rauf · A/D: rollen · Q/E: gieren · Shift/Ctrl: Schub · Leertaste: Boost · G: Fahrwerk · V: Klappen · B: Bremse · C: Kamera · M: Karte · O: Ton · P: Pause · ⌫: Neustart",
+  "flight.help": "Klick: Maus-Steuerung (N an/aus) · W/S: Nase runter/rauf · A/D: rollen · Q/E: gieren · Shift/Ctrl: Schub · Leertaste: Boost · Bild↑/Bild↓: Trimm · G: Fahrwerk · V: Klappen · B: Bremse · C: Kamera · M: Karte · O: Ton · P: Pause · ⌫: Neustart",
   "gearDown": "Fahrwerk ausgefahren",
   "gearUp": "Fahrwerk eingefahren",
   "landing.butter": "Butterweiche Landung",
@@ -96,5 +96,13 @@
   "challenge.help": "Flieg der Reihe nach durch die Ringe. Der orange Ring ist der nächste, der grüne das Ziel. Nach einem Absturz geht es beim letzten Ring weiter, die Uhr läuft weiter. ⌫ startet neu.",
   "medal.gold": "Gold",
   "medal.silver": "Silber",
-  "medal.bronze": "Bronze"
+  "medal.bronze": "Bronze",
+  "flight.mainMenu": "Hauptmenü",
+  "flight.controls": "Steuerung",
+  "hud.airspeed": "Fahrt",
+  "hud.engine": "Motor",
+  "hud.rpm": "U/min",
+  "hud.trim": "Trimm",
+  "hud.altitude": "Höhe",
+  "hud.vs": "Steigrate"
 }
