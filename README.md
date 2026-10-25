@@ -25,7 +25,13 @@ Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
 
 ## Was schon geht
 
-![Goldene Stunde über Lauterbrunnen](docs/screenshots/golden-hour.png)
+![Lauterbrunnen mit Chalets und Wald](docs/screenshots/lauterbrunnen-forest.png)
+
+- **Regionstypische Gebäude und Bäume**, in Blender modelliert und auf die swisstopo-Grundrisse
+  und Waldflächen gesetzt: Berner Bauernhaus, Chalet, Walliser Holzhaus, Engadiner Haus, Tessiner
+  Rustico und Wohnhaus, Mehrfamilienhaus, Block, Halle, Kirchen; Fichte, Tanne, Lärche, Arve, Buche,
+  Kastanie nach Höhe und Region ([Konzept](docs/KONZEPT-PHASE6.md)).
+  ![Goldene Stunde über Lauterbrunnen](docs/screenshots/golden-hour.png)
 
 - **Grafik:** Sonnenstand nach Datum und Uhrzeit, Luftperspektive, Wolkendecke mit Wolkenschatten,
   Schnee in der Höhe, Flugzeugschatten, Kondensstreifen, Bloom, SMAA, Sonnen-Glanzlicht;

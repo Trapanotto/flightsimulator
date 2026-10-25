@@ -24,6 +24,8 @@ export interface TileBuildings {
   footprints: Footprint[];
   churches: Array<{ lon: number; lat: number }>;
   canton: string | null;
+  /** Tree positions as lon, lat pairs. */
+  trees: Float64Array;
 }
 
 /**
@@ -257,4 +259,56 @@ export function tintOf(
       : PALETTES[region];
   const h = Math.abs(Math.sin(lon * 12_989.8 + lat * 78_233.1) * 43_758.5453) % 1;
   return palette[Math.floor(h * palette.length) % palette.length]!;
+}
+
+// ---------------------------------------------------------------------------
+// Trees
+// ---------------------------------------------------------------------------
+
+export const TREE_TYPES = ['spruce', 'fir', 'larch', 'arve', 'beech', 'chestnut'] as const;
+export type TreeType = (typeof TREE_TYPES)[number];
+
+const TREE_HEIGHT: Record<TreeType, [number, number]> = {
+  spruce: [18, 32],
+  fir: [18, 30],
+  larch: [15, 28],
+  arve: [8, 15],
+  beech: [14, 26],
+  chestnut: [10, 18],
+};
+
+/** Species by elevation and region; deterministic per position. Null = no tree (too high). */
+export function treeOf(
+  region: Region,
+  elevation: number,
+  lon: number,
+  lat: number,
+): { type: TreeType; height: number } | null {
+  const h = Math.abs(Math.sin(lon * 91_234.7 + lat * 47_123.9) * 43_758.5453) % 1;
+  const h2 = Math.abs(Math.sin(lon * 17_771.3 + lat * 61_337.1) * 24_634.6345) % 1;
+  if (elevation > 2350) return null;
+  let type: TreeType;
+  const alpine = region === 'engadin' || region === 'valais';
+  if (region === 'ticino' && elevation < 1000)
+    type = h < 0.55 ? 'chestnut' : h < 0.85 ? 'beech' : 'spruce';
+  else if (elevation < 650) type = h < 0.45 ? 'beech' : h < 0.85 ? 'spruce' : 'fir';
+  else if (elevation < 1350)
+    type = h < 0.65 ? 'spruce' : h < 0.85 ? 'fir' : alpine ? 'larch' : 'beech';
+  else if (elevation < 1900)
+    type = alpine
+      ? h < 0.5
+        ? 'larch'
+        : h < 0.75
+          ? 'arve'
+          : 'spruce'
+      : h < 0.6
+        ? 'spruce'
+        : h < 0.85
+          ? 'larch'
+          : 'arve';
+  else type = h < 0.55 ? 'larch' : 'arve';
+  const [lo, hi] = TREE_HEIGHT[type];
+  // Smaller towards the tree line.
+  const shrink = elevation > 1800 ? Math.max(0.45, 1 - (elevation - 1800) / 1000) : 1;
+  return { type, height: (lo + (hi - lo) * h2) * shrink };
 }

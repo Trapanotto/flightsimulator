@@ -18,7 +18,7 @@
     "assets:optimize": "node tools/optimize-aircraft.mjs",
     "test:flight": "node tools/flight-test.mjs",
     "benchmark": "node tools/benchmark.mjs",
-    "assets:buildings": "blender -b --factory-startup -P tools/blender/build_buildings.py && node tools/optimize-aircraft.mjs build/buildings_raw.glb public/assets/buildings/buildings.glb"
+    "assets:buildings": "blender -b --factory-startup -P tools/blender/build_buildings.py && node tools/optimize-aircraft.mjs build/buildings_raw.glb public/assets/buildings/buildings.glb && blender -b --factory-startup -P tools/blender/build_trees.py && node tools/optimize-aircraft.mjs build/trees_raw.glb public/assets/buildings/trees.glb"
   },
   "dependencies": {
     "@mapbox/vector-tile": "^3.0.0",

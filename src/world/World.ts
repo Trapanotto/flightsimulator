@@ -235,6 +235,8 @@ export class World {
     this.terrain.setReceiveShadow(q2.shadowMap > 0);
     this.buildings = new BuildingLayer(this, this.atmosphere.uniforms);
     this.buildings.radius = q2.buildingRadius;
+    this.buildings.treeRadius = q2.treeRadius;
+    this.buildings.treeSpacing = q2.treeSpacing;
     this.scene.add(this.buildings.group);
     this.terrain.rebase(this.shift);
     this.scene.add(this.terrain.group);
@@ -277,7 +279,11 @@ export class World {
     this.post.configure(quality);
     this.flare.enabled = quality.flare;
     this.terrain?.applyQuality(quality);
-    if (this.buildings) this.buildings.radius = quality.buildingRadius;
+    if (this.buildings) {
+      this.buildings.radius = quality.buildingRadius;
+      this.buildings.treeRadius = quality.treeRadius;
+      this.buildings.treeSpacing = quality.treeSpacing;
+    }
     this.game?.applyQuality(quality);
     this.resize();
   }

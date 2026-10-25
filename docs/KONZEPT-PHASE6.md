@@ -12,28 +12,28 @@ Emmentaler Weiler oder ein Tessiner Nucleo.
 
 `https://vectortiles.geo.admin.ch/tiles/ch.swisstopo.base.vt/v1.0.0/{z}/{x}/{y}.pbf` (Web Mercator, z14)
 
-| Ebene | Nutzen |
-|---|---|
-| `building` | Grundriss-Polygon + `render_height` → Grösse, Ausrichtung, Höhe |
-| `landcover` (`wood`/`forest`) | Waldflächen → Bäume streuen |
-| `landcover_pt` (`tree`) | Einzelbäume (Obstgärten, Alleen) |
-| `poi` (`place_of_worship`) | Kirchen |
-| `landuse` | Wohnen/Gewerbe/Industrie → Haustyp |
+| Ebene                         | Nutzen                                                          |
+| ----------------------------- | --------------------------------------------------------------- |
+| `building`                    | Grundriss-Polygon + `render_height` → Grösse, Ausrichtung, Höhe |
+| `landcover` (`wood`/`forest`) | Waldflächen → Bäume streuen                                     |
+| `landcover_pt` (`tree`)       | Einzelbäume (Obstgärten, Alleen)                                |
+| `poi` (`place_of_worship`)    | Kirchen                                                         |
+| `landuse`                     | Wohnen/Gewerbe/Industrie → Haustyp                              |
 
 ## Regionen und Gebäudetypen (Blender, prozedural wie das Flugzeug)
 
-| Typ | Region / Regel | Merkmale |
-|---|---|---|
-| Berner Bauernhaus | Mittelland & Voralpen, ländlich, grosse Grundfläche | weisser Sockel, Holz-Obergeschoss, riesiges Walmdach mit Ründe |
-| Chalet | Berner Oberland, Freiburger/Waadtländer Alpen, Zentralschweiz > 700 m | dunkles Holz auf Steinsockel, flaches Satteldach, Balkone |
-| Walliser Stadel / Holzhaus | Wallis | dunkles Lärchenholz, Steinsockel, Steinplattendach |
-| Engadiner Haus | Graubünden (Engadin, Münstertal) | dicke weisse Mauern, kleine Trichterfenster, Sgraffito, flaches Dach |
-| Tessiner Rustico | Tessin, Misox, Bergell | Bruchsteinmauern, Gneisplatten-Dach |
-| Tessiner / südliches Wohnhaus | Tessin, grössere Grundfläche | Pastellputz, flaches Ziegeldach |
-| Mehrfamilienhaus / Altstadt | städtisch (Höhe > 11 m oder `residential` dicht) | Putz, Fensterreihen, Ziegel- oder Flachdach |
-| Halle / Gewerbe | grosse Grundfläche, niedrig | Flachdach, Blech |
-| Kirche | `place_of_worship` | Schiff + Turm, Region bestimmt Turmform (Spitzhelm / Zwiebel / Campanile) |
-| Schuppen / Garage | < 40 m² | einfaches Pultdach |
+| Typ                           | Region / Regel                                                        | Merkmale                                                                  |
+| ----------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Berner Bauernhaus             | Mittelland & Voralpen, ländlich, grosse Grundfläche                   | weisser Sockel, Holz-Obergeschoss, riesiges Walmdach mit Ründe            |
+| Chalet                        | Berner Oberland, Freiburger/Waadtländer Alpen, Zentralschweiz > 700 m | dunkles Holz auf Steinsockel, flaches Satteldach, Balkone                 |
+| Walliser Stadel / Holzhaus    | Wallis                                                                | dunkles Lärchenholz, Steinsockel, Steinplattendach                        |
+| Engadiner Haus                | Graubünden (Engadin, Münstertal)                                      | dicke weisse Mauern, kleine Trichterfenster, Sgraffito, flaches Dach      |
+| Tessiner Rustico              | Tessin, Misox, Bergell                                                | Bruchsteinmauern, Gneisplatten-Dach                                       |
+| Tessiner / südliches Wohnhaus | Tessin, grössere Grundfläche                                          | Pastellputz, flaches Ziegeldach                                           |
+| Mehrfamilienhaus / Altstadt   | städtisch (Höhe > 11 m oder `residential` dicht)                      | Putz, Fensterreihen, Ziegel- oder Flachdach                               |
+| Halle / Gewerbe               | grosse Grundfläche, niedrig                                           | Flachdach, Blech                                                          |
+| Kirche                        | `place_of_worship`                                                    | Schiff + Turm, Region bestimmt Turmform (Spitzhelm / Zwiebel / Campanile) |
+| Schuppen / Garage             | < 40 m²                                                               | einfaches Pultdach                                                        |
 
 Jeder Typ in Blender auf Normgrösse modelliert, ein gemeinsamer Textur-Atlas (Fassaden, Dächer,
 Holz, Stein, Fenster) per numpy gebacken, 150–900 Dreiecke pro Haus. Im Spiel: InstancedMesh pro

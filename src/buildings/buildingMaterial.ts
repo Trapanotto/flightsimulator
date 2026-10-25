@@ -131,3 +131,44 @@ ${ATLAS_FN}`,
   };
   return mat;
 }
+
+/** Vertex-coloured Lambert material for the instanced trees, with the same aerial haze. */
+export function createTreeMaterial(atmosphere?: AtmosphereUniforms) {
+  const mat = new MeshLambertMaterial({ vertexColors: true });
+  mat.fog = false;
+  mat.customProgramCacheKey = () => `trees-${atmosphere ? 1 : 0}`;
+  mat.onBeforeCompile = (shader) => {
+    if (!atmosphere) return;
+    Object.assign(shader.uniforms, atmosphere);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWorld;')
+      .replace(
+        '#include <fog_vertex>',
+        '#include <fog_vertex>\nvWorld = (modelMatrix * instanceMatrix * vec4(position, 1.0)).xyz;',
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vWorld;
+        uniform vec3 uSunDir;
+        uniform vec3 uHazeColor;
+        uniform vec3 uHazeSunColor;
+        uniform float uHazeDensity;
+        uniform float uHazeHeight;
+        uniform float uCameraElevation;`,
+      )
+      .replace(
+        '#include <fog_fragment>',
+        `{
+          vec3 toFrag = vWorld - cameraPosition;
+          float dist = length(toFrag);
+          float density = uHazeDensity * exp(-max(uCameraElevation - 400.0, 0.0) / uHazeHeight);
+          float fogAmt = 1.0 - exp(-dist * density);
+          float sunAmt = pow(max(dot(toFrag / max(dist, 1.0), uSunDir), 0.0), 14.0) * 0.8;
+          gl_FragColor.rgb = mix(gl_FragColor.rgb, mix(uHazeColor, uHazeSunColor, sunAmt), fogAmt);
+        }`,
+      );
+  };
+  return mat;
+}

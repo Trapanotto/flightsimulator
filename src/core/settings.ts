@@ -22,6 +22,9 @@ export interface Quality {
   trails: boolean;
   /** Regional houses around the camera, metres (0 = off). */
   buildingRadius: number;
+  /** Trees around the camera (metres, 0 = off) and their spacing in forests. */
+  treeRadius: number;
+  treeSpacing: number;
 }
 
 export const PRESETS: Record<QualityLevel, Quality> = {
@@ -40,6 +43,8 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     flare: false,
     trails: false,
     buildingRadius: 1500,
+    treeRadius: 0,
+    treeSpacing: 12,
   },
   medium: {
     maxRenderScale: 1,
@@ -56,6 +61,8 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     flare: true,
     trails: true,
     buildingRadius: 3000,
+    treeRadius: 700,
+    treeSpacing: 11,
   },
   high: {
     maxRenderScale: 1,
@@ -72,6 +79,8 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     flare: true,
     trails: true,
     buildingRadius: 4500,
+    treeRadius: 1100,
+    treeSpacing: 9,
   },
   ultra: {
     maxRenderScale: 1,
@@ -88,6 +97,8 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     flare: true,
     trails: true,
     buildingRadius: 6000,
+    treeRadius: 1600,
+    treeSpacing: 8,
   },
 };
 
@@ -164,6 +175,7 @@ export function resolveQuality(s: Settings): { level: QualityLevel; quality: Qua
   if (fx.includes('nocloudshadow')) quality.cloudShadows = false;
   if (fx.includes('fixedscale')) quality.maxRenderScale = 1;
   if (fx.includes('nobuildings')) quality.buildingRadius = 0;
+  if (fx.includes('notrees')) quality.treeRadius = 0;
   return { level, quality };
 }
 

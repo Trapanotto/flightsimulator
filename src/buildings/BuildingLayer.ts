@@ -1,15 +1,30 @@
-import { Color, Group, type InstancedMesh, Quaternion, Vector3 } from 'three';
+import {
+  type BufferGeometry,
+  Color,
+  Group,
+  InstancedMesh,
+  Matrix4,
+  Mesh,
+  Quaternion,
+  Vector3,
+} from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { createTreeMaterial } from './buildingMaterial';
 import { WorkerPool } from '../core/WorkerPool';
 import type { AtmosphereUniforms } from '../render/Atmosphere';
 import type { World } from '../world/World';
 import { BuildingSet, type ChurchInstance, type HouseInstance } from './BuildingSet';
 import {
+  TREE_TYPES,
   type TileBuildings,
+  type TreeType,
   VECTOR_ZOOM,
   churchTypeOf,
   houseTypeOf,
   regionOf,
   tintOf,
+  treeOf,
   wallHeight,
 } from './footprints';
 import type { BuildingJob } from '../workers/buildings.worker';
@@ -24,10 +39,17 @@ interface Tile {
   churches?: Array<ChurchInstance & { base: Vector3 }>;
   loading: boolean;
   failed: boolean;
+  /** Spacing the tile's trees were generated with. */
+  treeSpacing: number;
 }
 
 const Y = new Vector3(0, 1, 0);
 const DEG = Math.PI / 180;
+const TREES_URL = `${import.meta.env.BASE_URL}assets/buildings/trees.glb`;
+const m4 = new Matrix4();
+const tq = new Quaternion();
+const tp = new Vector3();
+const ts = new Vector3();
 
 /** Web Mercator tile containing lon/lat. */
 function tileOf(lon: number, lat: number, z: number) {
@@ -53,6 +75,14 @@ export class BuildingLayer {
   readonly group = new Group();
   /** Radius around the camera in metres (quality preset); 0 = off. */
   radius = 3000;
+  /** Trees: radius around the camera and spacing in forests (metres); 0 = off. */
+  treeRadius = 700;
+  treeSpacing = 11;
+  private treeGeos?: Map<TreeType, BufferGeometry>;
+  private readonly treeMaterial;
+  private treeMeshes: InstancedMesh[] = [];
+  private readonly treeCentre = new Vector3(Infinity, 0, 0);
+  private treesDirty = false;
   private set?: BuildingSet;
   private readonly tiles = new Map<string, Tile>();
   private readonly pool: WorkerPool<BuildingJob, TileBuildings>;
@@ -72,6 +102,29 @@ export class BuildingLayer {
       1,
       2,
     );
+    this.treeMaterial = createTreeMaterial(atmosphere);
+    void new GLTFLoader()
+      .setMeshoptDecoder(MeshoptDecoder)
+      .loadAsync(TREES_URL)
+      .then(
+        (gltf) => {
+          const geos = new Map<TreeType, BufferGeometry>();
+          gltf.scene.updateMatrixWorld(true);
+          gltf.scene.traverse((o) => {
+            if (!(o instanceof Mesh)) return;
+            const name = (o.name.replace(/_mesh$/, '') || o.parent?.name || '').replace(
+              'Tree_',
+              '',
+            );
+            const g = (o.geometry as BufferGeometry).clone();
+            g.applyMatrix4(o.matrixWorld);
+            if ((TREE_TYPES as readonly string[]).includes(name)) geos.set(name as TreeType, g);
+          });
+          this.treeGeos = geos;
+          this.treesDirty = true;
+        },
+        (err) => console.error('trees', err),
+      );
     void BuildingSet.load(atmosphere).then(
       (s) => {
         this.set = s;
@@ -84,7 +137,13 @@ export class BuildingLayer {
   get stats() {
     let houses = 0;
     for (const t of this.tiles.values()) houses += t.houses?.length ?? 0;
-    return { tiles: this.tiles.size, houses, draws: this.meshes.length };
+    const trees = this.treeMeshes.reduce((n, m) => n + m.count, 0);
+    return {
+      tiles: this.tiles.size,
+      houses,
+      trees,
+      draws: this.meshes.length + this.treeMeshes.length,
+    };
   }
 
   /** Floating origin moved. */
@@ -98,7 +157,17 @@ export class BuildingLayer {
       this.selectTiles();
       this.placeReadyTiles();
     }
-    if (this.dirty && this.set) this.rebuild();
+    // Houses and trees share the group's floating-origin offset, so they are rebuilt together:
+    // after tile changes, or when the camera moved ~150 m (trees follow the camera).
+    const cam = this.world.camera.position.clone().add(this.world.originShift);
+    const treesDue = !!this.treeGeos && (this.treesDirty || cam.distanceTo(this.treeCentre) > 150);
+    if ((this.dirty && this.set) || treesDue) {
+      this.dirty = false;
+      this.treesDirty = false;
+      this.treeCentre.copy(cam);
+      this.rebuild();
+      this.rebuildTrees();
+    }
   }
 
   private selectTiles() {
@@ -147,18 +216,31 @@ export class BuildingLayer {
     candidates.sort((a, b) => a.d - b.d);
     for (const cnd of candidates) {
       if (this.tiles.has(cnd.key)) continue;
-      const t: Tile = { key: cnd.key, x: cnd.x, y: cnd.y, loading: true, failed: false };
+      const t: Tile = {
+        key: cnd.key,
+        x: cnd.x,
+        y: cnd.y,
+        loading: true,
+        failed: false,
+        treeSpacing: this.treeSpacing,
+      };
       this.tiles.set(cnd.key, t);
-      this.pool.submit({ z, x: cnd.x, y: cnd.y }, -cnd.d).promise.then(
-        (data) => {
-          t.data = data;
-          t.loading = false;
-        },
-        () => {
-          t.loading = false;
-          t.failed = true;
-        },
-      );
+      this.pool
+        .submit(
+          { z, x: cnd.x, y: cnd.y, treeSpacing: this.treeRadius > 0 ? this.treeSpacing : 0 },
+          -cnd.d,
+        )
+        .promise.then(
+          (data) => {
+            t.data = data;
+            t.loading = false;
+            this.treesDirty = true;
+          },
+          () => {
+            t.loading = false;
+            t.failed = true;
+          },
+        );
     }
   }
 
@@ -260,7 +342,6 @@ export class BuildingLayer {
   }
 
   private rebuild() {
-    this.dirty = false;
     for (const m of this.meshes) {
       this.group.remove(m);
       m.geometry.dispose();
@@ -292,6 +373,81 @@ export class BuildingLayer {
     for (const m of this.meshes) {
       m.frustumCulled = false;
       this.group.add(m);
+    }
+  }
+
+  /** Instanced trees within treeRadius of the camera, one mesh per species. */
+  private rebuildTrees() {
+    for (const m of this.treeMeshes) {
+      this.group.remove(m);
+      m.dispose();
+    }
+    this.treeMeshes = [];
+    if (this.treeRadius <= 0 || !this.treeGeos) return;
+    const w = this.world;
+    const needZoom = Math.min(14, w.quality.maxZoom);
+    const [clon, clat] = w.toGeo(w.camera.position);
+    const kx = 111_320 * Math.cos(clat * DEG);
+    const ky = 110_540;
+    const r2 = this.treeRadius * this.treeRadius;
+    const lists = new Map<TreeType, number[]>();
+    for (const t of this.tiles.values()) {
+      const d = t.data;
+      if (!d || !d.trees.length) continue;
+      const cc = tileCentre(t.x, t.y, VECTOR_ZOOM);
+      if (w.terrainDetailAt(cc.lon, cc.lat) < needZoom) continue;
+      const centre = w.fromGeo(cc.lon, cc.lat, 0);
+      const up = w.upAt(centre, new Vector3());
+      const qUp = new Quaternion().setFromUnitVectors(Y, up);
+      for (let i = 0; i < d.trees.length; i += 2) {
+        const lon = d.trees[i]!;
+        const lat = d.trees[i + 1]!;
+        const dx = (lon - clon) * kx;
+        const dy = (lat - clat) * ky;
+        if (dx * dx + dy * dy > r2) continue;
+        const g = w.groundAt(lon, lat);
+        if (g === undefined) continue;
+        const tree = treeOf(regionOf(d.canton, lon, lat, g), g, lon, lat);
+        if (!tree) continue;
+        const pos = w.fromGeo(lon, lat, g - 0.3);
+        const list = lists.get(tree.type) ?? [];
+        // x, y, z, height, yaw, qUp (x, y, z, w)
+        list.push(
+          pos.x,
+          pos.y,
+          pos.z,
+          tree.height,
+          (lon * 1e5) % 6.283,
+          qUp.x,
+          qUp.y,
+          qUp.z,
+          qUp.w,
+        );
+        lists.set(tree.type, list);
+      }
+    }
+    // Positions are relative to the current origin (group offset was reset by rebuild()).
+    for (const [type, list] of lists) {
+      const n = list.length / 9;
+      const mesh = new InstancedMesh(this.treeGeos.get(type)!, this.treeMaterial, n);
+      for (let i = 0; i < n; i++) {
+        const o = i * 9;
+        tq.set(list[o + 5]!, list[o + 6]!, list[o + 7]!, list[o + 8]!);
+        tq.multiply(new Quaternion().setFromAxisAngle(Y, list[o + 4]!));
+        const hgt = list[o + 3]!;
+        mesh.setMatrixAt(
+          i,
+          m4.compose(
+            tp.set(list[o]!, list[o + 1]!, list[o + 2]!),
+            tq,
+            ts.set(hgt * 0.95, hgt, hgt * 0.95),
+          ),
+        );
+      }
+      mesh.frustumCulled = false;
+      mesh.name = `trees_${type}`;
+      this.treeMeshes.push(mesh);
+      this.group.add(mesh);
     }
   }
 

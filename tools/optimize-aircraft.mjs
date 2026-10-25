@@ -1,6 +1,6 @@
 // Optimises the Blender export for the web: dedupe, prune, meshopt geometry compression.
 // Usage: node tools/optimize-aircraft.mjs [in=build/tr1_raw.glb] [out=public/assets/aircraft/tr1.glb]
-// Also used for build/buildings_raw.glb -> public/assets/buildings/buildings.glb.
+// Also used for build/buildings_raw.glb and build/trees_raw.glb (public/assets/buildings/).
 import { statSync } from 'node:fs';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
