@@ -254,6 +254,33 @@ export class FlightAudio {
     speechSynthesis.speak(u);
   }
 
+  /** Challenge sounds: a bright ding per ring, a rising arpeggio at the finish, a low buzz on a miss. */
+  chime(kind: 'gate' | 'last' | 'finish' | 'miss') {
+    const ctx = this.ctx;
+    if (!ctx || !this.master) return;
+    const t = ctx.currentTime;
+    const notes: Record<typeof kind, number[]> = {
+      gate: [1318.5, 1975.5],
+      last: [1318.5, 1760, 2637],
+      finish: [784, 988, 1175, 1568],
+      miss: [220, 196],
+    };
+    notes[kind].forEach((f, i) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = kind === 'miss' ? 'square' : 'sine';
+      const at = t + i * (kind === 'finish' ? 0.11 : 0.07);
+      const len = kind === 'miss' ? 0.18 : 0.45;
+      o.frequency.setValueAtTime(f, at);
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(kind === 'miss' ? 0.05 : 0.12, at + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + len);
+      o.connect(g).connect(this.master!);
+      o.start(at);
+      o.stop(at + len + 0.05);
+    });
+  }
+
   /** Short noise burst: tyre chirp + thump on touchdown, long rumble on a crash. */
   impact(kind: 'touchdown' | 'crash', strength = 1) {
     const ctx = this.ctx;

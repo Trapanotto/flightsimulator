@@ -7,6 +7,7 @@ import type { Hangar } from './hangar/Hangar';
 import type { HangarView } from './ui/HangarView';
 import type { FlightGame } from './game/FlightGame';
 import type { FlightView } from './ui/FlightView';
+import { type Course, courseById } from './game/challenges';
 
 const lang = detectLang();
 document.documentElement.lang = lang;
@@ -77,7 +78,7 @@ async function ensureWorld() {
   return world;
 }
 
-async function openFlight(currentLang: Lang) {
+async function openFlight(currentLang: Lang, course?: Course) {
   ui.hidden = true;
   worldCanvas.hidden = false;
   const [{ FlightGame }, { FlightView, FLIGHT_PLACES }] = await Promise.all([
@@ -100,7 +101,8 @@ async function openFlight(currentLang: Lang) {
     () => void showSettings(currentLang),
   );
   w.start();
-  game.start(FLIGHT_PLACES[0]!.place);
+  if (course) game.startChallenge(course);
+  else game.start(FLIGHT_PLACES[0]!.place);
   game.load().catch((err) => console.error(err));
 }
 
@@ -157,7 +159,11 @@ if (!document.createElement('canvas').getContext('webgl2')) {
     explore: (l) => void openWorld(l),
     hangar: (l) => void openHangar(l),
     settings: (l) => void showSettings(l),
+    challenge: (l, c) => void openFlight(l, c),
   });
   if (location.hash === '#hangar' || location.hash === '#buildings') void openHangar(lang);
   if (location.hash === '#fly') void openFlight(lang);
+  // #challenge=lauterbrunnen starts a course directly (tests, links).
+  const course = courseById(location.hash.match(/^#challenge=([\w-]+)/)?.[1] ?? '');
+  if (course) void openFlight(lang, course);
 }

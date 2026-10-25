@@ -7,23 +7,31 @@ Three.js · Geodaten von [geo.admin.ch](https://docs.geo.admin.ch/) (swisstopo) 
 
 ## Stand
 
-| Phase | Inhalt                                                | Status      |
-| ----- | ----------------------------------------------------- | ----------- |
-| 0     | Fundament: Projekt, CI, GitHub Pages, Startbildschirm | ✅          |
-| 1     | Geo-Grundlagen & erstes Terrain                       | ✅          |
-| 2     | Streaming-Terrain (LOD, Floating Origin)              | ✅          |
-| 3     | Flugzeug aus Blender                                  | ✅          |
-| 4     | Flugmodell, Steuerung, Kameras                        | ✅          |
-| 5     | Grafik-Politur                                        | ✅          |
-| 6     | Gebäude, HUD & UI                                     | ✅          |
-| 7     | Gameplay & Audio                                      | 🔊 Audio ✅ |
-| 8     | Release 1.0                                           | ⏳          |
+| Phase | Inhalt                                                | Status                  |
+| ----- | ----------------------------------------------------- | ----------------------- |
+| 0     | Fundament: Projekt, CI, GitHub Pages, Startbildschirm | ✅                      |
+| 1     | Geo-Grundlagen & erstes Terrain                       | ✅                      |
+| 2     | Streaming-Terrain (LOD, Floating Origin)              | ✅                      |
+| 3     | Flugzeug aus Blender                                  | ✅                      |
+| 4     | Flugmodell, Steuerung, Kameras                        | ✅                      |
+| 5     | Grafik-Politur                                        | ✅                      |
+| 6     | Gebäude, HUD & UI                                     | ✅                      |
+| 7     | Gameplay & Audio                                      | 🏁 Challenges, Audio ✅ |
+| 8     | Release 1.0                                           | ⏳                      |
 
 Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
 
 ![Startbildschirm](public/assets/ui/hero.jpg)
 
 ## Was schon geht
+
+- **Ring-Challenges:** fünf Strecken mit Zeitmessung, Medaillen (Gold/Silber/Bronze) und Bestzeiten
+  im Browser – Lauterbrunnen Canyon Run, Matterhorn-Umrundung, Aletsch Gletscher-Express,
+  Seen-Tour Zentralschweiz und Landeanflug Samedan (endet mit Landung auf Piste 03).
+  Die Ringe sind gegen das swisstopo-Höhenmodell geplant: jeder liegt 90–150 m über Grund, und die
+  Linie zwischen zwei Ringen ist frei. Nach einem Absturz geht es beim letzten Ring weiter.
+  Direktstart per Link, z. B. `#challenge=aletsch`.
+  ![Aletschgletscher](docs/screenshots/challenge-aletsch.png)
 
 - **Echte Wasserflächen:** Seen und Flüsse aus den swisstopo-Vektorkacheln (Gewässer aus swissTLM3D)
   werden als Maske in die Luftbild-Kacheln gezeichnet; der Shader macht daraus Wasser mit Wellen,

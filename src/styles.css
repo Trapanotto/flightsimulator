@@ -1054,3 +1054,238 @@ body {
 .place-search small {
   color: var(--ink-dim);
 }
+
+/* ---- Ring challenges ---- */
+
+.medal {
+  display: inline-block;
+  width: 0.95em;
+  height: 0.95em;
+  border-radius: 50%;
+  vertical-align: -0.12em;
+  box-shadow:
+    inset 0 -2px 0 rgba(0, 0, 0, 0.25),
+    0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.medal-gold {
+  background: radial-gradient(circle at 35% 30%, #fff3b0, #e6b422 55%, #a87b0c);
+}
+.medal-silver {
+  background: radial-gradient(circle at 35% 30%, #ffffff, #c4ccd4 55%, #7d8790);
+}
+.medal-bronze {
+  background: radial-gradient(circle at 35% 30%, #ffd7b0, #c9803e 55%, #7e4a1c);
+}
+
+.challenges {
+  width: min(620px, calc(100% - 32px));
+  max-height: calc(100% - 48px);
+  color: var(--ink);
+  background: rgba(14, 22, 40, 0.94);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  padding: 22px;
+  line-height: 1.45;
+}
+.challenges::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+.challenges h2 {
+  margin: 0 0 6px;
+  font-family: var(--font-display);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.challenges-help {
+  margin: 0 0 14px;
+  color: var(--ink-dim);
+  font-size: 13px;
+}
+.course-list {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.course {
+  width: 100%;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  color: var(--ink);
+  font: inherit;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+}
+.course:hover,
+.course:focus-visible {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 140, 20, 0.8);
+  outline: none;
+}
+.course-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.course-head b {
+  font: 600 19px/1.1 var(--font-display);
+  letter-spacing: 0.04em;
+}
+.course-best {
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+.course-desc {
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+.course-meta {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.course-medals {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.chud {
+  position: absolute;
+  top: calc(max(12px, env(safe-area-inset-top)) + 52px);
+  left: 12px;
+  display: grid;
+  gap: 2px;
+  padding: 10px 14px;
+  min-width: 170px;
+  border-radius: 10px;
+  background: var(--glass);
+  border: 1px solid rgba(255, 140, 20, 0.55);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  pointer-events: none;
+}
+.chud[hidden] {
+  display: none;
+}
+.chud-name {
+  font: 600 13px/1.1 var(--font-display);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #ffb05c;
+}
+.chud-time {
+  font: 700 32px/1 var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+.chud-sub {
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.ring-marker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+.ring-marker[hidden] {
+  display: none;
+}
+.ring-marker i {
+  position: absolute;
+  left: -9px;
+  top: -9px;
+  width: 18px;
+  height: 18px;
+  border: 3px solid #ff8c14;
+  transform: rotate(45deg);
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.6));
+}
+.ring-marker.edge i {
+  border-width: 0;
+  width: 0;
+  height: 0;
+  left: -12px;
+  top: -10px;
+  border-left: 24px solid #ff8c14;
+  border-top: 10px solid transparent;
+  border-bottom: 10px solid transparent;
+  transform: rotate(var(--angle));
+}
+.ring-marker span {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font: 600 13px/1 var(--font-display);
+  letter-spacing: 0.05em;
+  color: #ffd0a0;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.cresult {
+  position: absolute;
+  z-index: 5;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(380px, calc(100% - 32px));
+  padding: 22px 24px;
+  text-align: center;
+  border-radius: 14px;
+  background: rgba(14, 22, 40, 0.88);
+  border: 1px solid rgba(255, 140, 20, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.cresult[hidden] {
+  display: none;
+}
+.cresult h2 {
+  margin: 0 0 8px;
+  font: 600 20px/1.2 var(--font-display);
+  letter-spacing: 0.06em;
+}
+.cresult p {
+  margin: 6px 0;
+}
+.cresult-kicker {
+  font: 700 14px/1 var(--font-display);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #ffb05c;
+}
+.cresult-time {
+  font: 700 54px/1 var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+.cresult-medal {
+  font: 600 20px/1.2 var(--font-display);
+  letter-spacing: 0.06em;
+}
+.cresult-best {
+  color: var(--ink-dim);
+  min-height: 1.4em;
+}
+.cresult-best b {
+  color: #9cf59c;
+}
+.cresult-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 14px;
+}

@@ -11,10 +11,22 @@ import { MouseAim } from '../input/MouseAim';
 import { type FlightEnv, type FlightEvent, FlightModel } from '../physics/FlightModel';
 import type { World } from '../world/World';
 import { type Runway, alongRunway, bearingDeg } from './airports';
+import { type ChallengeEvent, ChallengeRun } from './ChallengeRun';
+import { type Course, startHeading } from './challenges';
+import { RingLayer } from './RingLayer';
 
 export type StartPlace =
   | { kind: 'runway'; runway: Runway }
-  | { kind: 'air'; name: string; lon: number; lat: number; h: number; heading: number };
+  | {
+      kind: 'air';
+      name: string;
+      lon: number;
+      lat: number;
+      h: number;
+      heading: number;
+      /** Use `h` as is (challenges); otherwise keep at least 300 m above the ground. */
+      exact?: boolean;
+    };
 
 export interface GameMessage {
   text: string;
@@ -59,6 +71,13 @@ export class FlightGame {
   private lastCamDist = -1;
   private approach = 0;
   private envMap?: Texture;
+  /** The running ring challenge, if any. */
+  challenge?: ChallengeRun;
+  private rings?: RingLayer;
+  /** Aircraft position at the previous frame, for the ring checks. */
+  private readonly lastPos = new Vector3();
+  /** Set by the view: ring passed, missed, finished. */
+  onChallengeEvent?: (e: ChallengeEvent) => void;
 
   constructor(private readonly world: World) {
     this.env = {
@@ -103,6 +122,7 @@ export class FlightGame {
     this.rig.dispose();
     this.audio.dispose();
     if (this.aircraft) this.world.scene.remove(this.aircraft.root, this.trails.group);
+    this.endChallenge();
     this.envMap?.dispose();
   }
 
@@ -124,19 +144,56 @@ export class FlightGame {
     return tex;
   }
 
-  start(place: StartPlace) {
+  /** Starts (or restarts) a ring challenge: air start in front of the first ring. */
+  startChallenge(course: Course) {
+    this.endChallenge();
+    const s = course.start;
+    // Create the run before start(): moving the camera rebases, and the run must follow.
+    this.challenge = new ChallengeRun(course, (lon, lat, h) => this.world.fromGeo(lon, lat, h));
+    this.rings = new RingLayer(this.challenge);
+    this.world.scene.add(this.rings.group);
+    this.start(
+      {
+        kind: 'air',
+        name: course.id,
+        lon: s.lon,
+        lat: s.lat,
+        h: s.alt,
+        heading: startHeading(course),
+        exact: true,
+      },
+      true,
+    );
+  }
+
+  endChallenge() {
+    this.rings?.dispose();
+    this.rings = undefined;
+    this.challenge = undefined;
+  }
+
+  /** Free flight from a start place; ends a running challenge unless `keepChallenge`. */
+  start(place: StartPlace, keepChallenge = false) {
+    if (!keepChallenge) this.endChallenge();
     this.place = place;
     this.crashTime = -1;
     this.message = null;
-    const { lon, lat, h, heading } = this.placePose(place);
+    const { lon, lat, h, heading, exact } = this.placePose(place);
     // Put the camera there first so the terrain under it streams in.
     this.world.moveCameraTo(lon, lat, h + 40);
     this.waitingForTerrain = true;
     this.waitStarted = this.time;
-    this.pendingPose = { lon, lat, h, heading, onGround: place.kind === 'runway' };
+    this.pendingPose = { lon, lat, h, heading, onGround: place.kind === 'runway', exact };
   }
 
-  private pendingPose?: { lon: number; lat: number; h: number; heading: number; onGround: boolean };
+  private pendingPose?: {
+    lon: number;
+    lat: number;
+    h: number;
+    heading: number;
+    onGround: boolean;
+    exact?: boolean;
+  };
 
   private placePose(place: StartPlace) {
     if (place.kind === 'runway') {
@@ -144,7 +201,13 @@ export class FlightGame {
       const p = alongRunway(r, 120);
       return { lon: p.lon, lat: p.lat, h: 0, heading: bearingDeg(r.from, r.to) };
     }
-    return { lon: place.lon, lat: place.lat, h: place.h, heading: place.heading };
+    return {
+      lon: place.lon,
+      lat: place.lat,
+      h: place.h,
+      heading: place.heading,
+      exact: place.exact,
+    };
   }
 
   /** Tries to finish a pending start once the terrain height is known. */
@@ -154,13 +217,14 @@ export class FlightGame {
     const ground = this.world.groundAt(pose.lon, pose.lat);
     const waited = this.time - this.waitStarted;
     // On a runway we need detailed terrain (zoom >= 14) so the aircraft sits on the real surface.
+    // Challenges too: coarse tiles fill narrow valleys and would crash the aircraft at once.
     // The time limit only guards against tiles that never arrive (no network).
     const detailed = this.world.terrainDetailAt(pose.lon, pose.lat) >= 14 || waited > 45;
-    if (ground === undefined || (pose.onGround && !detailed)) {
+    if (ground === undefined || ((pose.onGround || pose.exact) && !detailed)) {
       this.world.moveCameraTo(pose.lon, pose.lat, (ground ?? pose.h) + 40);
       return;
     }
-    const h = pose.onGround ? ground + 1.53 : Math.max(pose.h, ground + 300);
+    const h = pose.onGround ? ground + 1.53 : Math.max(pose.h, ground + (pose.exact ? 40 : 300));
     const pos = this.world.fromGeo(pose.lon, pose.lat, h);
     const basis = this.world.basisAt(pos);
     const fwd = basis.north
@@ -175,13 +239,17 @@ export class FlightGame {
     this.aim.reset(fwd);
     this.rig.snap();
     if (this.aircraft) this.aircraft.controls.gear = pose.onGround ? 1 : 0;
+    this.lastPos.copy(pos);
     this.pendingPose = undefined;
     this.waitingForTerrain = false;
+    if (this.challenge) this.say('challenge.go', 'info', 3);
   }
 
   /** Floating origin moved. */
   rebase(delta: Vector3) {
     this.fm.position.sub(delta);
+    this.lastPos.sub(delta);
+    this.challenge?.rebase(delta);
     this.rig.rebase(delta);
     this.trails.rebase(delta);
   }
@@ -214,11 +282,19 @@ export class FlightGame {
         this.acc -= STEP;
       }
       for (const e of this.events.splice(0)) this.onEvent(e);
+      const run = this.challenge;
+      if (run && !this.fm.crashed) {
+        for (const e of run.update(dt, this.lastPos, this.fm.position)) this.onChallenge(e);
+      } else if (run && !run.finished) {
+        run.time += dt; // the clock keeps running while the wreck burns
+      }
+      this.lastPos.copy(this.fm.position);
       if (this.fm.crashed && this.crashTime > 0 && this.time - this.crashTime > RESPAWN_DELAY)
         this.respawn();
     }
 
     this.syncModel(dt);
+    this.rings?.update(dt);
     this.updateAudio(dt);
     // While the start place loads, the camera stays where start() put it (that is what streams
     // the terrain in); the chase camera takes over once the aircraft is placed.
@@ -309,7 +385,8 @@ export class FlightGame {
         this.rig.next();
         break;
       case 'reset':
-        if (this.place) this.start(this.place);
+        if (this.challenge) this.startChallenge(this.challenge.course);
+        else if (this.place) this.start(this.place);
         break;
       case 'pause':
         this.paused = !this.paused;
@@ -331,8 +408,12 @@ export class FlightGame {
 
   private onEvent(e: FlightEvent) {
     if (e.type === 'touchdown') {
-      this.say(`landing.${e.rating}|${e.sinkRate.toFixed(1)}`, 'good');
+      this.say(`landing.${e.rating}|${e.sinkRate.toFixed(1)} m/s`, 'good');
       this.audio.impact('touchdown', Math.max(0.4, e.sinkRate / 2));
+      if (this.challenge) {
+        const [lon, lat] = this.world.toGeo(this.fm.position);
+        for (const c of this.challenge.touchdown(lon, lat)) this.onChallenge(c);
+      }
     } else if (e.type === 'crash') {
       this.crashTime = this.time;
       this.say(`crash.${e.reason}`, 'bad', RESPAWN_DELAY);
@@ -342,8 +423,39 @@ export class FlightGame {
     }
   }
 
+  private onChallenge(e: ChallengeEvent) {
+    const run = this.challenge!;
+    if (e.type === 'gate') {
+      // No text here: the HUD counter and the chime say it without covering the next ring.
+      this.audio.chime(run.next === run.gates.length ? 'last' : 'gate');
+    } else if (e.type === 'miss') {
+      this.say('challenge.miss', 'bad', 2.5);
+      this.audio.chime('miss');
+    } else if (e.type === 'land') {
+      this.say('challenge.landNow', 'info', 6);
+    } else if (e.type === 'finish') {
+      this.message = null;
+      this.audio.chime('finish');
+    }
+    this.onChallengeEvent?.(e);
+  }
+
   /** After a crash: continue in the air above the crash site, same heading. */
   private respawn() {
+    if (this.challenge && !this.challenge.finished) {
+      // Challenge: back at the last ring passed, pointing at the next one.
+      const { position, forward } = this.challenge.respawnPose();
+      this.fm.gearDown = false;
+      this.fm.reset(position, forward, 65, false);
+      this.fm.gearDown = false;
+      this.controls.input.throttle = 0.7;
+      this.aim.reset(forward);
+      this.rig.snap();
+      this.lastPos.copy(position);
+      this.crashTime = -1;
+      this.message = null;
+      return;
+    }
     const [lon, lat] = this.world.toGeo(this.fm.position);
     const ground = this.world.groundAt(lon, lat) ?? 0;
     const pos = this.world.fromGeo(lon, lat, ground + 500);
@@ -354,6 +466,7 @@ export class FlightGame {
     this.controls.input.throttle = 0.7;
     this.aim.reset(this.fm.forward);
     this.rig.snap();
+    this.lastPos.copy(pos);
     this.crashTime = -1;
     this.message = null;
   }

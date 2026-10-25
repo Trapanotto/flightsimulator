@@ -1,7 +1,9 @@
 import { APP_VERSION, ATTRIBUTION } from '../core/config';
+import type { Course } from '../game/challenges';
 import { type Lang, type MessageKey, storeLang, t } from '../i18n';
+import { openChallengePicker } from './ChallengePicker';
 
-/** Main menu shown on load. Buttons for later phases are visible but disabled. */
+/** Main menu shown on load. */
 export class StartScreen {
   constructor(
     private readonly root: HTMLElement,
@@ -11,6 +13,7 @@ export class StartScreen {
       explore: (lang: Lang) => void;
       hangar: (lang: Lang) => void;
       settings: (lang: Lang) => void;
+      challenge: (lang: Lang, course: Course) => void;
     },
   ) {
     this.render();
@@ -18,8 +21,6 @@ export class StartScreen {
 
   private render(): void {
     const tr = (key: MessageKey) => t(this.lang, key);
-    const soon = `<span class="soon">${tr('menu.soon')}</span>`;
-
     this.root.innerHTML = `
       <main class="start" style="--hero: url('${import.meta.env.BASE_URL}assets/ui/hero.jpg')">
         <header class="brand">
@@ -32,7 +33,7 @@ export class StartScreen {
           <button class="btn btn-primary" data-action="fly">${tr('menu.fly')}</button>
           <button class="btn" data-action="preview">${tr('menu.preview')}</button>
           <button class="btn" data-action="hangar">${tr('menu.hangar')}</button>
-          <button class="btn" disabled>${tr('menu.challenges')} ${soon}</button>
+          <button class="btn" data-action="challenges">${tr('menu.challenges')}</button>
           <button class="btn" data-action="settings">${tr('menu.settings')}</button>
           <button class="btn" data-action="credits">${tr('menu.credits')}</button>
         </nav>
@@ -67,6 +68,11 @@ export class StartScreen {
     this.root
       .querySelector('[data-action="settings"]')!
       .addEventListener('click', () => this.actions.settings(this.lang));
+    this.root
+      .querySelector('[data-action="challenges"]')!
+      .addEventListener('click', () =>
+        openChallengePicker(this.lang, (c) => this.actions.challenge(this.lang, c)),
+      );
     this.root
       .querySelector('[data-action="hangar"]')!
       .addEventListener('click', () => this.actions.hangar(this.lang));

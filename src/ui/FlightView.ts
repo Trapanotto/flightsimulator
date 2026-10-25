@@ -4,8 +4,11 @@ import { type Lang, type MessageKey, t } from '../i18n';
 import { RUNWAYS } from '../game/airports';
 import type { FlightGame, StartPlace } from '../game/FlightGame';
 import { PLACES } from '../world/places';
+import type { ChallengeEvent } from '../game/ChallengeRun';
+import { formatTime, loadBestTimes } from '../game/challenges';
+import { medalBadge, openChallengePicker } from './ChallengePicker';
 import { Instruments } from './Instruments';
-import { Minimap } from './Minimap';
+import { type MapMarker, Minimap } from './Minimap';
 import { PlaceSearch } from './PlaceSearch';
 import type { World } from '../world/World';
 
@@ -57,10 +60,18 @@ export class FlightView {
       <div class="topbar">
         <button class="btn btn-small" data-action="back">← ${tr('view.back')}</button>
         <button class="btn btn-small" data-action="settings" aria-label="${tr('menu.settings')}">⚙</button>
+        <button class="chip chip-accent" data-action="challenges">${tr('menu.challenges')}</button>
         <div class="places" role="group" aria-label="${tr('view.places')}">
           ${FLIGHT_PLACES.map((p, i) => `<button class="chip" data-place="${i}">${p.label}</button>`).join('')}
         </div>
       </div>
+      <div class="chud" data-v="chud" hidden>
+        <span class="chud-name" data-v="cname"></span>
+        <span class="chud-time" data-v="ctime">0:00.0</span>
+        <span class="chud-sub"><span data-v="cgates"></span> · <span data-v="cbest"></span></span>
+      </div>
+      <div class="ring-marker" hidden><i></i><span data-v="cdist"></span></div>
+      <div class="cresult" hidden></div>
       <div class="reticle aim" hidden></div>
       <div class="reticle nose" hidden></div>
       <div class="fhud">
@@ -106,6 +117,11 @@ export class FlightView {
 
     this.q('[data-action="back"]').addEventListener('click', onBack);
     this.q('[data-action="settings"]').addEventListener('click', () => onSettings?.());
+    this.q('[data-action="challenges"]').addEventListener('click', (e) => {
+      (e.currentTarget as HTMLElement).blur();
+      this.pickChallenge();
+    });
+    game.onChallengeEvent = (e) => this.onChallengeEvent(e);
     this.el.querySelectorAll<HTMLButtonElement>('[data-place]').forEach((b) =>
       b.addEventListener('click', () => {
         game.start(FLIGHT_PLACES[Number(b.dataset.place)]!.place);
@@ -143,7 +159,153 @@ export class FlightView {
 
   destroy() {
     cancelAnimationFrame(this.raf);
+    this.game.onChallengeEvent = undefined;
     this.el.remove();
+  }
+
+  /** Course list; the game pauses while it is open. */
+  private pickChallenge() {
+    const g = this.game;
+    const wasPaused = g.paused;
+    g.paused = true;
+    let picked = false;
+    const dialog = openChallengePicker(this.lang, (course) => {
+      picked = true;
+      this.hideResult();
+      g.paused = false;
+      g.startChallenge(course);
+    });
+    dialog.addEventListener('close', () => {
+      if (!picked) g.paused = wasPaused;
+    });
+  }
+
+  private onChallengeEvent(e: ChallengeEvent) {
+    if (e.type === 'finish') this.showResult();
+  }
+
+  private hideResult() {
+    this.q('.cresult').hidden = true;
+  }
+
+  /** Result card: time, medal, best time; again / other course / free flight. */
+  private showResult() {
+    const run = this.game.challenge;
+    const r = run?.result;
+    if (!run || !r) return;
+    const tr = (k: MessageKey) => this.tr(k);
+    const best = loadBestTimes()[run.course.id];
+    const box = this.q('.cresult');
+    box.innerHTML = `
+      <p class="cresult-kicker">${tr('challenge.finish')}</p>
+      <h2>${run.course.name[this.lang]}</h2>
+      <p class="cresult-time">${formatTime(r.time)}</p>
+      <p class="cresult-medal">${
+        r.medal
+          ? `${medalBadge(this.lang, r.medal)} ${tr(`medal.${r.medal}` as MessageKey)}`
+          : tr('challenge.noMedal')
+      }</p>
+      <p class="cresult-best">${
+        r.newBest
+          ? `<b>${tr('challenge.newBest')}</b>`
+          : best !== undefined
+            ? `${tr('challenge.best')} ${formatTime(best)}`
+            : ''
+      }</p>
+      <div class="cresult-actions">
+        <button class="btn btn-small btn-primary" data-r="again">${tr('challenge.again')}</button>
+        <button class="btn btn-small" data-r="other">${tr('challenge.other')}</button>
+        <button class="btn btn-small" data-r="free">${tr('challenge.free')}</button>
+      </div>`;
+    box.hidden = false;
+    const course = run.course;
+    box.querySelector('[data-r="again"]')!.addEventListener('click', () => {
+      this.hideResult();
+      this.game.startChallenge(course);
+    });
+    box.querySelector('[data-r="other"]')!.addEventListener('click', () => {
+      this.hideResult();
+      this.pickChallenge();
+    });
+    box.querySelector('[data-r="free"]')!.addEventListener('click', () => {
+      this.hideResult();
+      this.game.endChallenge();
+    });
+  }
+
+  /** Clock, ring counter and best time while a challenge runs. */
+  private refreshChallenge() {
+    const run = this.game.challenge;
+    this.show('chud', !!run);
+    if (!run) {
+      this.hideResult();
+      return;
+    }
+    const n = run.gates.length;
+    this.set('cname', run.course.name[this.lang]);
+    this.set('ctime', formatTime(run.result?.time ?? run.time));
+    this.set(
+      'cgates',
+      run.awaitingLanding
+        ? this.tr('challenge.land')
+        : `${this.tr('challenge.gate')} ${Math.min(run.next + 1, n)}/${n}`,
+    );
+    const best = loadBestTimes()[run.course.id];
+    this.set(
+      'cbest',
+      best === undefined
+        ? this.tr('challenge.noBest')
+        : `${this.tr('challenge.best')} ${formatTime(best)}`,
+    );
+  }
+
+  private markers(): MapMarker[] {
+    const run = this.game.challenge;
+    if (!run || run.finished) return [];
+    const gates = run.course.gates;
+    const last = gates.length - 1;
+    const out: MapMarker[] = gates.slice(run.next, run.next + 5).map((g, i) => ({
+      lon: g.lon,
+      lat: g.lat,
+      kind: i === 0 ? 'next' : run.next + i === last ? 'finish' : 'later',
+    }));
+    const r = run.course.landing;
+    if (r && run.next + 5 > last) {
+      out.push({
+        lon: (r.from.lon + r.to.lon) / 2,
+        lat: (r.from.lat + r.to.lat) / 2,
+        kind: out.length ? 'finish' : 'next',
+      });
+    }
+    return out;
+  }
+
+  /** Arrow/diamond towards the next ring; clamped to the screen edge when it is off screen. */
+  private placeRingMarker() {
+    const el = this.q('.ring-marker');
+    const target = this.game.challenge?.target;
+    if (!target || this.game.waitingForTerrain) {
+      el.hidden = true;
+      return;
+    }
+    const cam = this.world.camera;
+    const dist = cam.position.distanceTo(target);
+    const v = tmp.copy(target).project(cam);
+    const behind = v.z > 1;
+    let x = behind ? -v.x : v.x;
+    let y = behind ? -v.y : v.y;
+    const inside = !behind && Math.abs(x) < 0.92 && Math.abs(y) < 0.85;
+    if (!inside) {
+      // Push the point onto the screen border along its direction from the centre.
+      const k = Math.max(Math.abs(x) / 0.92, Math.abs(y) / 0.85, 1e-6);
+      x /= k;
+      y /= k;
+    }
+    el.hidden = false;
+    el.classList.toggle('edge', !inside);
+    el.style.setProperty('--angle', `${Math.atan2(-y * innerHeight, x * innerWidth)}rad`);
+    el.style.transform = `translate(${((x + 1) / 2) * innerWidth}px, ${((1 - y) / 2) * innerHeight}px)`;
+    this.set('cdist', dist < 1000 ? `${Math.round(dist)} m` : `${(dist / 1000).toFixed(1)} km`);
   }
 
   private tr(k: MessageKey) {
@@ -172,7 +334,7 @@ export class FlightView {
     if (this.frame % 6 === 0) {
       const [lon, lat, alt] = this.world.toGeo(fm.position);
       const hag = g.heightAboveGround ?? alt;
-      this.minimap.update(lon, lat, heading, hag);
+      this.minimap.update(lon, lat, heading, hag, this.markers());
       if (performance.now() > this.placeTimer) {
         this.placeTimer = performance.now() + 1000;
         const near = this.world.buildings?.nearestPlace(lon, lat);
@@ -207,13 +369,15 @@ export class FlightView {
       if (m) {
         const [key, value] = m.text.split('|');
         const label = t(this.lang, key as MessageKey) ?? key;
-        this.set('msg', value ? `${label} · ${value} m/s` : label);
+        this.set('msg', value ? `${label} · ${value}` : label);
         this.q('[data-v="msg"]').dataset.kind = m.kind;
       }
       this.show('msg', !!m);
       this.show('wait', g.waitingForTerrain);
       this.show('pause', g.paused);
+      this.refreshChallenge();
     }
+    this.placeRingMarker();
     this.placeReticle('.reticle.aim', g.aim.active ? g.aimPoint(tmp) : null);
     this.placeReticle('.reticle.nose', g.aim.active ? g.nosePoint(tmp) : null);
   }

@@ -7,6 +7,21 @@ const TEMPLATE =
   'https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-farbe/default/current/3857/{z}/{x}/{y}.jpeg';
 const TILE = 256;
 
+/** Rings drawn on the map: the next one highlighted, the finish green. */
+export interface MapMarker {
+  lon: number;
+  lat: number;
+  kind: 'next' | 'later' | 'finish';
+}
+
+const project = (lon: number, lat: number, n: number): [number, number] => {
+  const r = (lat * Math.PI) / 180;
+  return [
+    ((lon + 180) / 360) * n * TILE,
+    ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n * TILE,
+  ];
+};
+
 export class Minimap {
   readonly el: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
@@ -46,7 +61,13 @@ export class Minimap {
   }
 
   /** Draws the map around lon/lat; heading in degrees. */
-  update(lon: number, lat: number, headingDeg: number, altitude: number) {
+  update(
+    lon: number,
+    lat: number,
+    headingDeg: number,
+    altitude: number,
+    markers: MapMarker[] = [],
+  ) {
     const size = this.el.clientWidth;
     const dpr = Math.min(window.devicePixelRatio, 2);
     if (this.canvas.width !== Math.round(size * dpr)) {
@@ -59,9 +80,7 @@ export class Minimap {
         (this.large ? 1 : 0),
     );
     const n = 2 ** z;
-    const px = ((lon + 180) / 360) * n * TILE;
-    const r = (lat * Math.PI) / 180;
-    const py = ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n * TILE;
+    const [px, py] = project(lon, lat, n);
     const c = this.ctx;
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.fillStyle = '#d9d6cc';
@@ -77,6 +96,32 @@ export class Minimap {
         if (img) c.drawImage(img, tx * TILE - px + half, ty * TILE - py + half, TILE, TILE);
       }
     }
+    if (markers.length) this.drawMarkers(markers, n, px - half, py - half);
     this.el.style.setProperty('--heading', `${headingDeg}deg`);
+  }
+
+  private drawMarkers(markers: MapMarker[], n: number, ox: number, oy: number) {
+    const c = this.ctx;
+    const pts = markers.map((m) => {
+      const [x, y] = project(m.lon, m.lat, n);
+      return [x - ox, y - oy] as const;
+    });
+    c.lineWidth = 2;
+    c.setLineDash([5, 4]);
+    c.strokeStyle = 'rgba(255, 140, 20, 0.85)';
+    c.beginPath();
+    pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
+    c.stroke();
+    c.setLineDash([]);
+    markers.forEach((m, i) => {
+      const [x, y] = pts[i]!;
+      c.beginPath();
+      c.arc(x, y, m.kind === 'next' ? 6 : 4, 0, Math.PI * 2);
+      c.fillStyle = m.kind === 'next' ? '#ff8c14' : m.kind === 'finish' ? '#2fd05a' : '#ffffff';
+      c.fill();
+      c.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+      c.lineWidth = 1.5;
+      c.stroke();
+    });
   }
 }
