@@ -45,6 +45,8 @@ export interface HouseInstance {
   width: number;
   height: number;
   tint: Color;
+  /** Full orientation (local vertical + yaw); overrides `yaw` and the shared `up`. */
+  q?: Quaternion;
 }
 
 export interface ChurchInstance {
@@ -55,6 +57,7 @@ export interface ChurchInstance {
   yaw: number;
   /** Nave length in metres (uniform scale). */
   size: number;
+  q?: Quaternion;
 }
 
 const m4 = new Matrix4();
@@ -63,6 +66,7 @@ const qUp = new Quaternion();
 const s = new Vector3();
 const p = new Vector3();
 const Y = new Vector3(0, 1, 0);
+const tmpUp = new Vector3();
 
 /** Loaded building geometry + material; creates instanced meshes for batches of houses. */
 export class BuildingSet {
@@ -129,11 +133,13 @@ export class BuildingSet {
         geo.setAttribute('iTint', new InstancedBufferAttribute(tint, 3));
         const mesh = new InstancedMesh(geo, this.material, list.length);
         list.forEach((h, i) => {
-          q.setFromAxisAngle(Y, h.yaw).premultiply(qUp);
+          if (h.q) q.copy(h.q);
+          else q.setFromAxisAngle(Y, h.yaw).premultiply(qUp);
           p.set(h.x, h.y, h.z);
           if (part === 'body') s.set(h.length, h.height, h.width);
           else {
-            p.addScaledVector(up, h.height);
+            // Roof sits on the walls: move up along the house's own vertical.
+            p.add(tmpUp.copy(Y).applyQuaternion(q).multiplyScalar(h.height));
             s.set(h.length, h.width, h.width);
           }
           mesh.setMatrixAt(i, m4.compose(p, q, s));
@@ -159,7 +165,8 @@ export class BuildingSet {
       );
       const mesh = new InstancedMesh(geo, this.material, list.length);
       list.forEach((c, i) => {
-        q.setFromAxisAngle(Y, c.yaw).premultiply(qUp);
+        if (c.q) q.copy(c.q);
+        else q.setFromAxisAngle(Y, c.yaw).premultiply(qUp);
         mesh.setMatrixAt(i, m4.compose(p.set(c.x, c.y, c.z), q, s.setScalar(c.size)));
       });
       mesh.computeBoundingSphere();

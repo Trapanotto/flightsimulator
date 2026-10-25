@@ -31,6 +31,7 @@ import {
   resolveQuality,
   timeSpec,
 } from '../core/settings';
+import { BuildingLayer } from '../buildings/BuildingLayer';
 import { Atmosphere } from '../render/Atmosphere';
 import { CloudLayer } from '../render/CloudLayer';
 import { PostFX } from '../render/PostFX';
@@ -123,6 +124,7 @@ export class World {
   private frameCount = 0;
   readonly frame: EnuFrame = enuFrame(BASE.lon, BASE.lat, 0);
   terrain?: TerrainEngine;
+  buildings?: BuildingLayer;
   private running = false;
   private active = false;
   private raf = 0;
@@ -231,6 +233,9 @@ export class World {
       },
     );
     this.terrain.setReceiveShadow(q2.shadowMap > 0);
+    this.buildings = new BuildingLayer(this, this.atmosphere.uniforms);
+    this.buildings.radius = q2.buildingRadius;
+    this.scene.add(this.buildings.group);
     this.terrain.rebase(this.shift);
     this.scene.add(this.terrain.group);
   }
@@ -272,6 +277,7 @@ export class World {
     this.post.configure(quality);
     this.flare.enabled = quality.flare;
     this.terrain?.applyQuality(quality);
+    if (this.buildings) this.buildings.radius = quality.buildingRadius;
     this.game?.applyQuality(quality);
     this.resize();
   }
@@ -386,6 +392,7 @@ export class World {
     this.rebaseIfNeeded();
     this.sky.position.copy(this.camera.position);
     this.updateEnvironment(dt);
+    this.buildings?.update(performance.now());
 
     this.camera.updateMatrixWorld();
     this.projView.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
@@ -576,11 +583,17 @@ export class World {
     const delta = anchor.clone();
     this.shift.add(delta);
     this.terrain?.rebase(delta);
+    this.buildings?.rebase(delta);
     this.camera.position.sub(delta);
     this.game?.rebase(delta);
   }
 
   // ---- queries for the flight game (render coordinates) ----
+
+  /** Render origin relative to the base frame (render = base - shift). */
+  get originShift(): Vector3 {
+    return this.shift;
+  }
 
   /** Local vertical at a point. */
   upAt(p: Vector3, out: Vector3): Vector3 {

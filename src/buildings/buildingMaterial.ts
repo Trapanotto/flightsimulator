@@ -10,10 +10,17 @@ const ATLAS_FN = /* glsl */ `
         vec4 atlasCell(float cell, vec2 uvm) {
           float cx = mod(cell, 4.0);
           float cy = floor(cell / 4.0 + 0.001);
-          // Repeat inside the cell; gradients from the unwrapped coordinates avoid mip seams.
           vec2 f = fract(uvm);
           vec2 p = (vec2(cx, cy) + vec2(f.x, 1.0 - f.y) * 0.98 + 0.01) / 4.0;
-          return textureGrad(map, p, dFdx(uvm) / 4.0, dFdy(uvm) / 4.0);
+          // Gradients from the unwrapped coordinates avoid mip seams at the cell edges; clamping
+          // them keeps the lookup inside the cell (no bleeding from neighbours).
+          vec2 gx = dFdx(uvm);
+          vec2 gy = dFdy(uvm);
+          float g = max(length(gx), length(gy));
+          vec4 detail = textureGrad(map, p, gx / 4.0 * min(1.0, 0.25 / max(g, 1e-5)), gy / 4.0 * min(1.0, 0.25 / max(g, 1e-5)));
+          // Far away: the cell's average colour (mip 9 of the 2048 atlas = one texel per cell).
+          vec4 avg = textureLod(map, (vec2(cx, cy) + 0.5) / 4.0, 9.0);
+          return mix(detail, avg, smoothstep(0.12, 0.45, g));
         }
 `;
 

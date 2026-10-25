@@ -20,6 +20,8 @@ export interface Quality {
   smaa: boolean;
   flare: boolean;
   trails: boolean;
+  /** Regional houses around the camera, metres (0 = off). */
+  buildingRadius: number;
 }
 
 export const PRESETS: Record<QualityLevel, Quality> = {
@@ -37,6 +39,7 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     smaa: false,
     flare: false,
     trails: false,
+    buildingRadius: 1500,
   },
   medium: {
     maxRenderScale: 1,
@@ -52,6 +55,7 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     smaa: true,
     flare: true,
     trails: true,
+    buildingRadius: 3000,
   },
   high: {
     maxRenderScale: 1,
@@ -67,6 +71,7 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     smaa: true,
     flare: true,
     trails: true,
+    buildingRadius: 4500,
   },
   ultra: {
     maxRenderScale: 1,
@@ -82,6 +87,7 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     smaa: true,
     flare: true,
     trails: true,
+    buildingRadius: 6000,
   },
 };
 
@@ -157,6 +163,7 @@ export function resolveQuality(s: Settings): { level: QualityLevel; quality: Qua
   if (fx.includes('nodetail')) quality.terrainDetail = false;
   if (fx.includes('nocloudshadow')) quality.cloudShadows = false;
   if (fx.includes('fixedscale')) quality.maxRenderScale = 1;
+  if (fx.includes('nobuildings')) quality.buildingRadius = 0;
   return { level, quality };
 }
 
