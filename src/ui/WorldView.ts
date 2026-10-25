@@ -148,7 +148,7 @@ function format(s: WorldStats): string {
   const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
   const lines = [
     `FPS       ${s.fps.toFixed(0)}  (${s.frameMs.toFixed(1)} ms, max ${s.worstFrameMs.toFixed(0)})`,
-    `Scale     ${Math.round(s.renderScale * 100)} % render resolution`,
+    `Pixels    ${s.pixelRatio.toFixed(2)}x (full resolution)`,
     `CPU       update ${s.tickMs.toFixed(1)} ms · render ${s.renderMs.toFixed(1)} ms`,
     `Draws     ${s.calls}   Tris ${k(s.triangles)}`,
     `GPU       ${s.geometries} geo · ${s.textures} tex`,

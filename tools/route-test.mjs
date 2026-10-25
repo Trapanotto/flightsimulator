@@ -35,7 +35,7 @@ const gpu = await page.evaluate(() => {
 });
 console.log(`GPU: ${gpu}\nRoute at ${kmh} km/h, max ${minutes} min\n`);
 console.log(
-  '  time  leg      km   fps  frame  worst scale   cpuU  cpuR  drawn ready load queue  detail  min  pending',
+  '  time  leg      km   fps  frame  worst   px   cpuU  cpuR  drawn ready load queue  detail  min  pending',
 );
 
 const t0 = Date.now();
@@ -46,7 +46,7 @@ for (;;) {
   const r = s.route;
   const sec = Math.round((Date.now() - t0) / 1000);
   console.log(
-    `${String(sec).padStart(5)}s  ${r.leg}/${r.legs} ${r.distanceKm.toFixed(1).padStart(7)} ${s.fps.toFixed(0).padStart(5)} ${s.frameMs.toFixed(1).padStart(6)} ${s.worstFrameMs.toFixed(0).padStart(6)} ${(s.renderScale * 100).toFixed(0).padStart(4)}% ${s.tickMs.toFixed(1).padStart(6)} ${s.renderMs.toFixed(1).padStart(5)} ${String(s.tilesRendered).padStart(6)} ${String(s.tilesReady).padStart(5)} ${String(s.tilesLoading).padStart(4)} ${String(s.queued).padStart(5)} ${(s.coverage * 100).toFixed(0).padStart(6)}% ${(r.minCoverage * 100).toFixed(0).padStart(4)}% ${((r.pendingFrames / Math.max(1, r.frames)) * 100).toFixed(0).padStart(6)}%`,
+    `${String(sec).padStart(5)}s  ${r.leg}/${r.legs} ${r.distanceKm.toFixed(1).padStart(7)} ${s.fps.toFixed(0).padStart(5)} ${s.frameMs.toFixed(1).padStart(6)} ${s.worstFrameMs.toFixed(0).padStart(6)} ${s.pixelRatio.toFixed(2).padStart(5)} ${s.tickMs.toFixed(1).padStart(6)} ${s.renderMs.toFixed(1).padStart(5)} ${String(s.tilesRendered).padStart(6)} ${String(s.tilesReady).padStart(5)} ${String(s.tilesLoading).padStart(4)} ${String(s.queued).padStart(5)} ${(s.coverage * 100).toFixed(0).padStart(6)}% ${(r.minCoverage * 100).toFixed(0).padStart(4)}% ${((r.pendingFrames / Math.max(1, r.frames)) * 100).toFixed(0).padStart(6)}%`,
   );
   if (r.done || sec > Number(minutes) * 60) break;
 }

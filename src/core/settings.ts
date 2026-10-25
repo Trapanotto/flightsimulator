@@ -4,8 +4,7 @@ export type QualityLevel = 'low' | 'medium' | 'high' | 'ultra';
 export const QUALITY_LEVELS: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
 
 export interface Quality {
-  /** Highest render scale for dynamic resolution (share of the device pixel ratio). */
-  maxRenderScale: number;
+  /** Always the full device resolution, capped at this pixel ratio (no downscaling). */
   maxPixelRatio: number;
   /** Terrain screen-space error threshold (px), max zoom and tile budget. */
   tau: number;
@@ -31,8 +30,7 @@ export interface Quality {
 
 export const PRESETS: Record<QualityLevel, Quality> = {
   low: {
-    maxRenderScale: 0.75,
-    maxPixelRatio: 1,
+    maxPixelRatio: 2,
     tau: 9,
     maxZoom: 14,
     maxTiles: 260,
@@ -50,8 +48,7 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     water: true,
   },
   medium: {
-    maxRenderScale: 1,
-    maxPixelRatio: 1.25,
+    maxPixelRatio: 2,
     tau: 6,
     maxZoom: 15,
     maxTiles: 400,
@@ -69,8 +66,7 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     water: true,
   },
   high: {
-    maxRenderScale: 1,
-    maxPixelRatio: 1.5,
+    maxPixelRatio: 2,
     tau: 4.5,
     maxZoom: 16,
     maxTiles: 560,
@@ -88,7 +84,6 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     water: true,
   },
   ultra: {
-    maxRenderScale: 1,
     maxPixelRatio: 2,
     tau: 3.5,
     maxZoom: 17,
@@ -189,7 +184,6 @@ export function resolveQuality(s: Settings): { level: QualityLevel; quality: Qua
   if (fx.includes('noshadow')) quality.shadowMap = 0;
   if (fx.includes('nodetail')) quality.terrainDetail = false;
   if (fx.includes('nocloudshadow')) quality.cloudShadows = false;
-  if (fx.includes('fixedscale')) quality.maxRenderScale = 1;
   if (fx.includes('nobuildings')) quality.buildingRadius = 0;
   if (fx.includes('notrees')) quality.treeRadius = 0;
   if (fx.includes('nowater')) quality.water = false;

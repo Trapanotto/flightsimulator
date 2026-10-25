@@ -47,14 +47,13 @@ import { PLACES, type Place, TEST_ROUTE } from './places';
 const BASE = { lon: 8.2275, lat: 46.8182 };
 /** Re-centre the render origin when the camera is this far from it. */
 const REBASE_DISTANCE = 5000;
-/** Lowest dynamic render scale (share of the base pixel ratio). */
-const MIN_RENDER_SCALE = 0.6;
 
 export interface WorldStats {
   fps: number;
   frameMs: number;
   worstFrameMs: number;
-  renderScale: number;
+  /** Pixel ratio we render at (full device resolution, capped at 2). */
+  pixelRatio: number;
   /** CPU ms per frame: our update / three.js render call. */
   tickMs: number;
   renderMs: number;
@@ -135,9 +134,6 @@ export class World {
   private frameMs = 0;
   private worstMs = 0;
   private worstAcc = 0;
-  private renderScale = 1;
-  private lastDownscale = 0;
-  private lastUpscale = 0;
   private basePixelRatio = 1;
   private tickMs = 0;
   private renderMs = 0;
@@ -262,8 +258,7 @@ export class World {
     this.qualityLevel = level;
     this.quality = quality;
     this.basePixelRatio = Math.min(window.devicePixelRatio, quality.maxPixelRatio);
-    this.renderScale = Math.min(this.renderScale, quality.maxRenderScale);
-    this.renderer.setPixelRatio(this.basePixelRatio * this.renderScale);
+    this.renderer.setPixelRatio(this.basePixelRatio);
     this.renderer.shadowMap.enabled = quality.shadowMap > 0;
     if (quality.shadowMap > 0) {
       this.sun.shadow.mapSize.set(quality.shadowMap, quality.shadowMap);
@@ -337,7 +332,7 @@ export class World {
       fps: this.fps,
       frameMs: this.frameMs,
       worstFrameMs: this.worstMs,
-      renderScale: this.renderScale,
+      pixelRatio: this.basePixelRatio,
       tickMs: this.tickMs,
       renderMs: this.renderMs,
       calls: info.render.calls,
@@ -408,7 +403,6 @@ export class World {
       this.camera.position,
       this.forward,
       this.frustum,
-      // LOD uses the full-resolution height so dynamic resolution does not change detail.
       this.canvas.clientHeight * this.basePixelRatio,
       this.camera.fov * DEG,
     );
@@ -511,39 +505,7 @@ export class World {
       this.fpsAcc = 0;
       this.fpsFrames = 0;
       this.worstAcc = 0;
-      this.adaptResolution();
     }
-  }
-
-  /**
-   * Dynamic resolution (concept ch. 16): drop render scale by 5 % when frames are too slow,
-   * raise it again after a few seconds at full frame rate. rAF is capped by the display,
-   * so "fast enough" means frames land at the refresh interval.
-   */
-  private adaptResolution() {
-    if (location.search.includes('fixedscale')) return;
-    const now = performance.now();
-    if (this.frameMs > 18.5 && this.renderScale > MIN_RENDER_SCALE) {
-      this.setRenderScale(this.renderScale - 0.05);
-      this.lastDownscale = now;
-    } else if (
-      this.frameMs < 17.2 &&
-      this.renderScale < this.quality.maxRenderScale &&
-      now - this.lastDownscale > 6000 &&
-      now - this.lastUpscale > 3000
-    ) {
-      this.setRenderScale(this.renderScale + 0.05);
-      this.lastUpscale = now;
-    }
-  }
-
-  private setRenderScale(scale: number) {
-    this.renderScale = Math.min(
-      this.quality.maxRenderScale,
-      Math.max(MIN_RENDER_SCALE, Math.round(scale * 100) / 100),
-    );
-    this.renderer.setPixelRatio(this.basePixelRatio * this.renderScale);
-    this.resize();
   }
 
   private halt() {

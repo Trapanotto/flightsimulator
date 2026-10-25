@@ -62,7 +62,7 @@ Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
   und automatischem Testflug Genf → St. Moritz
 - **Floating Origin:** keine Zitterbewegungen, egal wo man in der Schweiz ist
 - **Höhe über Grund** aus einem Höhenraster pro Kachel; die Kamera kann nicht mehr durch Berge fliegen
-- **Dynamische Auflösung:** wird es eng, rechnet das Spiel mit etwas weniger Pixeln
+- **Volle Auflösung:** immer scharf in der nativen Bildschirmauflösung (bis Pixelrate 2), kein Herunterskalieren
 - Debug-Anzeige mit `F3` (oder `?debug` in der URL)
 
 ### Steuerung (Fliegen)

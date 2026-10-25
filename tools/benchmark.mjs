@@ -34,7 +34,7 @@ for (const preset of presets) {
       const s = window.__world.stats();
       out.push({
         fps: s.fps,
-        scale: s.renderScale,
+        pixelRatio: s.pixelRatio,
         tiles: s.tilesRendered,
         worst: s.worstFrameMs,
         cov: s.coverage,

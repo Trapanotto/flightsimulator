@@ -43,8 +43,6 @@ export class FlightAudio {
     roarFilter: BiquadFilterNode;
     roarAm: GainNode;
     amOsc: OscillatorNode;
-    whineOsc: OscillatorNode;
-    whineGain: GainNode;
     windGain: GainNode;
     windFilter: BiquadFilterNode;
     cockpit: BiquadFilterNode;
@@ -112,14 +110,15 @@ export class FlightAudio {
     cockpit.frequency.value = 18_000;
     cockpit.connect(master);
 
-    // Propeller: blade-pass sawtooth + sub octave, low-passed: the "thrum".
+    // Propeller: blade-pass triangle + sub octave, low-passed: the "thrum". (A sawtooth has
+    // strong overtones up to 1-2 kHz, which sound like singing/whistling.)
     const propOsc = ctx.createOscillator();
-    propOsc.type = 'sawtooth';
+    propOsc.type = 'triangle';
     const propSub = ctx.createOscillator();
-    propSub.type = 'triangle';
+    propSub.type = 'sine';
     const propFilter = ctx.createBiquadFilter();
     propFilter.type = 'lowpass';
-    propFilter.Q.value = 0.8;
+    propFilter.Q.value = 0.5;
     const propGain = ctx.createGain();
     propGain.gain.value = 0;
     propOsc.connect(propFilter);
@@ -140,17 +139,11 @@ export class FlightAudio {
     roarGain.gain.value = 0;
     noiseSource().connect(roarFilter).connect(roarAm).connect(roarGain).connect(cockpit);
 
-    // Turbine whine (PT6-like), quiet; boost adds to it.
-    const whineOsc = ctx.createOscillator();
-    whineOsc.type = 'sine';
-    const whineGain = ctx.createGain();
-    whineGain.gain.value = 0;
-    whineOsc.connect(whineGain).connect(cockpit);
-
     // Wind: noise through a band-pass that rises with speed.
     const windFilter = ctx.createBiquadFilter();
-    windFilter.type = 'bandpass';
-    windFilter.Q.value = 0.5;
+    // Low-pass, not band-pass: a resonant band over noise sounds like whistling.
+    windFilter.type = 'lowpass';
+    windFilter.Q.value = 0.3;
     const windGain = ctx.createGain();
     windGain.gain.value = 0;
     noiseSource().connect(windFilter).connect(windGain).connect(cockpit);
@@ -176,7 +169,7 @@ export class FlightAudio {
     servoGain.gain.value = 0;
     servoOsc.connect(servoFilter).connect(servoGain).connect(cockpit);
 
-    for (const o of [propOsc, propSub, amOsc, whineOsc, warnOsc, servoOsc]) o.start();
+    for (const o of [propOsc, propSub, amOsc, warnOsc, servoOsc]) o.start();
     this.nodes = {
       propOsc,
       propSub,
@@ -186,8 +179,6 @@ export class FlightAudio {
       roarFilter,
       roarAm,
       amOsc,
-      whineOsc,
-      whineGain,
       windGain,
       windFilter,
       cockpit,
@@ -211,23 +202,21 @@ export class FlightAudio {
     smooth(n.propOsc.frequency, blade, ctx);
     smooth(n.propSub.frequency, blade / 2, ctx);
     smooth(n.amOsc.frequency, blade, ctx);
-    smooth(n.propFilter.frequency, 200 + 600 * s.throttle, ctx);
+    smooth(n.propFilter.frequency, 140 + 260 * s.throttle, ctx);
     const running = s.rpm > 0.05 ? 1 : 0;
-    smooth(n.propGain.gain, mute * running * (0.08 + 0.14 * s.throttle), ctx, 0.15);
-    smooth(n.roarFilter.frequency, (200 + 450 * s.throttle) * doppler, ctx);
-    smooth(n.roarGain.gain, mute * running * (0.05 + 0.16 * s.throttle), ctx, 0.15);
-    smooth(n.whineOsc.frequency, (900 + 500 * s.rpm + (s.boost ? 250 : 0)) * doppler, ctx, 0.4);
+    smooth(n.propGain.gain, mute * running * (0.1 + 0.14 * s.throttle), ctx, 0.15);
+    smooth(n.roarFilter.frequency, (200 + 450 * s.throttle - (s.boost ? 120 : 0)) * doppler, ctx);
     smooth(
-      n.whineGain.gain,
-      mute * running * (0.0012 + 0.0025 * s.throttle + (s.boost ? 0.007 : 0)),
+      n.roarGain.gain,
+      mute * running * (0.05 + 0.16 * s.throttle + (s.boost ? 0.12 : 0)),
       ctx,
-      0.3,
+      0.15,
     );
 
     const v = Math.min(1.6, s.speed / 100);
-    smooth(n.windFilter.frequency, 180 + 520 * v, ctx);
+    smooth(n.windFilter.frequency, 160 + 440 * v, ctx);
     smooth(n.windGain.gain, mute * (s.onGround ? 0.3 : 1) * 0.22 * v * v, ctx, 0.2);
-    smooth(n.cockpit.frequency, s.inside ? 900 : 6500, ctx, 0.1);
+    smooth(n.cockpit.frequency, s.inside ? 700 : 3500, ctx, 0.1);
 
     smooth(n.servoGain.gain, mute * (s.servo ? 0.03 : 0), ctx, 0.1);
 

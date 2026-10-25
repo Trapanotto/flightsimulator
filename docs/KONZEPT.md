@@ -499,7 +499,7 @@ Komplett **prozedural mit WebAudio** (keine Lizenzprobleme, winziger Download):
 **Automatik:**
 
 - Beim ersten Start: GPU-Kennung (`WEBGL_debug_renderer_info`) + 3-s-Benchmark → Vorschlag einer Stufe.
-- **Dynamische Auflösung:** misst gleitend die Frametime; > 18 ms → Render-Skala −5 %, < 13 ms → +5 % (Grenzen je Stufe). Spart die meisten Einbrüche, unsichtbar für den Spieler.
+- ~~**Dynamische Auflösung**~~ – entfernt (Okt. 2026): das Bild wurde sichtbar unscharf. Es wird immer in voller Auflösung (Pixelrate bis 2) gerendert; Leistung kommt aus den Qualitätsstufen.
 - Bei Tab im Hintergrund: Loop pausiert, Requests werden gestoppt.
 
 **Mikro-Optimierungen (Pflicht):**
