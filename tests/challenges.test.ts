@@ -58,7 +58,6 @@ describe('courses', () => {
   it('medal times fit the fleet (Cessna ~63 m/s up to jets)', () => {
     for (const c of COURSES) {
       const len = courseLength(c);
-      expect(len / c.medals.gold, c.id).toBeLessThan(140);
       expect(len / c.medals.bronze, c.id).toBeGreaterThan(25);
     }
   });

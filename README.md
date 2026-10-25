@@ -73,7 +73,10 @@ Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
   - ✅ **Pilatus PC-12 NGX** (HB-TPC): Tiefdecker aus Stans, T-Leitwerk, Winglets, 5-Blatt-Propeller,
     Einziehfahrwerk; Challenge «Lauterbrunnen Canyon Run»; 0,8 MB.
     ![Pilatus PC-12 von Trapanotto Airlines](docs/screenshots/pc12.png)
-  - ⏳ Embraer Phenom 100, Lockheed Martin F-35 Lightning II, Airbus A320, Boeing 747
+  - ✅ **Embraer Phenom 100** (HB-TEP): Businessjet mit gepfeiltem Flügel, T-Leitwerk und zwei
+    Heck-Turbofans (drehender Fan); Challenge «Aletsch Gletscher-Express»; 0,8 MB.
+    ![Embraer Phenom 100 von Trapanotto Airlines](docs/screenshots/phenom100.png)
+  - ⏳ Lockheed Martin F-35 Lightning II, Airbus A320, Boeing 747
     ![Cessna 172 von Trapanotto Airlines](docs/screenshots/c172.png)
 
 - **Ganze Schweiz streamen:** Terrain (Quantized-Mesh) und SWISSIMAGE-Luftbilder direkt von geo.admin.ch,

@@ -192,7 +192,59 @@ export const PC12: AircraftType = {
   span: 16.28,
 };
 
-export const AIRCRAFT: AircraftType[] = [C172, PC12];
+export const PHENOM100: AircraftType = {
+  id: 'phenom100',
+  name: 'Embraer Phenom 100',
+  info: {
+    de: 'Leichter Businessjet · 2 Turbofans · 6 Sitze · bis 720 km/h',
+    en: 'Light business jet · 2 turbofans · 6 seats · up to 720 km/h',
+  },
+  registration: 'HB-TEP',
+  url: `${base}assets/aircraft/phenom100.glb`,
+  physics: {
+    thrust: 4.5,
+    drag: 4.5 / 200 ** 2,
+    gearDrag: 0.35,
+    flapDrag: 0.55,
+    boostFactor: 1,
+    boostSeconds: 0,
+    boostRecharge: 0,
+    stallSpeed: 46,
+    flapStallDrop: 9,
+    rotateSpeed: 50,
+    rollRate: 1.8,
+    pitchRate: 0.85,
+    yawRate: 0.35,
+    grip: 2.5,
+    gearHeight: 1.3, // model
+    bellyHeight: 0.7,
+    maxSinkRate: 3.2,
+    maxG: 3.5,
+    aoaRef: 4 * DEG,
+    aoaSpeed: 60,
+    aoaMax: 12 * DEG,
+    trimMin: -12 * DEG,
+    trimMax: 18 * DEG,
+    trimRate: 3 * DEG,
+    fixedGear: false,
+    maxFlapDeg: 36,
+    hull: {
+      nose: [0, -0.05, 6.3],
+      wingL: [6.15, -0.07, -1.0],
+      wingR: [-6.15, -0.07, -1.0],
+      tail: [0, 2.45, -5.9],
+    }, // model
+  },
+  engine: { kind: 'jet', display: 'n1', idle: 24, max: 100, blades: 22, maxRps: 60 },
+  eye: [0.35, 0.72, 3.1], // model
+  wingCam: [3.0, -0.1, -0.3],
+  chaseDistance: 17,
+  chaseHeight: 3.8,
+  length: 12.82,
+  span: 12.3,
+};
+
+export const AIRCRAFT: AircraftType[] = [C172, PC12, PHENOM100];
 export const DEFAULT_AIRCRAFT = C172;
 
 /** The type with this id, if it is in the fleet already. */
