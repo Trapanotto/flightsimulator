@@ -242,6 +242,7 @@ def livery(m):
     lines |= fuse & bag & ~((y > 0.705) & (y < 1.175) & (z > -0.115) & (z < 0.295))
     lines |= wing & tx.near(ax, (1.3, 2.2, 3.1, 4.0, 4.9), 0.004)
     lines |= tail_h & tx.near(ax, (0.6, 1.2), 0.004)
+    tx.paint_logo(c, fin, y, z, 3.86, 1.22, 0.36)
     c.shade(lines, 0.62)
     # Exhaust soot along the lower right cowling.
     soot = fuse & (x < 0) & (y > -2.6) & (y < 0.3) & (z < -0.2)
@@ -273,8 +274,6 @@ def decals(col, parts):
                                             (side * 0.55, -2.55, 0.18), *ax_, NAVY, spacing=1.3))
         out["Fin"].append(tx.text_mesh(col, f"D_reg_{side}", REG, 0.15,
                                        (side * 0.15, 3.55, 0.66), *ax_, NAVY))
-        out["Fin"].extend(tx.trapanotto_logo(col, f"D_logo_{side}", 0.36,
-                                             (side * 0.15, 3.86, 1.22), *ax_))
         out["Fuselage"].extend(tx.swiss_flag(col, f"D_flag_{side}", 0.09,
                                              (side * 0.30, 3.10, 0.22), *ax_))
     out["Wing_L"].append(tx.text_mesh(col, "D_reg_wing", REG, 0.58, (3.0, -0.62, 0.70),

@@ -182,6 +182,7 @@ def livery(m):
     di = tx.rounded_rect(y, z, -2.75, 0.18, 0.352, 0.652, 0.08)
     lines |= fuse & door & d & ~di
     lines |= wing & tx.near(ax, (1.5, 2.6, 3.7, 4.8), 0.005)
+    tx.paint_logo(c, fin, y, z, 4.85, 1.72, 0.62)
     c.shade(lines, 0.6)
     return c
 
@@ -205,8 +206,6 @@ def decals(col, parts):
                                             (side * 0.70, 1.15, 0.18), *ax_, NAVY))
         out["Fuselage"].extend(tx.swiss_flag(col, f"D_flag_{side}", 0.12,
                                              (side * 0.70, 1.95, 0.18), *ax_))
-        out["Fin"].extend(tx.trapanotto_logo(col, f"D_logo_{side}", 0.62,
-                                             (side * 0.2, 4.85, 1.72), *ax_))
     for side, target in ((1, "Engine_L"), (-1, "Engine_R")):
         ax_ = tx.side_axes(side)
         out[target].append(tx.text_mesh(col, f"D_eng_{side}", "TRAPANOTTO", 0.13,

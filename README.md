@@ -80,7 +80,10 @@ Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
     geneigte Doppelleitwerke, Stabilatoren, Nachbrenner (Leertaste); Challenge «Matterhorn-Umrundung»
     – Gold nur mit Nachbrenner; 0,7 MB.
     ![Lockheed Martin F-35 von Trapanotto Airlines](docs/screenshots/f35.png)
-  - ⏳ Airbus A320, Boeing 747
+  - ✅ **Airbus A320** (HB-JTA): Sharklets, Knickflügel, zwei Turbofans, Doppelräder, Cockpit mit
+    Scheiben; Challenge «Landeanflug Samedan» mit Landung; 1,1 MB.
+    ![Airbus A320 von Trapanotto Airlines](docs/screenshots/a320.png)
+  - ⏳ Boeing 747
     ![Cessna 172 von Trapanotto Airlines](docs/screenshots/c172.png)
 
 - **Ganze Schweiz streamen:** Terrain (Quantized-Mesh) und SWISSIMAGE-Luftbilder direkt von geo.admin.ch,

@@ -266,10 +266,11 @@ def swiss_flag(col, name, size, center, x_axis, y_axis):
                        y_axis, RED)
     u = size * 0.6 / 20.0
     a, b = 3 * u, 10 * u
-    outline = [(-a, b), (a, b), (a, a), (b, a), (b, -a), (a, -a), (a, -b), (-a, -b),
-               (-a, -a), (-b, -a), (-b, a), (-a, a)]
-    cross = polygon_decal(col, name + "_x", outline, center, x_axis, y_axis, WHITE, layer=1)
-    return [sq, cross]
+    vert = [(-a, -b), (a, -b), (a, b), (-a, b)]
+    horiz = [(-b, -a), (b, -a), (b, a), (-b, a)]
+    v = polygon_decal(col, name + "_xv", vert, center, x_axis, y_axis, WHITE, layer=1)
+    h = polygon_decal(col, name + "_xh", horiz, center, x_axis, y_axis, WHITE, layer=1)
+    return [sq, v, h]
 
 
 def trapanotto_logo(col, name, size, center, x_axis, y_axis, ring=WHITE, letter=NAVY):
@@ -277,9 +278,11 @@ def trapanotto_logo(col, name, size, center, x_axis, y_axis, ring=WHITE, letter=
     objs = [polygon_decal(col, name + "_disc", circle_outline(size / 2), center, x_axis, y_axis,
                           ring)]
     t = size
-    bar = [(-0.30 * t, 0.26 * t), (0.30 * t, 0.26 * t), (0.30 * t, 0.12 * t), (0.07 * t, 0.12 * t),
-           (0.07 * t, -0.32 * t), (-0.07 * t, -0.32 * t), (-0.07 * t, 0.12 * t), (-0.30 * t, 0.12 * t)]
+    # The T from two convex rectangles (concave outlines triangulate badly).
+    bar = [(-0.30 * t, 0.12 * t), (0.30 * t, 0.12 * t), (0.30 * t, 0.26 * t), (-0.30 * t, 0.26 * t)]
+    stem = [(-0.07 * t, -0.32 * t), (0.07 * t, -0.32 * t), (0.07 * t, 0.125 * t), (-0.07 * t, 0.125 * t)]
     objs.append(polygon_decal(col, name + "_t", bar, center, x_axis, y_axis, letter, layer=1))
+    objs.append(polygon_decal(col, name + "_s", stem, center, x_axis, y_axis, letter, layer=1))
     wing = [(-0.40 * t, 0.02 * t), (0.42 * t, 0.20 * t), (0.40 * t, 0.10 * t), (-0.38 * t, -0.06 * t)]
     objs.append(polygon_decal(col, name + "_w", wing, center, x_axis, y_axis, RED, layer=2))
     return objs
@@ -398,6 +401,23 @@ class Canvas:
         return np.clip(self.col, 0, 1), self.rough, self.metal
 
 
+def paint_logo(c, mask, u, v, cu, cv, size):
+    """
+    Airline logo painted into the livery (white disc, navy T, red wing stroke), in the 2D
+    coordinates (u, v) of a surface (fins: u = y, v = z). Reliable at any aircraft size.
+    """
+    du, dv = (u - cu) / size, (v - cv) / size
+    c.put(mask & (du * du + dv * dv <= 0.25), WHITE, 0.30)
+    bar = (np.abs(du) <= 0.30) & (dv >= 0.12) & (dv <= 0.26)
+    stem = (np.abs(du) <= 0.07) & (dv >= -0.32) & (dv <= 0.26)
+    c.put(mask & (bar | stem), NAVY, 0.30)
+    # Wing stroke: a band along the segment (-0.39, -0.02) -> (0.41, 0.15), 0.08 thick.
+    ax, ay, bx, by = -0.39, -0.02, 0.41, 0.15
+    t = np.clip(((du - ax) * (bx - ax) + (dv - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2), 0, 1)
+    d = np.hypot(du - (ax + t * (bx - ax)), dv - (ay + t * (by - ay)))
+    c.put(mask & (d <= 0.045), RED, 0.30)
+
+
 def near(values, targets, width):
     """True where `values` is within width of any target (panel lines)."""
     m = np.zeros(values.shape, bool)
@@ -457,7 +477,7 @@ def texture_atlas(parts, names, livery, decals_fn, size=2048, ao_samples=64, bas
     for target, ds in decals.items():
         for o in ds:
             # Stacked decals (logo layers) keep their order: the outer one is hit first.
-            shrinkwrap_onto(o, parts[target], 0.004 * k + 0.003 * o.get("layer", 0))
+            shrinkwrap_onto(o, parts[target], 0.004 * k + 0.003 * k * o.get("layer", 0))
     img_dc = new_image("bake_decal_color", size, float_buffer=True)
     img_dm = new_image("bake_decal_mask", size, float_buffer=True, non_color=True)
     baked = False

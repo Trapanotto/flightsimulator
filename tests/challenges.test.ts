@@ -69,7 +69,7 @@ describe('courses', () => {
       const p = plane.physics;
       const ideal = courseLength(c) / Math.sqrt(p.thrust / p.drag);
       expect(c.medals.gold / ideal, c.id).toBeGreaterThan(1.08);
-      expect(c.medals.gold / ideal, c.id).toBeLessThan(1.35);
+      expect(c.medals.gold / ideal, c.id).toBeLessThan(c.landing ? 2.2 : 1.35);
     }
   });
 

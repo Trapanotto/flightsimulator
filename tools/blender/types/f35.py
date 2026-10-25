@@ -190,6 +190,8 @@ def livery(m):
     c.shade(saw, 1.35)
     lines = fuse & tx.near(y, (-6.4, -5.5, -2.4, 0.9, 3.6, 6.2), 0.006)
     c.shade(lines, 1.3)
+    span = (z - 0.55) / math.cos(math.radians(20))
+    tx.paint_logo(c, fin, y, span, 4.85, 1.25, 0.80)
     return c
 
 
@@ -201,12 +203,4 @@ def decals(col, parts):
                                             (side * 1.2, -0.6, 0.30), *ax_, WHITE, spacing=1.12))
         out["Fuselage"].append(tx.text_mesh(col, f"D_reg_{side}", REG, 0.30,
                                             (side * 0.6, -6.6, 0.0), *ax_, WHITE))
-    for side, fin in ((1, "Fin_L"), (-1, "Fin_R")):
-        # Logo on the outer face of each canted fin.
-        cant = math.radians(20)
-        out_dir = Vector((side * math.cos(cant), 0, -math.sin(cant)))
-        up = Vector((side * math.sin(cant), 0, math.cos(cant)))
-        centre = Vector((side * (1.0 + 1.25 * math.sin(cant)), 4.85, 0.55 + 1.25 * math.cos(cant))) + out_dir * 0.2
-        read = Vector((0, 1, 0)) if side > 0 else Vector((0, -1, 0))
-        out[fin].extend(tx.trapanotto_logo(col, f"D_logo_{side}", 0.80, centre, read, up))
     return out

@@ -483,10 +483,16 @@ export class FlightGame {
     if (this.challenge && !this.challenge.finished) {
       // Challenge: back at the last ring passed, pointing at the next one.
       const { position, forward } = this.challenge.respawnPose();
-      this.fm.gearDown = this.gearFor(false);
-      this.fm.reset(position, forward, this.airStartSpeed, false);
-      this.fm.gearDown = this.gearFor(false);
-      this.controls.input.throttle = 0.7;
+      // Only the landing is left: continue on final, configured for landing.
+      const landing = this.challenge.awaitingLanding;
+      const p = this.type.physics;
+      const speed = landing ? (p.stallSpeed - p.flapStallDrop) * 1.3 : this.airStartSpeed;
+      this.fm.gearDown = this.gearFor(landing);
+      this.fm.reset(position, forward, speed, false);
+      this.fm.gearDown = this.gearFor(landing);
+      this.fm.flaps = landing ? 1 : 0;
+      if (this.aircraft) this.aircraft.controls.gear = this.fm.gearDown ? 1 : 0;
+      this.controls.input.throttle = landing ? 0.3 : 0.7;
       this.aim.reset(forward);
       this.rig.snap();
       this.lastPos.copy(position);

@@ -160,7 +160,7 @@ export const COURSES: Course[] = [
       p(9.87353, 46.52157, 1768),
     ],
     radius: 50,
-    medals: { gold: 200, silver: 235, bronze: 280 },
+    medals: { gold: 150, silver: 175, bronze: 210 },
     landing: SAMEDAN_03,
     aircraft: 'a320',
   },

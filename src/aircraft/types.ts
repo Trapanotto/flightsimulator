@@ -296,7 +296,59 @@ export const F35: AircraftType = {
   span: 10.7,
 };
 
-export const AIRCRAFT: AircraftType[] = [C172, PC12, PHENOM100, F35];
+export const A320: AircraftType = {
+  id: 'a320',
+  name: 'Airbus A320',
+  info: {
+    de: 'Kurz- und Mittelstrecke · 2 Turbofans · 180 Sitze · Sharklets',
+    en: 'Short and medium haul · 2 turbofans · 180 seats · sharklets',
+  },
+  registration: 'HB-JTA',
+  url: `${base}assets/aircraft/a320.glb`,
+  physics: {
+    thrust: 3.2,
+    drag: 3.2 / 250 ** 2,
+    gearDrag: 0.6,
+    flapDrag: 1.2,
+    boostFactor: 1,
+    boostSeconds: 0,
+    boostRecharge: 0,
+    stallSpeed: 68,
+    flapStallDrop: 18,
+    rotateSpeed: 72,
+    rollRate: 0.8,
+    pitchRate: 0.5,
+    yawRate: 0.22,
+    grip: 2.0,
+    gearHeight: 3.6, // model
+    bellyHeight: 1.55,
+    maxSinkRate: 3.0,
+    maxG: 2.5,
+    aoaRef: 4 * DEG,
+    aoaSpeed: 85,
+    aoaMax: 13 * DEG,
+    trimMin: -10 * DEG,
+    trimMax: 15 * DEG,
+    trimRate: 2 * DEG,
+    fixedGear: false,
+    maxFlapDeg: 35,
+    hull: {
+      nose: [0, 0, 18.8],
+      wingL: [17.6, 2.6, -6.5],
+      wingR: [-17.6, 2.6, -6.5],
+      tail: [0, 8.1, -16.5],
+    }, // model
+  },
+  engine: { kind: 'jet', display: 'n1', idle: 21, max: 100, blades: 24, maxRps: 45 },
+  eye: [0.52, 1.1, 16.6], // model
+  wingCam: [9.0, 0.6, -1.0],
+  chaseDistance: 55,
+  chaseHeight: 11,
+  length: 37.57,
+  span: 35.8,
+};
+
+export const AIRCRAFT: AircraftType[] = [C172, PC12, PHENOM100, F35, A320];
 export const DEFAULT_AIRCRAFT = C172;
 
 /** The type with this id, if it is in the fleet already. */
