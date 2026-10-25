@@ -94,7 +94,7 @@ def build(col, m):
         col, m["interior"], 0.20, 0.60, -0.30,
         seats=[(0.27, -0.85, 0.0), (-0.27, -0.85, 0.0), (0.27, -0.02, 0.0), (-0.27, -0.02, 0.0)],
         panel=(-1.66, 0.22, 0.94, 0.36), window=window, screen_mat=m["screen"],
-        yokes=[(0.27, -1.36, 0.10), (-0.27, -1.36, 0.10)],
+        yokes=[(0.27, -1.36, 0.10), (-0.27, -1.36, 0.10)], deck=(-2.60, -1.60, 0.42),
     )
     parts.update(g.build_surface(col, m["airframe"], WING, "Wing",
                                  controls=[("Flap", 0.08, 0.55), ("Aileron", 0.58, 0.93)],

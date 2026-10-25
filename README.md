@@ -69,8 +69,11 @@ Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
   und Klappen, Fahrwerk, Propeller bzw. Triebwerke, Lackierung mit Logo und Schriftzug in einer
   2048er-Textur, drei Detailstufen. Auswahl im **Hangar** oder im Flugmenü.
   - ✅ **Cessna 172 Skyhawk** (HB-TCA): Hochdecker mit Streben, starres Fahrwerk mit Radverkleidungen,
-    Glascockpit; 0,8 MB.
-  - ⏳ Pilatus PC-12, Embraer Phenom 100, Lockheed Martin F-35 Lightning II, Airbus A320, Boeing 747
+    Glascockpit; Challenge «Seen-Tour Zentralschweiz»; 0,8 MB.
+  - ✅ **Pilatus PC-12 NGX** (HB-TPC): Tiefdecker aus Stans, T-Leitwerk, Winglets, 5-Blatt-Propeller,
+    Einziehfahrwerk; Challenge «Lauterbrunnen Canyon Run»; 0,8 MB.
+    ![Pilatus PC-12 von Trapanotto Airlines](docs/screenshots/pc12.png)
+  - ⏳ Embraer Phenom 100, Lockheed Martin F-35 Lightning II, Airbus A320, Boeing 747
     ![Cessna 172 von Trapanotto Airlines](docs/screenshots/c172.png)
 
 - **Ganze Schweiz streamen:** Terrain (Quantized-Mesh) und SWISSIMAGE-Luftbilder direkt von geo.admin.ch,

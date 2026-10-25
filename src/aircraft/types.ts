@@ -140,7 +140,59 @@ export const C172: AircraftType = {
   span: 11.0,
 };
 
-export const AIRCRAFT: AircraftType[] = [C172];
+export const PC12: AircraftType = {
+  id: 'pc12',
+  name: 'Pilatus PC-12 NGX',
+  info: {
+    de: 'Einmotoriger Turboprop aus Stans · 9 Sitze · bis 528 km/h',
+    en: 'Single-engine turboprop from Stans · 9 seats · up to 528 km/h',
+  },
+  registration: 'HB-TPC',
+  url: `${base}assets/aircraft/pc12.glb`,
+  physics: {
+    thrust: 5.5,
+    drag: 5.5 / 145 ** 2,
+    gearDrag: 0.3,
+    flapDrag: 0.5,
+    boostFactor: 1,
+    boostSeconds: 0,
+    boostRecharge: 0,
+    stallSpeed: 34,
+    flapStallDrop: 8,
+    rotateSpeed: 38,
+    rollRate: 1.6,
+    pitchRate: 0.95,
+    yawRate: 0.4,
+    grip: 2.8,
+    gearHeight: 1.85, // model
+    bellyHeight: 1.0,
+    maxSinkRate: 3.5,
+    maxG: 3.3,
+    aoaRef: 5 * DEG,
+    aoaSpeed: 45,
+    aoaMax: 12 * DEG,
+    trimMin: -15 * DEG,
+    trimMax: 20 * DEG,
+    trimRate: 3.5 * DEG,
+    fixedGear: false,
+    maxFlapDeg: 40,
+    hull: {
+      nose: [0, -0.05, 7.4],
+      wingL: [8.1, 0.5, 1.6],
+      wingR: [-8.1, 0.5, 1.6],
+      tail: [0, 2.95, -7.4],
+    }, // model
+  },
+  engine: { kind: 'turboprop', display: 'rpm', idle: 950, max: 1700, blades: 5, maxRps: 28 },
+  eye: [0.38, 0.82, 2.75], // model
+  wingCam: [3.2, -0.2, 0.2],
+  chaseDistance: 18,
+  chaseHeight: 4.2,
+  length: 14.4,
+  span: 16.28,
+};
+
+export const AIRCRAFT: AircraftType[] = [C172, PC12];
 export const DEFAULT_AIRCRAFT = C172;
 
 /** The type with this id, if it is in the fleet already. */

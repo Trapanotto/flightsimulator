@@ -365,7 +365,7 @@ class Fuselage:
         return skin, glass
 
     def interior(self, col, mat, s0, s1, floor_z, seats=(), panel=None, window=None,
-                 screen_mat=None, yokes=()):
+                 screen_mat=None, yokes=(), deck=None):
         """
         Cabin tub seen through the windows: inner skin (open where window(centre) is True),
         rear bulkhead, seats and instrument panel with a dark firewall below it.
@@ -401,6 +401,11 @@ class Fuselage:
             low = z - h / 2
             parts.append(box(0, y - 0.04, (floor_z + low) / 2, w, 0.04, low - floor_z))  # firewall
             parts.append(box(0, y + 0.08, z + h / 2 + 0.015, w * 1.02, 0.22, 0.03))  # glare shield
+        if deck:
+            # Dark deck under the windshield: closes the view into the nose from inside.
+            y0, y1, dz = deck
+            hw = self.profile(self.s((y0 + y1) / 2))[0]
+            parts.append(box(0, (y0 + y1) / 2, dz, hw * 1.9, abs(y1 - y0), 0.02))
         for (x, y, z) in yokes:
             parts.append(cylinder((x, y - 0.25, z), (x, y, z), 0.02, 8))                # shaft
             parts.append(box(x, y, z, 0.30, 0.03, 0.05))                                # horns

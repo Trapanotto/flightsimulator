@@ -1,4 +1,5 @@
 import { Vector3 } from 'three';
+import { findAircraft } from '../src/aircraft/types';
 import { describe, expect, it } from 'vitest';
 import { ChallengeRun, ringCrossing, ringNormals } from '../src/game/ChallengeRun';
 import {
@@ -59,6 +60,17 @@ describe('courses', () => {
       const len = courseLength(c);
       expect(len / c.medals.gold, c.id).toBeLessThan(140);
       expect(len / c.medals.bronze, c.id).toBeGreaterThan(25);
+    }
+  });
+
+  it('gold is 8–35 % slower than the assigned aircraft at top speed', () => {
+    for (const c of COURSES) {
+      const plane = findAircraft(c.aircraft);
+      if (!plane) continue; // not built yet
+      const p = plane.physics;
+      const ideal = courseLength(c) / Math.sqrt(p.thrust / p.drag);
+      expect(c.medals.gold / ideal, c.id).toBeGreaterThan(1.08);
+      expect(c.medals.gold / ideal, c.id).toBeLessThan(1.35);
     }
   });
 

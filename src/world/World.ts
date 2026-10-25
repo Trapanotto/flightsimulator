@@ -104,6 +104,10 @@ function supportsClipControl(): boolean {
   return ok;
 }
 
+const TIME_SCALE = Math.min(
+  5,
+  Math.max(1, Number(new URLSearchParams(location.search).get('timescale')) || 1),
+);
 export class World {
   readonly renderer: WebGLRenderer;
   readonly scene = new Scene();
@@ -387,7 +391,8 @@ export class World {
 
   private tick(dt: number, dtMs: number) {
     this.updateBasis();
-    if (this.game) this.game.update(dt);
+    // ?timescale=3 runs the flight faster (automated test flights only).
+    if (this.game) this.game.update(dt * TIME_SCALE);
     else if (this.route) this.flyRoute(dt, dtMs);
     else this.fly.update(dt, this.basis, this.geo[2], this.ground);
     this.rebaseIfNeeded();
