@@ -254,7 +254,7 @@ export class FlightGame {
     this.fm.flaps = 0;
     this.fm.reset(pos, fwd, pose.onGround ? 0 : this.airStartSpeed, pose.onGround);
     this.fm.gearDown = this.gearFor(pose.onGround);
-    this.controls.input.throttle = pose.onGround ? 0 : 0.7;
+    this.controls.input.throttle = pose.onGround ? 0 : this.fm.throttle;
     this.aim.reset(fwd);
     this.rig.snap();
     if (this.aircraft) this.aircraft.controls.gear = this.fm.gearDown ? 1 : 0;
@@ -478,7 +478,8 @@ export class FlightGame {
       this.fm.reset(position, forward, speed, false);
       this.fm.gearDown = this.gearFor(landing);
       if (this.aircraft) this.aircraft.controls.gear = this.fm.gearDown ? 1 : 0;
-      this.controls.input.throttle = landing ? 0.3 : 0.7;
+      // reset() set the throttle for level flight in this configuration.
+      this.controls.input.throttle = this.fm.throttle;
       this.aim.reset(forward);
       this.rig.snap();
       this.lastPos.copy(position);
@@ -493,7 +494,7 @@ export class FlightGame {
     this.fm.gearDown = this.gearFor(false);
     this.fm.reset(pos, fwd, this.airStartSpeed, false);
     this.fm.gearDown = this.gearFor(false);
-    this.controls.input.throttle = 0.7;
+    this.controls.input.throttle = this.fm.throttle;
     this.aim.reset(this.fm.forward);
     this.rig.snap();
     this.lastPos.copy(pos);

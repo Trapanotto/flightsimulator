@@ -6,7 +6,11 @@ import { type AircraftPhysics, DEFAULT_AIRCRAFT } from '../aircraft/types';
  * with mass and inertia, aerodynamic forces and moments from non-dimensional coefficients
  * (lift with stall, drag polar, stability and damping derivatives, control derivatives),
  * propeller or jet thrust with altitude lapse, and a spring/damper landing gear with rolling
- * friction, brakes, side grip and nose-wheel steering.
+ * friction, brakes, side grip and nose-wheel steering. Ground effect near the runway.
+ *
+ * Flight controls: direct law (stick = surface deflection) with a yaw damper that keeps turns
+ * coordinated while the pedals are free, or fly-by-wire laws for the types that have them
+ * (stick = load factor and roll rate, computed by inverting the aerodynamic model).
  *
  * Model axes: x = left wing, y = up, z = nose (right-handed). Roll rate p = ω·z (right wing
  * down positive), pitch rate q = -ω·x (nose up positive), yaw rate r = -ω·y (nose right).
@@ -36,6 +40,12 @@ export interface FlightInput {
   brake: boolean;
   /** Trim wheel: -1 nose down .. 1 nose up (rate while held). */
   trim?: number;
+  /**
+   * Pitch / roll come from on/off keys: they are turned into rate demands (a pilot's hand
+   * easing the stick) instead of slamming the surfaces to the stop.
+   */
+  digitalPitch?: boolean;
+  digitalRoll?: boolean;
 }
 
 export interface TouchdownEvent {
@@ -81,8 +91,10 @@ export function thrustAt(
 ) {
   const e = p.propulsion;
   if (e.kind === 'prop') {
-    // Static thrust at low speed, then power-limited: T = eta * P / v.
-    const t = Math.min(e.staticThrust, (e.efficiency * e.power) / Math.max(v, 1));
+    // Static thrust at low speed, then power-limited: T = eta * P / v. Propeller efficiency
+    // climbs with airspeed (advance ratio) and peaks at cruise.
+    const eta = e.efficiency * Math.min(1, (1.25 * v) / (v + 0.25 * p.vne));
+    const t = Math.min(e.staticThrust, (eta * e.power) / Math.max(v, 1));
     return throttle * t * sigma;
   }
   const lapse = Math.pow(sigma, 0.7) * Math.max(0.6, 1 - 0.18 * (v / 340));
@@ -178,6 +190,16 @@ export class FlightModel {
   private airborneTime = 10;
   private groundTime = 10;
   private readonly controls = { e: 0, a: 0, r: 0 };
+  /** Surface commands this step, before the actuator rate limit. */
+  private readonly cmd = { e: 0, a: 0, r: 0 };
+  /** Fly-by-wire: bank and flight path held while the stick is released. */
+  private bankRef = 0;
+  /** A pitch key was held last step (auto-trim on release); the pilot flies with keys. */
+  private keyPitchHeld = false;
+  private keyFlying = false;
+  private pathRef = 0;
+  /** Induced drag factor from ground effect (1 = free air), updated once per frame. */
+  private groundEffect = 1;
   private readonly gearTorque = new Vector3();
 
   constructor(
@@ -229,21 +251,48 @@ export class FlightModel {
       // Trimmed flight: nose up by the angle of attack that carries the weight, elevator
       // trim that cancels the pitching moment there.
       const a = this.p.aero;
-      const rho = RHO0 * densityRatio(this.altitudeOf(position));
-      const cl = (this.p.mass * G) / (0.5 * rho * speed * speed * this.p.wingArea);
-      const alpha = Math.min(
-        this.alphaStall() * 0.8,
-        (cl - a.CL0 - this.flaps * a.CLflaps) / a.CLa,
-      );
+      const sigma = densityRatio(this.altitudeOf(position));
+      const { alpha, de, qs, cl } = this.trimFor(speed, sigma);
       this.rotateLocal(X, -alpha);
       this.updateAxes();
-      this.trim = clamp(-(a.Cm0 + a.Cma * alpha + this.flaps * a.Cmflaps) / a.Cmde, -1, 1);
+      this.trim = this.p.fbw ? 0 : de;
+      if (this.p.fbw) this.controls.e = this.cmd.e = de;
+      // Throttle for level flight: thrust = drag.
+      const ar = (this.p.span * this.p.span) / this.p.wingArea;
+      const cd =
+        a.CD0 +
+        (this.gearDown ? a.CDgear : 0) +
+        this.flaps * a.CDflaps +
+        (cl * cl) / (Math.PI * a.e * ar) +
+        waveDrag(speed);
+      const full = thrustAt(this.p, speed, sigma, 1, false);
+      this.throttle = full > 0 ? clamp((qs * cd) / full, 0.05, 1) : 0.7;
+      this.pathRef = 0;
+      this.bankRef = 0;
     } else {
-      this.trim = 0;
+      // Takeoff trim: set for the best climb speed (about Vy), so the aircraft flies on after the rotation.
+      this.trim = onGround && !this.p.fbw ? this.trimFor(1.5 * this.stallSpeed, 1).de : 0;
       if (onGround) this.settle();
     }
     this.speed = speed;
     this.direction.copy(speed > 0.5 ? this.velocity : this.forward).normalize();
+  }
+
+  /** Angle of attack and elevator for 1 g flight at `speed` (the elevator also makes lift). */
+  private trimFor(speed: number, sigma: number) {
+    const a = this.p.aero;
+    const qs = 0.5 * RHO0 * sigma * speed * speed * this.p.wingArea;
+    const cl = (this.p.mass * G) / qs;
+    let alpha = 0;
+    let de = 0;
+    for (let i = 0; i < 6; i++) {
+      alpha = Math.min(
+        this.alphaStall() * 0.8,
+        (cl - a.CL0 - this.flaps * a.CLflaps - a.CLde * de) / a.CLa,
+      );
+      de = clamp(-(a.Cm0 + a.Cma * alpha + this.flaps * a.Cmflaps) / a.Cmde, -1, 1);
+    }
+    return { alpha, de, qs, cl };
   }
 
   /**
@@ -303,6 +352,14 @@ export class FlightModel {
 
   step(dt: number, input: FlightInput, events: FlightEvent[] = []) {
     if (this.crashed) return;
+    // Ground effect: the ground blocks the wing-tip vortices, induced drag falls within about
+    // one span of the ground (McCormick).
+    const h = this.env.heightAboveGround(this.position);
+    if (h === undefined) this.groundEffect = 1;
+    else {
+      const k = Math.pow((16 * Math.max(0.3, h)) / this.p.span, 2);
+      this.groundEffect = k / (1 + k);
+    }
     const n = Math.max(1, Math.round(dt / SUB_DT));
     for (let i = 0; i < n && !this.crashed; i++) this.subStep(dt / n, input, events);
   }
@@ -321,15 +378,6 @@ export class FlightModel {
     this.boostLeft = this.boosting
       ? Math.max(0, this.boostLeft - dt)
       : Math.min(ab, this.boostLeft + 0.2 * dt);
-
-    // Control surfaces move at a finite rate; trim wheel.
-    const rate = p.controlRate * dt;
-    const c = this.controls;
-    c.e += clamp(input.pitch - c.e, -rate, rate);
-    c.a += clamp(input.roll - c.a, -rate, rate);
-    c.r += clamp(input.yaw - c.r, -rate, rate);
-    this.trim = clamp(this.trim + (input.trim ?? 0) * 0.12 * dt, -1, 1);
-    const de = clamp(c.e + this.trim, -1, 1);
 
     // The terrain under a slow aircraft on the ground jumped (more detailed tiles): follow it
     // instead of letting the springs throw the aircraft into the air.
@@ -353,6 +401,15 @@ export class FlightModel {
     const qh = (-this.omega.x * p.chord) / (2 * Vr);
     const rh = (-this.omega.y * p.span) / (2 * Vr);
 
+    // ---- flight controls: surfaces move at a finite rate ----
+    this.flightControls(dt, input, V, qbar);
+    const rate = p.controlRate * dt;
+    const c = this.controls;
+    c.e += clamp(this.cmd.e - c.e, -rate, rate);
+    c.a += clamp(this.cmd.a - c.a, -rate, rate);
+    c.r += clamp(this.cmd.r - c.r, -rate, rate);
+    const de = clamp(c.e + this.trim, -1, 1);
+
     const cl = this.liftCoefficient(this.alpha) + a.CLde * de + a.CLq * qh;
     const ar = (p.span * p.span) / p.wingArea;
     const stall = Math.max(0, this.alpha - this.alphaStall());
@@ -360,7 +417,7 @@ export class FlightModel {
       a.CD0 +
       (this.gearDown ? a.CDgear : 0) +
       this.flaps * a.CDflaps +
-      (cl * cl) / (Math.PI * a.e * ar) +
+      ((cl * cl) / (Math.PI * a.e * ar)) * this.groundEffect +
       1.2 * stall +
       0.3 * Math.abs(this.beta) +
       waveDrag(V);
@@ -421,6 +478,156 @@ export class FlightModel {
     this.gLoad += (g - this.gLoad) * Math.min(1, dt * 6);
 
     this.checkHull(events);
+  }
+
+  /**
+   * Pilot input -> surface commands (this.cmd). Direct law: the stick moves the surfaces, the
+   * trim wheel offsets the elevator, a yaw damper coordinates turns while the pedals are free.
+   * Fly-by-wire: commanded pitch and roll accelerations are turned into surface deflections by
+   * inverting the moment equations (dynamic inversion).
+   */
+  private flightControls(dt: number, input: FlightInput, V: number, qbar: number) {
+    const p = this.p;
+    const a = p.aero;
+    const I = p.inertia;
+    const cmd = this.cmd;
+    const fbw = p.fbw;
+    const qs = qbar * p.wingArea;
+    const airborne = !this.onGround && V > 15 && qs > 1;
+    const bank = this.bank;
+    const theta = this.pitch;
+    const gamma = V > 1 ? Math.asin(clamp(this.velocity.dot(this.worldUp) / V, -1, 1)) : 0;
+    const Vr = Math.max(V, 10);
+    const pr = this.omega.z;
+    const qr = -this.omega.x;
+    const rr = -this.omega.y;
+    const ph = (pr * p.span) / (2 * Vr);
+    const qh = (qr * p.chord) / (2 * Vr);
+    const rh = (rr * p.span) / (2 * Vr);
+    const stall = Math.max(0, this.alpha - this.alphaStall());
+
+    cmd.e = input.pitch;
+    cmd.a = input.roll;
+    cmd.r = input.yaw;
+    if (!fbw) this.trim = clamp(this.trim + (input.trim ?? 0) * 0.12 * dt, -1, 1);
+
+    // Key held: pitch rate demand (direct-law types; fly-by-wire already commands rates).
+    const noseWheelDown = this.onGround && this.wheels.some((w) => w.steer && w.comp > 0);
+    const keyPitch =
+      !fbw && !!input.digitalPitch && Math.abs(input.pitch) > 0.03 && V > 0.5 * this.stallSpeed;
+    if (keyPitch) {
+      let qCmd = input.pitch * p.keyPitchRate * DEG;
+      if (this.onGround) qCmd = Math.min(qCmd, 1.5 * (p.rotationLimit * DEG - theta));
+      // A held key never pulls the wing past the stall.
+      else qCmd = Math.min(qCmd, 2 * (this.alphaStall() - 2 * DEG - this.alpha));
+      const qDot = 4 * (qCmd - qr);
+      const cmRest = a.Cm0 + a.Cma * this.alpha + a.Cmq * qh + this.flaps * a.Cmflaps - 0.6 * stall;
+      const de = ((I[0] * qDot + this.gearTorque.x) / (qs * p.chord) - cmRest) / a.Cmde;
+      // Nose wheel still down: full stick until the nose comes up.
+      if (!(noseWheelDown && input.pitch > 0)) cmd.e = clamp(de, -1, 1) - this.trim;
+    } else if (this.keyPitchHeld && airborne) {
+      // Key released in flight: trimmed for the angle of attack the key left, the nose stays
+      // (never slower than 1.2 x stall speed).
+      const slowest = this.trimFor(1.2 * this.stallSpeed, 1).de;
+      const steady = -(a.Cm0 + a.Cma * this.alpha + this.flaps * a.Cmflaps) / a.Cmde;
+      const t = clamp(Math.min(steady, slowest), -1, 1);
+      this.controls.e += this.trim - t;
+      this.trim = t;
+    }
+    this.keyPitchHeld = keyPitch;
+    if (input.digitalPitch || input.digitalRoll) this.keyFlying = true;
+    else if (Math.abs(input.pitch) > 0.03 || Math.abs(input.roll) > 0.03) this.keyFlying = false;
+    // Flying with keys: the extra lift for a level turn (up to 45 deg) is added, as a pilot
+    // would pull for it.
+    if (this.keyFlying && airborne && !fbw && !keyPitch) {
+      const phi = Math.min(Math.abs(bank), 45 * DEG);
+      const dn = 1 / Math.cos(phi) - 1;
+      const qTurn = (G * Math.sin(phi) ** 2) / (Vr * Math.cos(phi));
+      const dAlpha = (dn * p.mass * G) / (qs * a.CLa);
+      const dCm = -(a.Cma * dAlpha + (a.Cmq * qTurn * p.chord) / (2 * Vr));
+      cmd.e += dCm / a.Cmde;
+    }
+    // Roll key held: roll rate demand. Released (still flying with keys): the bank stays where
+    // the key left it, so the aircraft does not creep into a spiral.
+    const keyRoll = !!input.digitalRoll && Math.abs(input.roll) > 0.03;
+    if (!fbw && airborne && (keyRoll || (this.keyFlying && Math.abs(input.roll) <= 0.03))) {
+      let pCmd: number;
+      if (keyRoll) {
+        pCmd = input.roll * p.keyRollRate * DEG;
+        this.bankRef = bank;
+      } else pCmd = 0.8 * (this.bankRef - bank);
+      const pDot = (keyRoll ? 8 : 4) * (pCmd - pr);
+      const clRest = a.Clb * this.beta + a.Clp * ph + a.Clr * rh + a.Cldr * this.controls.r;
+      cmd.a = clamp(((I[2] * pDot) / (qs * p.span) - clRest) / a.Clda, -1, 1);
+    }
+
+    // Fly-by-wire: ground mode is direct; the flight laws blend in over 2 s after liftoff.
+    const law = fbw && airborne ? clamp((this.airborneTime - 0.5) / 2, 0, 1) : 0;
+    // Takeoff rotation, until the flight laws have taken over: the stick commands a pitch rate
+    // (no over-rotation, no tail strike), released the attitude is held.
+    if (fbw && law < 1 && V > 0.5 * this.stallSpeed && qs > 1) {
+      const lim = p.rotationLimit * DEG;
+      let qCmd = Math.max(0, input.pitch) * fbw.rotationRate * DEG;
+      qCmd = Math.min(qCmd, 1.5 * (lim - theta));
+      if (input.pitch <= 0.03 && theta < 0.5 * DEG) qCmd = 0;
+      const qDot = 4 * (qCmd - qr);
+      const cmRest = a.Cm0 + a.Cma * this.alpha + a.Cmq * qh + this.flaps * a.Cmflaps;
+      const de = ((I[0] * qDot + this.gearTorque.x) / (qs * p.chord) - cmRest) / a.Cmde;
+      // Nose wheel still down: the stick acts directly until the nose comes up.
+      if (input.pitch < -0.03 || noseWheelDown) cmd.e = input.pitch;
+      else cmd.e = clamp(de, -1, 1) - this.trim;
+    }
+    if (fbw && law > 0) {
+      // Pitch: load factor demand; released, the flight path is held (bank-compensated up to
+      // the bank-hold angle); angle-of-attack protection below the stall.
+      const stick = input.pitch;
+      const free = Math.abs(stick) <= 0.03;
+      if (!free || law < 1) this.pathRef = gamma;
+      const comp = Math.cos(Math.min(Math.abs(bank), fbw.bankHold * DEG, 60 * DEG));
+      let n = Math.cos(theta) / comp;
+      n += stick > 0 ? stick * (fbw.gMax - 1) : stick * (1 - fbw.gMin);
+      let qCmd = (G / Vr) * (n - Math.cos(theta) * Math.cos(bank));
+      if (free) qCmd += 0.6 * (this.pathRef - gamma);
+      const aProt = this.alphaStall() - 2 * DEG;
+      qCmd = clamp(qCmd, 2 * (-0.15 - this.alpha), 2 * (aProt - this.alpha));
+      const qDot = fbw.pitchGain * (qCmd - qr);
+      const cmRest = a.Cm0 + a.Cma * this.alpha + a.Cmq * qh + this.flaps * a.Cmflaps - 0.6 * stall;
+      const de = ((I[0] * qDot + this.gearTorque.x) / (qs * p.chord) - cmRest) / a.Cmde;
+      // Auto-trim: the computers own the whole elevator.
+      cmd.e = lerp(cmd.e, clamp(de, -1, 1) - this.trim, law);
+
+      // Roll: rate demand, bank held when released, back to bankHold, never past bankMax.
+      const roll = input.roll;
+      let pCmd: number;
+      if (Math.abs(roll) > 0.03) {
+        pCmd = roll * fbw.rollRate * DEG;
+        this.bankRef = clamp(bank, -fbw.bankHold * DEG, fbw.bankHold * DEG);
+      } else pCmd = 1.2 * (this.bankRef - bank);
+      // Bank protection: the roll rate fades out towards bankMax (and pulls back past it).
+      if (Math.sign(pCmd) === Math.sign(bank)) {
+        const room = 1.5 * (fbw.bankMax * DEG - Math.abs(bank));
+        pCmd = Math.sign(pCmd) * Math.min(Math.abs(pCmd), room);
+      }
+      const pDot = fbw.rollGain * (pCmd - pr);
+      const clRest = a.Clb * this.beta + a.Clp * ph + a.Clr * rh + a.Cldr * this.controls.r;
+      const da = ((I[2] * pDot) / (qs * p.span) - clRest) / a.Clda;
+      cmd.a = lerp(cmd.a, clamp(da, -1, 1), law);
+    } else if (!airborne) {
+      this.bankRef = bank;
+      this.pathRef = gamma;
+    }
+
+    // Yaw damper / turn coordination while the pedals are free: no sideslip, the yaw rate of a
+    // coordinated turn.
+    if (airborne && Math.abs(input.yaw) < 0.05) {
+      const rCmd = (G * Math.sin(bank) * Math.cos(theta)) / Vr;
+      const rDot = 2.5 * (rCmd - rr) + 6 * this.beta;
+      const cnRest = a.Cnb * this.beta + a.Cnr * rh + a.Cnp * ph + a.Cnda * this.controls.a;
+      const dr = ((I[1] * rDot) / (qs * p.span) - cnRest) / a.Cndr;
+      const auth = fbw ? 1 : 0.6;
+      const blend = clamp((this.airborneTime - 0.3) / 1.5, 0, 1);
+      cmd.r = clamp(dr, -auth, auth) * blend;
+    }
   }
 
   /** Wheel springs, dampers and friction. Returns the world force; sets gearTorque (model). */
@@ -558,6 +765,10 @@ export class FlightModel {
     this.up.copy(Y).applyQuaternion(this.quaternion);
     this.right.copy(X).applyQuaternion(this.quaternion).negate();
   }
+}
+
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
 }
 
 function clamp(v: number, lo: number, hi: number) {

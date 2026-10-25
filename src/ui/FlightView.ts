@@ -378,7 +378,7 @@ export class FlightView {
       this.set('rpmUnit', e.display === 'rpm' ? this.tr('hud.rpm') : '% N1');
       this.q('[data-v="engineCell"]').classList.toggle('boost', fm.boosting);
       this.set('flaps', `${Math.round(fm.flaps * fm.p.maxFlapDeg)}°`);
-      this.set('trim', `${Math.round(fm.trim * 100)} %`);
+      this.set('trim', fm.p.fbw ? 'AUTO' : `${Math.round(fm.trim * 100)} %`);
       this.set('alt', String(Math.round(alt)));
       const vs = fm.verticalSpeed;
       this.set('vs', `${vs > 0.05 ? '+' : ''}${vs.toFixed(1)}`);

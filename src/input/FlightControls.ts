@@ -167,9 +167,12 @@ export class FlightControls {
     const keyboardActive = Math.abs(this.keyAxes.pitch) + Math.abs(this.keyAxes.roll) > 0.01;
     const aimOn = this.aim.active && !keyboardActive;
     let pitch = pick(this.keyAxes.pitch, pad.pitch, this.touch.pitch, aimOn ? this.aim.pitch : 0);
+    // Pitch from a key: the flight model eases it in as a pitch-rate demand.
+    this.input.digitalPitch = pitch !== 0 && pitch === this.keyAxes.pitch;
     if (this.invertPitch) pitch = -pitch;
     this.input.pitch = pitch;
     this.input.roll = pick(this.keyAxes.roll, pad.roll, this.touch.roll, aimOn ? this.aim.roll : 0);
+    this.input.digitalRoll = this.input.roll !== 0 && this.input.roll === this.keyAxes.roll;
     this.input.yaw = pick(this.keyAxes.yaw, pad.yaw, aimOn ? this.aim.yaw : 0);
     this.input.throttle = Math.max(0, Math.min(1, throttle));
     this.input.boost = boost;

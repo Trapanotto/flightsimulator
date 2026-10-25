@@ -216,3 +216,95 @@ describe('fleet performance (published figures)', () => {
     expect(stallSpeed(A320.physics, 1)).toBeGreaterThan(stallSpeed(C172.physics, 1) * 2);
   });
 });
+
+describe('handling (flight controls)', () => {
+  function cruise(type: AircraftType, frac = 0.6) {
+    const m = new FlightModel(flat, type.physics);
+    m.gearDown = false;
+    m.reset(new Vector3(0, 2000, 0), NORTH, type.physics.vne * frac, false);
+    return m;
+  }
+  const level = (m: FlightModel): FlightInput => ({ ...idle(), throttle: m.throttle });
+
+  for (const type of AIRCRAFT) {
+    it(`${type.id}: trimmed after a respawn, holds altitude hands-off`, () => {
+      const m = cruise(type, 0.75);
+      const th = m.throttle;
+      let worst = 0;
+      run(m, 20, () => {
+        worst = Math.max(worst, Math.abs(m.position.y - 2000));
+        return { ...idle(), throttle: th };
+      });
+      expect(worst).toBeLessThan(25);
+    });
+
+    it(`${type.id}: rolls without skidding (yaw damper / turn coordination)`, () => {
+      const m = cruise(type);
+      let beta = 0;
+      run(m, 1.5, () => {
+        beta = Math.max(beta, Math.abs(m.beta));
+        return { ...level(m), roll: 1 };
+      });
+      expect(beta).toBeLessThan(7 * DEG);
+    });
+
+    it(`${type.id}: a pitch key eases the nose up on takeoff, no over-rotation`, () => {
+      const m = onRunway(type);
+      m.flaps = type.physics.fbw && type.id === 'f35' ? 0 : 0.5;
+      const vr = stallSpeed(type.physics, m.flaps) * 1.1;
+      let maxPitch = 0;
+      let airborne = 0;
+      const ev = run(m, 90, () => {
+        if (m.speed < vr) return { ...idle(), throttle: 1 };
+        // Over-rotation shows during the rotation and the first seconds of the climb.
+        if (airborne < 2) maxPitch = Math.max(maxPitch, m.pitch);
+        if (!m.onGround) airborne += DT;
+        // Hold the key until the wheels have been off for a second, then let go.
+        const key = airborne < 1 ? 1 : 0;
+        return { ...idle(), throttle: 1, digitalPitch: key > 0, pitch: key };
+      });
+      expect(ev.some((e) => e.type === 'crash')).toBe(false);
+      expect(ev.some((e) => e.type === 'liftoff')).toBe(true);
+      expect(maxPitch).toBeLessThan(type.physics.rotationLimit * DEG + 5 * DEG);
+      expect(m.verticalSpeed).toBeGreaterThan(1);
+    });
+  }
+
+  it('direct law: full aft stick at cruise stops near the stall, not deep past it', () => {
+    for (const type of [C172, PC12]) {
+      const m = cruise(type, 0.75);
+      let alpha = 0;
+      run(m, 1, () => {
+        alpha = Math.max(alpha, m.alpha);
+        return { ...level(m), pitch: 1 };
+      });
+      expect(alpha, type.id).toBeLessThan(25 * DEG);
+    }
+  });
+
+  it('fly-by-wire: the A320 holds its bank when released and never passes 67 deg', () => {
+    const m = cruise(A320);
+    // Released at 45 deg: back to 33 deg and held there.
+    let released = false;
+    run(m, 30, () => {
+      released ||= m.bank > 45 * DEG;
+      return { ...level(m), roll: released ? 0 : 1 };
+    });
+    expect(Math.abs(m.bank - 33 * DEG)).toBeLessThan(4 * DEG);
+    let worst = 0;
+    run(m, 10, () => {
+      worst = Math.max(worst, Math.abs(m.bank));
+      return { ...level(m), roll: 1 };
+    });
+    expect(worst).toBeLessThan(70 * DEG);
+  });
+
+  it('fly-by-wire: the A320 holds its flight path with the stick released', () => {
+    const m = cruise(A320);
+    run(m, 3, () => ({ ...level(m), pitch: 0.3 }));
+    const vs = m.verticalSpeed;
+    expect(vs).toBeGreaterThan(2);
+    run(m, 5, () => ({ ...level(m), throttle: 1 }));
+    expect(m.verticalSpeed).toBeGreaterThan(vs * 0.5);
+  });
+});

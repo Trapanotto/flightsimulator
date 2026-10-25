@@ -132,7 +132,10 @@ export class Showcase {
 
   constructor(private readonly world: World) {
     // Start somewhere in the valley, with the PC-12 (built in Stans).
-    this.typeIndex = Math.max(0, AIRCRAFT.findIndex((a) => a.id === 'pc12'));
+    this.typeIndex = Math.max(
+      0,
+      AIRCRAFT.findIndex((a) => a.id === 'pc12'),
+    );
     this.s = 0;
     this.world.moveCameraTo(ROUTE[0]![0], ROUTE[0]![1], ROUTE[0]![2] + 60);
     void this.show(AIRCRAFT[this.typeIndex]!);
@@ -206,8 +209,16 @@ export class Showcase {
     const behind = this.renderAt(this.s - v * 0.5, new Vector3());
     const up = this.world.upAt(pos, this.basis.up);
     const fwd = this.basis.fwd.subVectors(ahead, behind).normalize();
-    const flat1 = pos.clone().sub(behind).addScaledVector(up, -pos.clone().sub(behind).dot(up)).normalize();
-    const flat2 = ahead.clone().sub(pos).addScaledVector(up, -ahead.clone().sub(pos).dot(up)).normalize();
+    const flat1 = pos
+      .clone()
+      .sub(behind)
+      .addScaledVector(up, -pos.clone().sub(behind).dot(up))
+      .normalize();
+    const flat2 = ahead
+      .clone()
+      .sub(pos)
+      .addScaledVector(up, -ahead.clone().sub(pos).dot(up))
+      .normalize();
     const turn = Math.atan2(flat1.clone().cross(flat2).dot(up), flat1.dot(flat2)) / 0.5; // rad/s
     const bank = Math.max(-0.9, Math.min(0.9, Math.atan((v * turn) / G)));
     const left = new Vector3().crossVectors(up, fwd).normalize();
@@ -257,13 +268,23 @@ export class Showcase {
       const ahead = this.renderAt(this.s + v * 3.8 + 50, new Vector3());
       const up = this.world.upAt(p, new Vector3());
       const side = new Vector3().subVectors(ahead, p).cross(up).normalize();
-      this.fixedCam.copy(p).addScaledVector(side, len * 1.6).addScaledVector(up, len * 0.35);
+      this.fixedCam
+        .copy(p)
+        .addScaledVector(side, len * 1.6)
+        .addScaledVector(up, len * 0.35);
     }
     if (this.shot === 'orbit') this.orbitAngle = Math.random() * Math.PI * 2;
     this.camSmooth.set(0, 0, 0);
   }
 
-  private placeCamera(dt: number, pos: Vector3, q: Quaternion, fwd: Vector3, up: Vector3, v: number) {
+  private placeCamera(
+    dt: number,
+    pos: Vector3,
+    q: Quaternion,
+    fwd: Vector3,
+    up: Vector3,
+    v: number,
+  ) {
     const cam = this.world.camera;
     const t = this.type;
     const len = Math.max(t.length, t.span);
@@ -271,7 +292,10 @@ export class Showcase {
     const look = new Vector3().copy(pos);
     switch (this.shot) {
       case 'chase':
-        cam.position.copy(pos).addScaledVector(fwd, -len * 1.4).addScaledVector(up, len * 0.32);
+        cam.position
+          .copy(pos)
+          .addScaledVector(fwd, -len * 1.4)
+          .addScaledVector(up, len * 0.32);
         look.addScaledVector(fwd, len * 2);
         break;
       case 'side': {
@@ -299,12 +323,18 @@ export class Showcase {
         break;
       }
       case 'wing':
-        cam.position.copy(new Vector3(...t.wingCam)).applyQuaternion(q).add(pos);
+        cam.position
+          .copy(new Vector3(...t.wingCam))
+          .applyQuaternion(q)
+          .add(pos);
         look.copy(cam.position).addScaledVector(fwd, 100).addScaledVector(up, -8);
         fov = 70;
         break;
       case 'wide':
-        cam.position.copy(pos).addScaledVector(fwd, -len * 6 - v * 1.5).addScaledVector(up, len * 2.2);
+        cam.position
+          .copy(pos)
+          .addScaledVector(fwd, -len * 6 - v * 1.5)
+          .addScaledVector(up, len * 2.2);
         fov = 50;
         break;
     }

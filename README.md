@@ -63,8 +63,16 @@ Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
   Auftrieb mit Strömungsabriss, Widerstandspolare, Stabilitäts-, Dämpfungs- und Ruderderivate,
   Propeller- bzw. Strahlschub mit Abnahme in der Höhe (Samedan auf 1700 m braucht längere
   Startstrecken), Transschall-Widerstand, Fahrwerk als Feder/Dämpfer pro Rad mit Bremsen und
-  Bugradlenkung, Trimmruder. Stall- und Höchstgeschwindigkeiten stimmen mit den Handbuchwerten
-  überein (Tests in `tests/flightModel.test.ts`). Warnungen: PULL UP, STALL, OVERSPEED.
+  Bugradlenkung, Trimmruder, Bodeneffekt. Stall- und Höchstgeschwindigkeiten stimmen mit den
+  Handbuchwerten überein (Tests in `tests/flightModel.test.ts`). Warnungen: PULL UP, STALL,
+  OVERSPEED.
+- **Flugsteuerung je Typ**: A320 und F-35 fliegen Fly-by-Wire wie im Original (Stick = Lastfaktor
+  und Rollrate, losgelassen hält das Flugzeug Bahn und Querlage, automatische Trimmung,
+  Anstell- und Querlagenschutz); die übrigen Typen direkt mit Gierdämpfer, der Kurven sauber
+  koordiniert. Startrimmung für die Steigfluggeschwindigkeit. Mit der Tastatur werden Tasten
+  zu weichen Drehraten statt Vollausschlag: die Nase hebt sich beim Start kontrolliert, nach dem
+  Loslassen bleiben Nase und Querlage, wo man sie hingesteuert hat (automatisches Nachtrimmen,
+  nie langsamer als 1,2 × Stall).
 - **Fliegen** mit der Flotte von Trapanotto Airlines: Start auf sechs echten Pisten
   (Bern-Belp, Sion, Zürich, Samedan, Lugano, Genf) oder in der Luft über Lauterbrunnen und am Matterhorn.
   Steuerung per Tastatur, Maus («fliege, wohin du schaust»), Gamepad oder Touch; Kameras

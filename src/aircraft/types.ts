@@ -52,6 +52,27 @@ export type Propulsion =
   | { kind: 'prop'; power: number; efficiency: number; staticThrust: number }
   | { kind: 'jet'; staticThrust: number; afterburner: number; afterburnerSeconds: number };
 
+/**
+ * Fly-by-wire flight laws (Airbus normal law, F-35 control laws): the stick commands load
+ * factor and roll rate instead of moving the surfaces; released, the aircraft holds its flight
+ * path and bank; trim is automatic; stall and bank protections.
+ */
+export interface FlyByWire {
+  /** Roll rate at full stick, deg/s. */
+  rollRate: number;
+  /** Load factor at full aft / full forward stick. */
+  gMax: number;
+  gMin: number;
+  /** Released beyond this bank the aircraft rolls back to it; it never banks past bankMax. */
+  bankHold: number;
+  bankMax: number;
+  /** How quickly the pitch and roll loops follow the command, 1/s. */
+  pitchGain: number;
+  rollGain: number;
+  /** Takeoff: pitch rate at full aft stick, deg/s. */
+  rotationRate: number;
+}
+
 export interface AircraftPhysics {
   /** kg, m², m, m (mean chord). */
   mass: number;
@@ -68,6 +89,12 @@ export interface AircraftPhysics {
   vne: number;
   /** Control surfaces travel per second (fraction of full deflection). */
   controlRate: number;
+  /** Flight control computers (else direct mechanical / hydraulic controls). */
+  fbw?: FlyByWire;
+  /** Pitch and roll rate while a key is held (deg/s), and the highest takeoff attitude (deg). */
+  keyPitchRate: number;
+  keyRollRate: number;
+  rotationLimit: number;
   /** Wheel contact points (model) with the weight share they are sprung for. */
   wheels: Array<{ pos: V3; share: number; steer?: boolean; brake?: boolean }>;
   /** Static compression of the gear springs, m. */
@@ -123,22 +150,22 @@ const LIGHT: Omit<Aero, 'CL0' | 'CLa' | 'CLmax' | 'CLflaps' | 'CD0' | 'CDgear' |
     CLde: 0.25,
     CLq: 3.9,
     Cm0: 0.02,
-    Cma: -0.9,
+    Cma: -1.8,
     Cmq: -12,
-    Cmde: 0.6,
+    Cmde: 0.5,
     Cmflaps: -0.08,
     CYb: -0.35,
     CYdr: 0.08,
     Clb: -0.09,
     Clp: -0.47,
-    Clr: 0.1,
+    Clr: 0.05,
     Clda: 0.07,
-    Cldr: 0.005,
+    Cldr: 0.002,
     Cnb: 0.065,
     Cnr: -0.1,
     Cnp: -0.03,
     Cndr: 0.035,
-    Cnda: -0.005,
+    Cnda: -0.003,
   };
 
 export const C172: AircraftType = {
@@ -171,6 +198,9 @@ export const C172: AircraftType = {
     propulsion: { kind: 'prop', power: 134_000, efficiency: 0.78, staticThrust: 2600 },
     vne: 163 * KT,
     controlRate: 4,
+    keyPitchRate: 12,
+    keyRollRate: 40,
+    rotationLimit: 12,
     wheels: [
       { pos: [0, -1.19, 2.96], share: 0.3, steer: true },
       { pos: [1.27, -1.19, -0.06], share: 0.35, brake: true },
@@ -227,7 +257,7 @@ export const PC12: AircraftType = {
       CDflaps: 0.07,
       e: 0.8,
       Cm0: 0.03,
-      Cma: -1.0,
+      Cma: -1.9,
       Cmq: -14,
       Cmde: 0.55,
       Cmflaps: -0.1,
@@ -242,6 +272,9 @@ export const PC12: AircraftType = {
     propulsion: { kind: 'prop', power: 895_000, efficiency: 0.82, staticThrust: 11_000 },
     vne: 240 * KT,
     controlRate: 3.5,
+    keyPitchRate: 10,
+    keyRollRate: 30,
+    rotationLimit: 12,
     wheels: [
       { pos: [0, -1.85, 5.32], share: 0.2, steer: true },
       { pos: [2.2, -1.85, 0.38], share: 0.4, brake: true },
@@ -298,9 +331,9 @@ export const PHENOM100: AircraftType = {
       CDflaps: 0.08,
       e: 0.78,
       Cm0: 0.02,
-      Cma: -1.1,
+      Cma: -2.0,
       Cmq: -15,
-      Cmde: 0.5,
+      Cmde: 0.52,
       Clb: -0.1,
       Clp: -0.45,
       Clda: 0.05,
@@ -314,6 +347,9 @@ export const PHENOM100: AircraftType = {
     propulsion: { kind: 'jet', staticThrust: 15_400, afterburner: 1, afterburnerSeconds: 0 },
     vne: 275 * KT,
     controlRate: 3.5,
+    keyPitchRate: 10,
+    keyRollRate: 30,
+    rotationLimit: 12,
     wheels: [
       { pos: [0, -1.3, 4.74], share: 0.15, steer: true },
       { pos: [1.62, -1.3, -0.04], share: 0.425, brake: true },
@@ -389,6 +425,19 @@ export const F35: AircraftType = {
     propulsion: { kind: 'jet', staticThrust: 125_000, afterburner: 1.53, afterburnerSeconds: 15 },
     vne: 700 * KT,
     controlRate: 6,
+    keyPitchRate: 25,
+    keyRollRate: 90,
+    rotationLimit: 13,
+    fbw: {
+      rollRate: 180,
+      gMax: 9,
+      gMin: -3,
+      bankHold: 180,
+      bankMax: 180,
+      pitchGain: 6,
+      rollGain: 10,
+      rotationRate: 6,
+    },
     wheels: [
       { pos: [0, -1.76, 6.1], share: 0.12, steer: true },
       { pos: [1.55, -1.76, -1.35], share: 0.44, brake: true },
@@ -445,13 +494,14 @@ export const A320: AircraftType = {
       CDflaps: 0.08,
       e: 0.82,
       Cm0: 0.05,
-      Cma: -1.2,
+      Cma: -1.4,
       Cmq: -20,
       Cmde: 0.45,
       Cmflaps: -0.12,
       Clb: -0.15,
       Clp: -0.4,
-      Clda: 0.025,
+      // Ailerons plus roll spoilers.
+      Clda: 0.05,
       Cnb: 0.12,
       Cnr: -0.18,
       Cnp: -0.02,
@@ -465,6 +515,19 @@ export const A320: AircraftType = {
     propulsion: { kind: 'jet', staticThrust: 240_000, afterburner: 1, afterburnerSeconds: 0 },
     vne: 350 * KT,
     controlRate: 2,
+    keyPitchRate: 6,
+    keyRollRate: 12,
+    rotationLimit: 12,
+    fbw: {
+      rollRate: 15,
+      gMax: 2.5,
+      gMin: -1,
+      bankHold: 33,
+      bankMax: 67,
+      pitchGain: 2.5,
+      rollGain: 4,
+      rotationRate: 3.5,
+    },
     wheels: [
       { pos: [0, -3.6, 15.5], share: 0.08, steer: true },
       { pos: [3.8, -3.6, -1.05], share: 0.46, brake: true },
@@ -528,7 +591,7 @@ export const B747: AircraftType = {
       Cmflaps: -0.12,
       Clb: -0.2,
       Clp: -0.42,
-      Clda: 0.025,
+      Clda: 0.045, // ailerons plus spoilers
       Cnb: 0.15,
       Cnr: -0.25,
       Cnp: -0.02,
@@ -542,6 +605,9 @@ export const B747: AircraftType = {
     propulsion: { kind: 'jet', staticThrust: 1_008_000, afterburner: 1, afterburnerSeconds: 0 },
     vne: 365 * KT,
     controlRate: 1.5,
+    keyPitchRate: 5,
+    keyRollRate: 10,
+    rotationLimit: 11,
     wheels: [
       { pos: [0, -5.42, 27.8], share: 0.06, steer: true },
       { pos: [5.85, -5.42, -2.1], share: 0.24, brake: true },
