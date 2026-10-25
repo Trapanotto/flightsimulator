@@ -1,4 +1,4 @@
-import { PMREMGenerator, Scene, Vector3 } from 'three';
+import { PMREMGenerator, Scene, type Texture, Vector3 } from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { FlightAudio } from '../audio/FlightAudio';
 import { Aircraft } from '../aircraft/Aircraft';
@@ -58,6 +58,7 @@ export class FlightGame {
   private servoUntil = 0;
   private lastCamDist = -1;
   private approach = 0;
+  private envMap?: Texture;
 
   constructor(private readonly world: World) {
     this.env = {
@@ -70,8 +71,10 @@ export class FlightGame {
   }
 
   async load() {
+    // Only the aircraft gets the sky reflection. Not via scene.environment: since three r17x
+    // that also lights Lambert materials (terrain, houses, trees) and washes the world out.
     const env = this.makeEnvironment();
-    this.world.scene.environment = env;
+    this.envMap = env;
     this.aircraft = await Aircraft.load(AIRCRAFT_URL, env);
     this.aircraft.root.traverse((o) => {
       // The sky is very bright; full-strength reflections wash the white paint out.
@@ -100,7 +103,7 @@ export class FlightGame {
     this.rig.dispose();
     this.audio.dispose();
     if (this.aircraft) this.world.scene.remove(this.aircraft.root, this.trails.group);
-    this.world.scene.environment = null;
+    this.envMap?.dispose();
   }
 
   /** Reflections for the aircraft: a pre-filtered copy of the sky. */
