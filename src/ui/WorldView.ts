@@ -1,6 +1,9 @@
 import { ATTRIBUTION } from '../core/config';
 import { type Lang, t } from '../i18n';
+import { wgs84ToLv95 } from '../geo/lv95';
 import { PLACES } from '../world/places';
+import { Minimap } from './Minimap';
+import { PlaceSearch } from './PlaceSearch';
 import type { World, WorldStats } from '../world/World';
 
 /** Overlay for the 3D view: instruments, places, test flight, controls hint and F3 debug panel. */
@@ -12,6 +15,8 @@ export class WorldView {
   private readonly routeBtn: HTMLButtonElement;
   private readonly forwardBtn: HTMLButtonElement;
   private timer = 0;
+  private readonly minimap: Minimap;
+  private readonly place: HTMLElement;
 
   constructor(
     parent: HTMLElement,
@@ -32,6 +37,7 @@ export class WorldView {
         </div>
       </div>
       <div class="hud" aria-live="off"></div>
+      <div class="near-place"></div>
       <span class="loading-dot" hidden>${t(lang, 'view.loading')}</span>
       <button class="btn btn-small forward" data-action="forward" aria-pressed="false">▶ ${t(lang, 'view.forward')}</button>
       <p class="hint">${t(lang, 'view.help')}</p>
@@ -65,9 +71,31 @@ export class WorldView {
       this.forwardBtn.setAttribute('aria-pressed', String(world.fly.autoForward));
       this.forwardBtn.blur();
     });
+    this.minimap = new Minimap(this.el);
+    this.place = this.el.querySelector('.near-place')!;
+    new PlaceSearch(
+      this.el.querySelector('.topbar')!,
+      lang,
+      (hit) => void this.flyTo(hit.lon, hit.lat),
+    );
     window.addEventListener('keydown', this.onKey);
     if (import.meta.env.DEV || location.search.includes('debug')) this.debug.hidden = false;
     this.timer = window.setInterval(() => this.refresh(), 200);
+  }
+
+  /** Jumps to a searched place, 450 m above the ground (official height from geo.admin.ch). */
+  private async flyTo(lon: number, lat: number) {
+    let ground = 600;
+    try {
+      const [e, n] = wgs84ToLv95(lon, lat);
+      const res = await fetch(
+        `https://api3.geo.admin.ch/rest/services/height?easting=${e.toFixed(1)}&northing=${n.toFixed(1)}`,
+      );
+      if (res.ok) ground = Number((await res.json()).height) || ground;
+    } catch {
+      // Offline: keep the default.
+    }
+    this.world.goTo({ name: 'search', lon, lat, h: ground + 450, heading: 0, pitch: -20 });
   }
 
   destroy() {
@@ -78,6 +106,14 @@ export class WorldView {
 
   private refresh() {
     const s = this.world.stats();
+    const cam = this.world.camera.position;
+    const [lon, lat] = this.world.toGeo(cam);
+    const b = this.world.basisAt(cam);
+    const fwd = this.world.camera.getWorldDirection(cam.clone());
+    const heading = (Math.atan2(fwd.dot(b.east), fwd.dot(b.north)) * 180) / Math.PI;
+    this.minimap.update(lon, lat, heading, s.agl ?? 1000);
+    const near = this.world.buildings?.nearestPlace(lon, lat);
+    this.place.textContent = near ? near.name : '';
     const agl = s.agl === undefined ? '–' : `${Math.round(s.agl)} m`;
     this.hud.innerHTML = `
       <span><b>${Math.round(s.speedKmh)}</b> km/h</span>
@@ -100,6 +136,8 @@ export class WorldView {
     } else if (e.code === 'KeyR') {
       if (this.world.routeActive) this.world.stopRoute();
       else this.world.startRoute();
+    } else if (e.code === 'KeyM') {
+      this.minimap.toggle();
     } else if (e.code === 'KeyF') {
       this.forwardBtn.click();
     }

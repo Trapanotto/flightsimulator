@@ -25,7 +25,9 @@ Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
 
 ## Was schon geht
 
-![Lauterbrunnen mit Chalets und Wald](docs/screenshots/lauterbrunnen-forest.png)
+- **HUD:** Kompassband, künstlicher Horizont mit Nickleiter, nächster Ortsname, Minimap aus der
+  Landeskarte (M = gross), Suche nach jedem Ort der Schweiz (geo.admin.ch SearchServer).
+  ![Lauterbrunnen mit Chalets und Wald](docs/screenshots/lauterbrunnen-forest.png)
 
 - **Regionstypische Gebäude und Bäume**, in Blender modelliert und auf die swisstopo-Grundrisse
   und Waldflächen gesetzt: Berner Bauernhaus, Chalet, Walliser Holzhaus, Engadiner Haus, Tessiner

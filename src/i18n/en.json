@@ -5,7 +5,7 @@
   "menu.settings": "Settings",
   "menu.credits": "Credits",
   "menu.soon": "soon",
-  "status.phase": "Phase 5 · Graphics",
+  "status.phase": "Phase 6 · Scenery & HUD",
   "status.webglMissing": "Your browser does not support WebGL 2. Please use a current version of Chrome, Edge, Firefox or Safari.",
   "credits.title": "Credits",
   "credits.data": "Geodata: © swisstopo (Federal Office of Topography), provided via geo.admin.ch",
@@ -39,7 +39,7 @@
   "camera.orbit": "Orbit",
   "flight.waiting": "Loading terrain at the start …",
   "flight.paused": "Paused – press P to continue",
-  "flight.help": "Click: mouse flight · W/S: nose down/up · A/D: roll · Q/E: yaw · Shift/Ctrl: throttle · Space: boost · G: gear · V: flaps · B: brake · C: camera · P: pause · ⌫: restart",
+  "flight.help": "Click: mouse flight (N on/off) · W/S: nose down/up · A/D: roll · Q/E: yaw · Shift/Ctrl: throttle · Space: boost · G: gear · V: flaps · B: brake · C: camera · M: map · P: pause · ⌫: restart",
   "gearDown": "Gear down",
   "gearUp": "Gear up",
   "landing.butter": "Butter-smooth landing",
@@ -66,5 +66,7 @@
   "time.golden": "Golden hour",
   "weather.clear": "Clear",
   "weather.fair": "Fair",
-  "weather.cloudy": "Cloudy"
+  "weather.cloudy": "Cloudy",
+  "search.placeholder": "Search a place …",
+  "hud.near": "near"
 }

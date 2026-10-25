@@ -4,6 +4,9 @@ import { type Lang, type MessageKey, t } from '../i18n';
 import { RUNWAYS } from '../game/airports';
 import type { FlightGame, StartPlace } from '../game/FlightGame';
 import { PLACES } from '../world/places';
+import { Instruments } from './Instruments';
+import { Minimap } from './Minimap';
+import { PlaceSearch } from './PlaceSearch';
 import type { World } from '../world/World';
 
 /** Start places in flight mode: all runways, plus two air starts in the Alps. */
@@ -35,6 +38,9 @@ export class FlightView {
   readonly el: HTMLElement;
   private readonly q = <T extends HTMLElement>(sel: string) => this.el.querySelector<T>(sel)!;
   private raf = 0;
+  private readonly instruments: Instruments;
+  private readonly minimap: Minimap;
+  private placeTimer = 0;
 
   constructor(
     parent: HTMLElement,
@@ -76,6 +82,7 @@ export class FlightView {
         <span data-v="flaps">${tr('hud.flaps')} 0 %</span>
         <span data-v="cam"></span>
       </div>
+      <div class="near-place" data-v="place"></div>
       <div class="warning" data-v="warn" hidden></div>
       <div class="fmessage" data-v="msg" hidden></div>
       <div class="loading-dot" data-v="wait" hidden>${tr('flight.waiting')}</div>
@@ -120,6 +127,12 @@ export class FlightView {
     const thr = this.q<HTMLInputElement>('.touch-throttle');
     thr.addEventListener('input', () => (game.controls.touch.throttle = Number(thr.value) / 100));
     this.setupStick();
+    this.instruments = new Instruments(this.el);
+    this.minimap = new Minimap(this.el);
+    game.onToggleMap = () => this.minimap.toggle();
+    new PlaceSearch(this.q('.topbar'), lang, (hit) =>
+      game.start({ kind: 'air', name: hit.name, lon: hit.lon, lat: hit.lat, h: 0, heading: 0 }),
+    );
 
     const loop = () => {
       this.raf = requestAnimationFrame(loop);
@@ -131,6 +144,10 @@ export class FlightView {
   destroy() {
     cancelAnimationFrame(this.raf);
     this.el.remove();
+  }
+
+  private tr(k: MessageKey) {
+    return t(this.lang, k);
   }
 
   private set(key: string, text: string) {
@@ -147,6 +164,24 @@ export class FlightView {
   private refresh() {
     const g = this.game;
     const fm = g.fm;
+    // Attitude and heading every frame; map and place name a few times per second.
+    const b = this.world.basisAt(fm.position);
+    const heading = (Math.atan2(fm.forward.dot(b.east), fm.forward.dot(b.north)) * 180) / Math.PI;
+    this.instruments.update(heading, (fm.pitch * 180) / Math.PI, (fm.bank * 180) / Math.PI);
+    this.instruments.visible = !g.waitingForTerrain && g.rig.mode !== 'orbit';
+    if (this.frame % 6 === 0) {
+      const [lon, lat, alt] = this.world.toGeo(fm.position);
+      const hag = g.heightAboveGround ?? alt;
+      this.minimap.update(lon, lat, heading, hag);
+      if (performance.now() > this.placeTimer) {
+        this.placeTimer = performance.now() + 1000;
+        const near = this.world.buildings?.nearestPlace(lon, lat);
+        this.set(
+          'place',
+          near ? (near.km < 1 ? near.name : `${this.tr('hud.near')} ${near.name}`) : '',
+        );
+      }
+    }
     const tr = (k: MessageKey) => t(this.lang, k);
     // Numbers at ~20 Hz, reticles every frame.
     if (this.frame++ % 3 === 0) {

@@ -1,7 +1,7 @@
 import type { FlightInput } from '../physics/FlightModel';
 
 /** One-shot actions (toggles), consumed once per frame. */
-export type FlightAction = 'gear' | 'flaps' | 'camera' | 'reset' | 'pause' | 'mouseAim';
+export type FlightAction = 'gear' | 'flaps' | 'camera' | 'reset' | 'pause' | 'mouseAim' | 'map';
 
 const DEADZONE = 0.08;
 const EXPO = 0.4;
@@ -36,7 +36,8 @@ const ACTION_KEYS: Record<string, FlightAction> = {
   KeyC: 'camera',
   Backspace: 'reset',
   KeyP: 'pause',
-  KeyM: 'mouseAim',
+  KeyN: 'mouseAim',
+  KeyM: 'map',
 };
 
 /** Standard gamepad layout (Xbox naming). */

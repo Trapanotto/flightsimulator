@@ -146,6 +146,28 @@ export class BuildingLayer {
     };
   }
 
+  /** Nearest named place: villages and towns within 6 km, hamlets within 2 km. */
+  nearestPlace(lon: number, lat: number): { name: string; km: number } | null {
+    const kx = 111.32 * Math.cos(lat * DEG);
+    let best: { name: string; km: number } | null = null;
+    let bestScore = Infinity;
+    for (const t of this.tiles.values()) {
+      for (const p of t.data?.places ?? []) {
+        const km = Math.hypot((p.lon - lon) * kx, (p.lat - lat) * 110.54);
+        const reach = p.cls === 'hamlet' ? 2 : p.cls === 'village' ? 6 : 12;
+        if (km > reach) continue;
+        // Bigger places win at equal distance.
+        const score =
+          km / (p.cls === 'city' ? 3 : p.cls === 'town' ? 2 : p.cls === 'village' ? 1.3 : 1);
+        if (score < bestScore) {
+          bestScore = score;
+          best = { name: p.name, km };
+        }
+      }
+    }
+    return best;
+  }
+
   /** Floating origin moved. */
   rebase(delta: Vector3) {
     this.group.position.sub(delta);

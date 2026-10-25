@@ -158,6 +158,22 @@ async function load(job: BuildingJob): Promise<TileBuildings> {
     if (lon >= b.west && lon < b.east && lat >= b.south && lat < b.north) trees.push(lon, lat);
   }
 
+  const places: TileBuildings['places'] = [];
+  const placeLayer = vt.layers.place;
+  for (let i = 0; placeLayer && i < placeLayer.length; i++) {
+    const f = placeLayer.feature(i);
+    const cls = String(f.properties.class ?? '');
+    if (!['city', 'town', 'village', 'hamlet', 'suburb'].includes(cls)) continue;
+    const g = f.toGeoJSON(job.x, job.y, job.z).geometry as { type: string; coordinates: Pos };
+    if (g.type !== 'Point') continue;
+    places.push({
+      name: String(f.properties['name:de'] ?? f.properties.name ?? ''),
+      cls,
+      lon: g.coordinates[0],
+      lat: g.coordinates[1],
+    });
+  }
+
   let canton: string | null = null;
   const admin = vt.layers.administrative_unit;
   for (let i = 0; admin && i < admin.length; i++) {
@@ -169,7 +185,7 @@ async function load(job: BuildingJob): Promise<TileBuildings> {
       if (pointInRing([lon0, lat0], ring)) canton = name;
     }
   }
-  return { footprints, churches, canton, trees: new Float64Array(trees) };
+  return { footprints, churches, canton, trees: new Float64Array(trees), places };
 }
 
 self.onmessage = async (e: MessageEvent<{ id: number; job: BuildingJob }>) => {

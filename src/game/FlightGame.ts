@@ -40,6 +40,8 @@ export class FlightGame {
   /** Waiting for terrain under the start place. */
   waitingForTerrain = true;
   message: GameMessage | null = null;
+  /** Set by the view: toggles the large map (key M). */
+  onToggleMap?: () => void;
   readonly env: FlightEnv;
   private acc = 0;
   private time = 0;
@@ -266,6 +268,9 @@ export class FlightGame {
         break;
       case 'pause':
         this.paused = !this.paused;
+        break;
+      case 'map':
+        this.onToggleMap?.();
         break;
       case 'mouseAim':
         this.aim.enabled = !this.aim.enabled;

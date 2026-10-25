@@ -1,7 +1,7 @@
 {
   "name": "trapanotto-flight-simulator",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
   "description": "Arcade flight simulator over a streamed 3D Switzerland (swisstopo data, Three.js, Blender assets).",
   "license": "MIT",

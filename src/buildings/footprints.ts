@@ -26,6 +26,8 @@ export interface TileBuildings {
   canton: string | null;
   /** Tree positions as lon, lat pairs. */
   trees: Float64Array;
+  /** Named places (village, town, ...) for the HUD. */
+  places: Array<{ name: string; cls: string; lon: number; lat: number }>;
 }
 
 /**
