@@ -5,6 +5,10 @@ const TERRAIN_BASE = 'https://3d.geo.admin.ch/ch.swisstopo.terrain.3d/v1/';
 export const SWISSIMAGE_TEMPLATE =
   'https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.swissimage/default/current/3857/{z}/{x}/{y}.jpeg';
 
+/** Water polygons (lakes, wide rivers; based on swissTLM3D) for the water mask. */
+export const WATER_TILE_URL =
+  'https://vectortiles.geo.admin.ch/tiles/ch.swisstopo.base.vt/v1.0.0/{z}/{x}/{y}.pbf';
+
 interface LayerJson {
   tiles: string[];
   version: string;

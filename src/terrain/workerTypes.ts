@@ -15,6 +15,8 @@ export interface ImageryJob {
   bounds: GeoBounds;
   zoom: number;
   size: number;
+  /** Vector tile template for the water mask (stored in the alpha channel), or null. */
+  water: string | null;
 }
 export interface ImageryResult {
   bitmap: ImageBitmap;

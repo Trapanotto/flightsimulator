@@ -223,7 +223,7 @@ export class World {
       this.frame,
       anisotropy,
       this.atmosphere.uniforms,
-      { detail: q2.terrainDetail, cloudShadows: q2.cloudShadows },
+      { detail: q2.terrainDetail, cloudShadows: q2.cloudShadows, water: q2.water },
       {
         ...DEFAULT_TERRAIN,
         tau: num('tau', q2.tau),

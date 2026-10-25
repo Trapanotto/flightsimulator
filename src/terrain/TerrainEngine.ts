@@ -15,7 +15,7 @@ import type { EnuFrame } from '../geo/ellipsoid';
 import { tileId } from '../geo/tiles';
 import { Quadtree, type QuadtreeOptions, type TileNode, type TileProvider } from './Quadtree';
 import type { AtmosphereUniforms } from '../render/Atmosphere';
-import { SWISSIMAGE_TEMPLATE, type TerrainSource } from './sources';
+import { SWISSIMAGE_TEMPLATE, type TerrainSource, WATER_TILE_URL } from './sources';
 import { type TerrainLook, createTerrainMaterial, setTerrainDefines } from './terrainMaterial';
 import type { ImageryJob, ImageryResult, TerrainJob, TerrainResult } from './workerTypes';
 
@@ -79,7 +79,7 @@ export class TerrainEngine implements TileProvider {
     private readonly frame: EnuFrame,
     private readonly anisotropy: number,
     private readonly atmosphere: AtmosphereUniforms,
-    readonly look: TerrainLook = { detail: true, cloudShadows: true },
+    readonly look: TerrainLook = { detail: true, cloudShadows: true, water: true },
     readonly settings: TerrainSettings = { ...DEFAULT_TERRAIN },
   ) {
     const opts: QuadtreeOptions = {
@@ -162,15 +162,21 @@ export class TerrainEngine implements TileProvider {
     terrainDetail: boolean;
     cloudShadows: boolean;
     shadowMap: number;
+    water: boolean;
   }) {
     this.settings.tau = q.tau;
     this.settings.maxZoom = q.maxZoom;
     this.settings.maxTiles = q.maxTiles;
     this.tree.setTau(q.tau);
     this.tree.setMaxZoom(Math.min(q.maxZoom, this.source.maxZoom));
-    if (this.look.detail !== q.terrainDetail || this.look.cloudShadows !== q.cloudShadows) {
+    if (
+      this.look.detail !== q.terrainDetail ||
+      this.look.cloudShadows !== q.cloudShadows ||
+      this.look.water !== q.water
+    ) {
       this.look.detail = q.terrainDetail;
       this.look.cloudShadows = q.cloudShadows;
+      this.look.water = q.water;
       for (const t of this.gpu.values()) {
         const m = t.mesh.material as MeshLambertMaterial;
         setTerrainDefines(m, this.look);
@@ -212,6 +218,7 @@ export class TerrainEngine implements TileProvider {
         // 512 px textures for detail tiles, 256 px for far tiles (a quarter of the memory).
         zoom: Math.min(19, z + (big ? 2 : 1)),
         size: big ? 512 : 256,
+        water: this.look.water ? WATER_TILE_URL : null,
       },
       node.priority,
     );

@@ -25,6 +25,14 @@ Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
 
 ## Was schon geht
 
+- **Echte Wasserflächen:** Seen und Flüsse aus den swisstopo-Vektorkacheln (Gewässer aus swissTLM3D)
+  werden als Maske in die Luftbild-Kacheln gezeichnet; der Shader macht daraus Wasser mit Wellen,
+  Himmelsspiegelung (Fresnel) und Sonnenglanz.
+  ![Zürichsee](docs/screenshots/zuerichsee.png)
+
+- **Ton:** komplett synthetisch mit WebAudio – Turboprop, Wind, Boost, PULL-UP/STALL-Warnungen,
+  Aufsetzen und Absturz, Doppler in den Aussenkameras (O = Ton aus).
+
 - **HUD:** Kompassband, künstlicher Horizont mit Nickleiter, nächster Ortsname, Minimap aus der
   Landeskarte (M = gross), Suche nach jedem Ort der Schweiz (geo.admin.ch SearchServer).
   ![Lauterbrunnen mit Chalets und Wald](docs/screenshots/lauterbrunnen-forest.png)
