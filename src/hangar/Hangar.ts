@@ -14,7 +14,9 @@ import {
 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { Vector3 as V3 } from 'three';
 import { Aircraft } from '../aircraft/Aircraft';
+import { BuildingSet, CHURCH_TYPES, HOUSE_TYPES, type HouseType } from '../buildings/BuildingSet';
 
 /** Ground height in the model (gear down), metres below the origin. */
 const GROUND_Y = -1.53;
@@ -85,6 +87,89 @@ export class Hangar {
 
     window.addEventListener('resize', this.resize);
     this.resize();
+  }
+
+  /** Design review of the building set (#buildings): all types in a row at typical sizes. */
+  async showBuildings() {
+    const set = await BuildingSet.load();
+    this.renderer.toneMappingExposure = 0.62;
+    const sizes: Record<HouseType, [number, number, number]> = {
+      farmhouse: [24, 17, 4.8],
+      chalet: [12, 10, 6.5],
+      valais: [8, 7, 6.5],
+      engadin: [15, 12, 7.5],
+      rustico: [8, 6, 5],
+      ticino: [12, 10, 7],
+      urban: [17, 11, 12],
+      block: [26, 14, 19],
+      hall: [42, 26, 8],
+      shed: [6, 4, 3],
+    };
+    let x = 0;
+    const houses = HOUSE_TYPES.map((type) => {
+      const [length, width, height] = sizes[type];
+      const h = {
+        type,
+        x: x + length / 2,
+        y: -1.53,
+        z: 0,
+        yaw: 0,
+        length,
+        width,
+        height,
+        tint: new Color(1, 0.93, 0.82),
+      };
+      x += length + 8;
+      return h;
+    });
+    const up = new V3(0, 1, 0);
+    const meshes = [
+      ...set.createHouses(houses, up),
+      ...set.createChurches(
+        CHURCH_TYPES.map((type, i) => ({
+          type,
+          x: x + 20 + i * 45,
+          y: -1.53,
+          z: 0,
+          yaw: 0,
+          size: 26,
+        })),
+        up,
+      ),
+    ];
+    for (const m of meshes) {
+      m.castShadow = m.receiveShadow = true;
+      this.scene.add(m);
+    }
+    const total = x + 110;
+    this.controls.target.set(total / 2, 6, 0);
+    this.camera.position.set(total / 2 - 40, 70, 150);
+    this.camera.far = 3000;
+    this.camera.updateProjectionMatrix();
+    this.controls.maxDistance = 1500;
+    this.controls.autoRotate = false;
+    const s = this.scene.children.find(
+      (o) => (o as { isDirectionalLight?: boolean }).isDirectionalLight,
+    ) as unknown as {
+      shadow: {
+        camera: {
+          left: number;
+          right: number;
+          top: number;
+          bottom: number;
+          far: number;
+          updateProjectionMatrix(): void;
+        };
+      };
+      position: V3;
+    };
+    s.position.set(total / 2 - 80, 120, 90);
+    const c = s.shadow.camera;
+    c.left = c.bottom = -total / 2 - 20;
+    c.right = c.top = total / 2 + 20;
+    c.far = 600;
+    c.updateProjectionMatrix();
+    (s as unknown as { target: { position: V3 } }).target.position.set(total / 2, 0, 0);
   }
 
   async load() {

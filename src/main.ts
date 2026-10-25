@@ -127,7 +127,9 @@ async function openHangar(currentLang: Lang) {
     (window as unknown as { __hangar: Hangar }).__hangar = hangar;
   hangarView = new HangarView(document.body, currentLang, hangar, closeHangar);
   hangar.start();
-  if (first) {
+  if (first && location.hash === '#buildings') {
+    hangar.showBuildings().catch((err) => console.error(err));
+  } else if (first) {
     hangar.load().catch((err) => {
       console.error(err);
       alert(String(err));
@@ -152,6 +154,6 @@ if (!document.createElement('canvas').getContext('webgl2')) {
     hangar: (l) => void openHangar(l),
     settings: (l) => void showSettings(l),
   });
-  if (location.hash === '#hangar') void openHangar(lang);
+  if (location.hash === '#hangar' || location.hash === '#buildings') void openHangar(lang);
   if (location.hash === '#fly') void openFlight(lang);
 }

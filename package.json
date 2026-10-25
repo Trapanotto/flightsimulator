@@ -17,12 +17,15 @@
     "assets": "blender -b --factory-startup -P tools/blender/build_tr1.py && node tools/optimize-aircraft.mjs",
     "assets:optimize": "node tools/optimize-aircraft.mjs",
     "test:flight": "node tools/flight-test.mjs",
-    "benchmark": "node tools/benchmark.mjs"
+    "benchmark": "node tools/benchmark.mjs",
+    "assets:buildings": "blender -b --factory-startup -P tools/blender/build_buildings.py && node tools/optimize-aircraft.mjs build/buildings_raw.glb public/assets/buildings/buildings.glb"
   },
   "dependencies": {
+    "@mapbox/vector-tile": "^3.0.0",
+    "meshoptimizer": "^1.3.0",
+    "pbf": "^5.1.2",
     "postprocessing": "^6.39.5",
-    "three": "^0.186.1",
-    "meshoptimizer": "^1.3.0"
+    "three": "^0.186.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
