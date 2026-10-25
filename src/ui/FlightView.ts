@@ -378,14 +378,21 @@ export class FlightView {
       this.set('rpmUnit', e.display === 'rpm' ? this.tr('hud.rpm') : '% N1');
       this.q('[data-v="engineCell"]').classList.toggle('boost', fm.boosting);
       this.set('flaps', `${Math.round(fm.flaps * fm.p.maxFlapDeg)}°`);
-      const trimRange = fm.trim >= 0 ? fm.p.trimMax : -fm.p.trimMin;
-      this.set('trim', `${Math.round((fm.trim / trimRange) * 100)} %`);
+      this.set('trim', `${Math.round(fm.trim * 100)} %`);
       this.set('alt', String(Math.round(alt)));
       const vs = fm.verticalSpeed;
       this.set('vs', `${vs > 0.05 ? '+' : ''}${vs.toFixed(1)}`);
 
       const warn =
-        fm.crashed || g.waitingForTerrain ? '' : g.pullUp ? 'PULL UP' : fm.stalled ? 'STALL' : '';
+        fm.crashed || g.waitingForTerrain
+          ? ''
+          : g.pullUp
+            ? 'PULL UP'
+            : fm.stalled
+              ? 'STALL'
+              : fm.speed > fm.p.vne
+                ? 'OVERSPEED'
+                : '';
       this.set('warn', warn);
       this.show('warn', warn !== '');
       const m = g.message;

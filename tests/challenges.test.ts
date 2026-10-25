@@ -1,5 +1,6 @@
 import { Vector3 } from 'three';
 import { findAircraft } from '../src/aircraft/types';
+import { topSpeed } from '../src/physics/FlightModel';
 import { describe, expect, it } from 'vitest';
 import { ChallengeRun, ringCrossing, ringNormals } from '../src/game/ChallengeRun';
 import {
@@ -67,7 +68,7 @@ describe('courses', () => {
       const plane = findAircraft(c.aircraft);
       if (!plane) continue; // not built yet
       const p = plane.physics;
-      const ideal = courseLength(c) / Math.sqrt(p.thrust / p.drag);
+      const ideal = courseLength(c) / Math.min(topSpeed(p), p.vne);
       expect(c.medals.gold / ideal, c.id).toBeGreaterThan(1.08);
       expect(c.medals.gold / ideal, c.id).toBeLessThan(c.landing ? 2.2 : 1.35);
     }

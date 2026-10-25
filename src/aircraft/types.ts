@@ -1,53 +1,84 @@
 /**
- * Aircraft types of the Trapanotto Airlines fleet: model file, arcade flight figures, cameras,
+ * Aircraft types of the Trapanotto Airlines fleet: model file, flight physics, cameras,
  * engine sound and HUD display per type. Models are built in Blender
  * (tools/blender/types/<id>.py); the numbers marked "model" come from the build's META.
+ *
+ * Physics: published figures (mass, wing, power/thrust, inertia, speeds) plus aerodynamic
+ * derivatives typical for the class (textbook values in the style of JSBSim/Aeromatic).
+ * Control derivatives are per unit stick input (-1..1 = full deflection), positive = the
+ * nose up / right roll / nose right.
  *
  * Model axes: x = left wing, y = up, z = nose; origin = reference point `gearHeight` above
  * the ground with the gear down.
  */
 
-const DEG = Math.PI / 180;
-
 type V3 = [number, number, number];
 
+export interface Aero {
+  /** Lift: at zero angle of attack, slope (1/rad), maximum clean, added by full flaps. */
+  CL0: number;
+  CLa: number;
+  CLmax: number;
+  CLflaps: number;
+  CLde: number;
+  CLq: number;
+  /** Drag: zero-lift, gear, full flaps, Oswald factor. */
+  CD0: number;
+  CDgear: number;
+  CDflaps: number;
+  e: number;
+  /** Pitch: Cm0, static stability, damping, elevator, flaps. */
+  Cm0: number;
+  Cma: number;
+  Cmq: number;
+  Cmde: number;
+  Cmflaps: number;
+  /** Side force, roll and yaw derivatives. */
+  CYb: number;
+  CYdr: number;
+  Clb: number;
+  Clp: number;
+  Clr: number;
+  Clda: number;
+  Cldr: number;
+  Cnb: number;
+  Cnr: number;
+  Cnp: number;
+  Cndr: number;
+  Cnda: number;
+}
+
+export type Propulsion =
+  | { kind: 'prop'; power: number; efficiency: number; staticThrust: number }
+  | { kind: 'jet'; staticThrust: number; afterburner: number; afterburnerSeconds: number };
+
 export interface AircraftPhysics {
-  /** Acceleration along the path at full throttle, m/s². */
-  thrust: number;
-  /** Drag coefficient; top speed in level flight is sqrt(thrust / drag). */
-  drag: number;
-  /** Extra drag factors with gear down / full flaps. */
-  gearDrag: number;
-  flapDrag: number;
-  /** Boost (afterburner on the F-35): thrust factor, seconds available, recharge per second. */
-  boostFactor: number;
-  boostSeconds: number;
-  boostRecharge: number;
-  /** Clean stall speed and how much full flaps lower it, m/s. */
-  stallSpeed: number;
-  flapStallDrop: number;
-  /** The nose may lift above this speed on the runway, m/s. */
-  rotateSpeed: number;
-  rollRate: number;
-  pitchRate: number;
-  yawRate: number;
-  /** How fast the flight path follows the nose (1/s). */
-  grip: number;
-  /** Model origin above ground: gear down / on the belly. */
+  /** kg, m², m, m (mean chord). */
+  mass: number;
+  wingArea: number;
+  span: number;
+  chord: number;
+  /** Moments of inertia about the model axes [x pitch, y yaw, z roll], kg m². */
+  inertia: V3;
+  /** Centre of gravity, model coordinates. */
+  cg: V3;
+  aero: Aero;
+  propulsion: Propulsion;
+  /** Maximum operating speed (m/s) for the OVERSPEED warning and course timing. */
+  vne: number;
+  /** Control surfaces travel per second (fraction of full deflection). */
+  controlRate: number;
+  /** Wheel contact points (model) with the weight share they are sprung for. */
+  wheels: Array<{ pos: V3; share: number; steer?: boolean; brake?: boolean }>;
+  /** Static compression of the gear springs, m. */
+  gearStroke: number;
+  rollFriction: number;
+  brakeFriction: number;
+  /** Model origin above ground: gear down / belly. */
   gearHeight: number;
   bellyHeight: number;
+  /** Highest sink rate the gear survives, m/s. */
   maxSinkRate: number;
-  /** Highest load factor a full pull can produce. */
-  maxG: number;
-  /** Angle of attack: aoaRef at aoaSpeed, growing with 1/v², capped at aoaMax. */
-  aoaRef: number;
-  aoaSpeed: number;
-  aoaMax: number;
-  /** Hands-off pitch attitude range of the trim and wheel speed, radians (per second). */
-  trimMin: number;
-  trimMax: number;
-  trimRate: number;
-  /** Fixed gear: always down, the gear key does nothing. */
   fixedGear: boolean;
   /** Flap angle at full flaps, degrees (HUD). */
   maxFlapDeg: number;
@@ -59,7 +90,6 @@ export interface EngineProfile {
   kind: 'piston' | 'turboprop' | 'jet' | 'fighter';
   /** HUD: propeller rpm or fan speed N1 in %. */
   display: 'rpm' | 'n1';
-  /** Idle and maximum (rpm, or N1 %). */
   idle: number;
   max: number;
   /** Propeller / fan: blade count and revolutions per second at full power (visual + sound). */
@@ -70,58 +100,88 @@ export interface EngineProfile {
 export interface AircraftType {
   id: string;
   name: string;
-  /** Short line for the selection list. */
   info: { de: string; en: string };
   registration: string;
   url: string;
   physics: AircraftPhysics;
   engine: EngineProfile;
-  /** Cameras: pilot eye, wing camera, chase distance and height (model coordinates / metres). */
+  /** Cameras: pilot eye, wing camera (model coordinates), chase distance and height (m). */
   eye: V3;
   wingCam: V3;
   chaseDistance: number;
   chaseHeight: number;
-  /** Overall size for LOD distances and the hangar camera, metres. */
   length: number;
   span: number;
 }
 
 const base = import.meta.env?.BASE_URL ?? '/';
+const KT = 0.5144;
+
+/** Class presets for the stability and control derivatives. */
+const LIGHT: Omit<Aero, 'CL0' | 'CLa' | 'CLmax' | 'CLflaps' | 'CD0' | 'CDgear' | 'CDflaps' | 'e'> =
+  {
+    CLde: 0.25,
+    CLq: 3.9,
+    Cm0: 0.02,
+    Cma: -0.9,
+    Cmq: -12,
+    Cmde: 0.6,
+    Cmflaps: -0.08,
+    CYb: -0.35,
+    CYdr: 0.08,
+    Clb: -0.09,
+    Clp: -0.47,
+    Clr: 0.1,
+    Clda: 0.07,
+    Cldr: 0.005,
+    Cnb: 0.065,
+    Cnr: -0.1,
+    Cnp: -0.03,
+    Cndr: 0.035,
+    Cnda: -0.005,
+  };
 
 export const C172: AircraftType = {
   id: 'c172',
   name: 'Cessna 172 Skyhawk',
   info: {
-    de: 'Einmotoriger Hochdecker · 4 Sitze · bis 226 km/h',
-    en: 'Single-engine high-wing · 4 seats · up to 226 km/h',
+    de: 'Einmotoriger Hochdecker · 4 Sitze · 180 PS · bis 230 km/h',
+    en: 'Single-engine high-wing · 4 seats · 180 hp · up to 230 km/h',
   },
   registration: 'HB-TCA',
   url: `${base}assets/aircraft/c172.glb`,
   physics: {
-    thrust: 2.2,
-    drag: 2.2 / 63 ** 2,
-    gearDrag: 0,
-    flapDrag: 0.6,
-    boostFactor: 1,
-    boostSeconds: 0,
-    boostRecharge: 0,
-    stallSpeed: 25,
-    flapStallDrop: 4,
-    rotateSpeed: 27,
-    rollRate: 1.5,
-    pitchRate: 1.0,
-    yawRate: 0.45,
-    grip: 3.0,
+    mass: 1043,
+    wingArea: 16.2,
+    span: 11.0,
+    chord: 1.49,
+    inertia: [1825, 2667, 1285],
+    cg: [0, 0.1, 0.85],
+    aero: {
+      ...LIGHT,
+      CL0: 0.3,
+      CLa: 4.8,
+      CLmax: 1.55,
+      CLflaps: 0.65,
+      CD0: 0.027,
+      CDgear: 0.008,
+      CDflaps: 0.05,
+      e: 0.75,
+    },
+    propulsion: { kind: 'prop', power: 134_000, efficiency: 0.78, staticThrust: 2600 },
+    vne: 163 * KT,
+    controlRate: 4,
+    wheels: [
+      { pos: [0, -1.19, 2.96], share: 0.3, steer: true },
+      { pos: [1.27, -1.19, -0.06], share: 0.35, brake: true },
+      { pos: [-1.27, -1.19, -0.06], share: 0.35, brake: true },
+    ],
+    gearStroke: 0.1,
+    rollFriction: 0.025,
+    brakeFriction: 0.45,
     gearHeight: 1.19, // model
     bellyHeight: 0.62,
-    maxSinkRate: 3.5,
-    maxG: 4.4,
-    aoaRef: 5 * DEG,
-    aoaSpeed: 32,
-    aoaMax: 13 * DEG,
-    trimMin: -15 * DEG,
-    trimMax: 20 * DEG,
-    trimRate: 4 * DEG,
+    maxSinkRate: 3.0,
     fixedGear: true,
     maxFlapDeg: 30,
     hull: {
@@ -144,36 +204,55 @@ export const PC12: AircraftType = {
   id: 'pc12',
   name: 'Pilatus PC-12 NGX',
   info: {
-    de: 'Einmotoriger Turboprop aus Stans · 9 Sitze · bis 528 km/h',
-    en: 'Single-engine turboprop from Stans · 9 seats · up to 528 km/h',
+    de: 'Einmotoriger Turboprop aus Stans · 1200 PS · 9 Sitze',
+    en: 'Single-engine turboprop from Stans · 1200 shp · 9 seats',
   },
   registration: 'HB-TPC',
   url: `${base}assets/aircraft/pc12.glb`,
   physics: {
-    thrust: 5.5,
-    drag: 5.5 / 145 ** 2,
-    gearDrag: 0.3,
-    flapDrag: 0.5,
-    boostFactor: 1,
-    boostSeconds: 0,
-    boostRecharge: 0,
-    stallSpeed: 34,
-    flapStallDrop: 8,
-    rotateSpeed: 38,
-    rollRate: 1.6,
-    pitchRate: 0.95,
-    yawRate: 0.4,
-    grip: 2.8,
+    mass: 4500,
+    wingArea: 25.81,
+    span: 16.28,
+    chord: 1.75,
+    inertia: [18000, 29000, 13000],
+    cg: [0, 0, 1.5],
+    aero: {
+      ...LIGHT,
+      CL0: 0.25,
+      CLa: 5.0,
+      CLmax: 1.55,
+      CLflaps: 1.1,
+      CD0: 0.023,
+      CDgear: 0.015,
+      CDflaps: 0.07,
+      e: 0.8,
+      Cm0: 0.03,
+      Cma: -1.0,
+      Cmq: -14,
+      Cmde: 0.55,
+      Cmflaps: -0.1,
+      Clb: -0.1,
+      Clp: -0.48,
+      Clda: 0.06,
+      Cnb: 0.08,
+      Cnr: -0.11,
+      CYb: -0.4,
+      CLq: 4,
+    },
+    propulsion: { kind: 'prop', power: 895_000, efficiency: 0.82, staticThrust: 11_000 },
+    vne: 240 * KT,
+    controlRate: 3.5,
+    wheels: [
+      { pos: [0, -1.85, 5.32], share: 0.2, steer: true },
+      { pos: [2.2, -1.85, 0.38], share: 0.4, brake: true },
+      { pos: [-2.2, -1.85, 0.38], share: 0.4, brake: true },
+    ],
+    gearStroke: 0.12,
+    rollFriction: 0.025,
+    brakeFriction: 0.45,
     gearHeight: 1.85, // model
     bellyHeight: 1.0,
-    maxSinkRate: 3.5,
-    maxG: 3.3,
-    aoaRef: 5 * DEG,
-    aoaSpeed: 45,
-    aoaMax: 12 * DEG,
-    trimMin: -15 * DEG,
-    trimMax: 20 * DEG,
-    trimRate: 3.5 * DEG,
+    maxSinkRate: 3.0,
     fixedGear: false,
     maxFlapDeg: 40,
     hull: {
@@ -196,36 +275,56 @@ export const PHENOM100: AircraftType = {
   id: 'phenom100',
   name: 'Embraer Phenom 100',
   info: {
-    de: 'Leichter Businessjet · 2 Turbofans · 6 Sitze · bis 720 km/h',
-    en: 'Light business jet · 2 turbofans · 6 seats · up to 720 km/h',
+    de: 'Leichter Businessjet · 2 × 7,7 kN · 6 Sitze',
+    en: 'Light business jet · 2 × 7.7 kN · 6 seats',
   },
   registration: 'HB-TEP',
   url: `${base}assets/aircraft/phenom100.glb`,
   physics: {
-    thrust: 4.5,
-    drag: 4.5 / 200 ** 2,
-    gearDrag: 0.35,
-    flapDrag: 0.55,
-    boostFactor: 1,
-    boostSeconds: 0,
-    boostRecharge: 0,
-    stallSpeed: 46,
-    flapStallDrop: 9,
-    rotateSpeed: 50,
-    rollRate: 1.8,
-    pitchRate: 0.85,
-    yawRate: 0.35,
-    grip: 2.5,
+    mass: 4500,
+    wingArea: 18.79,
+    span: 12.3,
+    chord: 1.6,
+    inertia: [20000, 27000, 9000],
+    cg: [0, 0, 0.35],
+    aero: {
+      ...LIGHT,
+      CL0: 0.15,
+      CLa: 4.8,
+      CLmax: 1.35,
+      CLflaps: 0.75,
+      CD0: 0.026,
+      CDgear: 0.02,
+      CDflaps: 0.08,
+      e: 0.78,
+      Cm0: 0.02,
+      Cma: -1.1,
+      Cmq: -15,
+      Cmde: 0.5,
+      Clb: -0.1,
+      Clp: -0.45,
+      Clda: 0.05,
+      Cnb: 0.09,
+      Cnr: -0.12,
+      Cnp: -0.02,
+      Cndr: 0.03,
+      CYb: -0.4,
+      CLq: 4.5,
+    },
+    propulsion: { kind: 'jet', staticThrust: 15_400, afterburner: 1, afterburnerSeconds: 0 },
+    vne: 275 * KT,
+    controlRate: 3.5,
+    wheels: [
+      { pos: [0, -1.3, 4.74], share: 0.15, steer: true },
+      { pos: [1.62, -1.3, -0.04], share: 0.425, brake: true },
+      { pos: [-1.62, -1.3, -0.04], share: 0.425, brake: true },
+    ],
+    gearStroke: 0.12,
+    rollFriction: 0.02,
+    brakeFriction: 0.5,
     gearHeight: 1.3, // model
     bellyHeight: 0.7,
-    maxSinkRate: 3.2,
-    maxG: 3.5,
-    aoaRef: 4 * DEG,
-    aoaSpeed: 60,
-    aoaMax: 12 * DEG,
-    trimMin: -12 * DEG,
-    trimMax: 18 * DEG,
-    trimRate: 3 * DEG,
+    maxSinkRate: 3.0,
     fixedGear: false,
     maxFlapDeg: 36,
     hull: {
@@ -248,36 +347,59 @@ export const F35: AircraftType = {
   id: 'f35',
   name: 'Lockheed Martin F-35 Lightning II',
   info: {
-    de: 'Kampfjet · Nachbrenner statt Boost · bis 1190 km/h im Tiefflug',
-    en: 'Fighter jet · afterburner instead of boost · up to 1190 km/h down low',
+    de: 'Kampfjet · 125 kN, mit Nachbrenner 191 kN (Leertaste)',
+    en: 'Fighter jet · 125 kN, 191 kN with afterburner (space)',
   },
   registration: 'T-35',
   url: `${base}assets/aircraft/f35.glb`,
   physics: {
-    thrust: 9,
-    drag: 9 / 330 ** 2,
-    gearDrag: 0.3,
-    flapDrag: 0.4,
-    boostFactor: 1.5,
-    boostSeconds: 10,
-    boostRecharge: 0.5,
-    stallSpeed: 58,
-    flapStallDrop: 10,
-    rotateSpeed: 68,
-    rollRate: 4.0,
-    pitchRate: 1.8,
-    yawRate: 0.7,
-    grip: 3.5,
+    mass: 22_000,
+    wingArea: 42.7,
+    span: 10.7,
+    chord: 4.58,
+    inertia: [190_000, 220_000, 40_000],
+    cg: [0, 0, -0.6],
+    aero: {
+      ...LIGHT,
+      CL0: 0.05,
+      CLa: 3.6,
+      CLmax: 1.6,
+      CLflaps: 0.3,
+      CD0: 0.022,
+      CDgear: 0.02,
+      CDflaps: 0.04,
+      e: 0.7,
+      Cm0: 0,
+      Cma: -0.35,
+      Cmq: -6,
+      Cmde: 0.5,
+      Cmflaps: -0.02,
+      Clb: -0.06,
+      Clp: -0.3,
+      Clr: 0.03,
+      Clda: 0.04,
+      Cnb: 0.1,
+      Cnr: -0.25,
+      Cnp: -0.01,
+      Cndr: 0.03,
+      Cnda: -0.002,
+      CYb: -0.8,
+      CLq: 3,
+    },
+    propulsion: { kind: 'jet', staticThrust: 125_000, afterburner: 1.53, afterburnerSeconds: 15 },
+    vne: 700 * KT,
+    controlRate: 6,
+    wheels: [
+      { pos: [0, -1.76, 6.1], share: 0.12, steer: true },
+      { pos: [1.55, -1.76, -1.35], share: 0.44, brake: true },
+      { pos: [-1.55, -1.76, -1.35], share: 0.44, brake: true },
+    ],
+    gearStroke: 0.15,
+    rollFriction: 0.02,
+    brakeFriction: 0.5,
     gearHeight: 1.76, // model
     bellyHeight: 0.6,
     maxSinkRate: 4.0,
-    maxG: 9,
-    aoaRef: 4 * DEG,
-    aoaSpeed: 80,
-    aoaMax: 16 * DEG,
-    trimMin: -20 * DEG,
-    trimMax: 30 * DEG,
-    trimRate: 5 * DEG,
     fixedGear: false,
     maxFlapDeg: 30,
     hull: {
@@ -300,36 +422,60 @@ export const A320: AircraftType = {
   id: 'a320',
   name: 'Airbus A320',
   info: {
-    de: 'Kurz- und Mittelstrecke · 2 Turbofans · 180 Sitze · Sharklets',
-    en: 'Short and medium haul · 2 turbofans · 180 seats · sharklets',
+    de: 'Kurz- und Mittelstrecke · 2 × 120 kN · 180 Sitze · Sharklets',
+    en: 'Short and medium haul · 2 × 120 kN · 180 seats · sharklets',
   },
   registration: 'HB-JTA',
   url: `${base}assets/aircraft/a320.glb`,
   physics: {
-    thrust: 3.2,
-    drag: 3.2 / 250 ** 2,
-    gearDrag: 0.6,
-    flapDrag: 1.2,
-    boostFactor: 1,
-    boostSeconds: 0,
-    boostRecharge: 0,
-    stallSpeed: 68,
-    flapStallDrop: 18,
-    rotateSpeed: 72,
-    rollRate: 0.8,
-    pitchRate: 0.5,
-    yawRate: 0.22,
-    grip: 2.0,
+    mass: 64_000,
+    wingArea: 122.6,
+    span: 34.1,
+    chord: 4.19,
+    inertia: [4.3e6, 7.0e6, 2.8e6],
+    cg: [0, -0.5, 0.4],
+    aero: {
+      ...LIGHT,
+      CL0: 0.2,
+      CLa: 5.2,
+      CLmax: 1.45,
+      CLflaps: 1.35,
+      CD0: 0.02,
+      CDgear: 0.018,
+      CDflaps: 0.08,
+      e: 0.82,
+      Cm0: 0.05,
+      Cma: -1.2,
+      Cmq: -20,
+      Cmde: 0.45,
+      Cmflaps: -0.12,
+      Clb: -0.15,
+      Clp: -0.4,
+      Clda: 0.025,
+      Cnb: 0.12,
+      Cnr: -0.18,
+      Cnp: -0.02,
+      Cndr: 0.04,
+      Cnda: -0.002,
+      CYb: -0.6,
+      CYdr: 0.12,
+      CLde: 0.3,
+      CLq: 5,
+    },
+    propulsion: { kind: 'jet', staticThrust: 240_000, afterburner: 1, afterburnerSeconds: 0 },
+    vne: 350 * KT,
+    controlRate: 2,
+    wheels: [
+      { pos: [0, -3.6, 15.5], share: 0.08, steer: true },
+      { pos: [3.8, -3.6, -1.05], share: 0.46, brake: true },
+      { pos: [-3.8, -3.6, -1.05], share: 0.46, brake: true },
+    ],
+    gearStroke: 0.25,
+    rollFriction: 0.02,
+    brakeFriction: 0.45,
     gearHeight: 3.6, // model
     bellyHeight: 1.55,
     maxSinkRate: 3.0,
-    maxG: 2.5,
-    aoaRef: 4 * DEG,
-    aoaSpeed: 85,
-    aoaMax: 13 * DEG,
-    trimMin: -10 * DEG,
-    trimMax: 15 * DEG,
-    trimRate: 2 * DEG,
     fixedGear: false,
     maxFlapDeg: 35,
     hull: {

@@ -1,51 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { Vector3 } from 'three';
-import { AIRCRAFT, type AircraftPhysics } from '../src/aircraft/types';
-import { type FlightEvent, type FlightInput, FlightModel } from '../src/physics/FlightModel';
+import { AIRCRAFT, A320, C172, PC12, type AircraftType } from '../src/aircraft/types';
+import {
+  type FlightEvent,
+  type FlightInput,
+  FlightModel,
+  stallSpeed,
+  topSpeed,
+} from '../src/physics/FlightModel';
 
-const DEG = Math.PI / 180;
-/** Test aircraft with the figures the arcade model was tuned with (former TR-1). */
-const TR1: AircraftPhysics = {
-  thrust: 7.0,
-  drag: 7.0 / 140 ** 2,
-  gearDrag: 0.35,
-  flapDrag: 0.45,
-  boostFactor: 1.6,
-  boostSeconds: 5,
-  boostRecharge: 0.25,
-  stallSpeed: 30,
-  flapStallDrop: 7,
-  rotateSpeed: 33,
-  rollRate: Math.PI,
-  pitchRate: 1.25,
-  yawRate: 0.5,
-  grip: 3.0,
-  gearHeight: 1.53,
-  bellyHeight: 0.62,
-  maxSinkRate: 4.5,
-  maxG: 8,
-  aoaRef: 5 * DEG,
-  aoaSpeed: 40,
-  aoaMax: 12 * DEG,
-  trimMin: -20 * DEG,
-  trimMax: 25 * DEG,
-  trimRate: 4 * DEG,
-  fixedGear: false,
-  maxFlapDeg: 35,
-  hull: {
-    nose: [0, 0, 6],
-    wingL: [4.6, 0.05, -0.5],
-    wingR: [-4.6, 0.05, -0.5],
-    tail: [0, 2.05, -5.2],
-  },
-};
-
-/** Flat ground at y = 0, +Y up. */
+/** Flat ground at y = 0, +Y up, sea level. */
 const flat = {
   up: (_p: Vector3, out: Vector3) => out.set(0, 1, 0),
   heightAboveGround: (p: Vector3) => p.y,
+  altitude: (p: Vector3) => p.y,
 };
 const NORTH = new Vector3(0, 0, -1);
+const DEG = Math.PI / 180;
+const DT = 1 / 120;
 const idle = (): FlightInput => ({
   pitch: 0,
   roll: 0,
@@ -54,246 +26,191 @@ const idle = (): FlightInput => ({
   boost: false,
   brake: false,
 });
-const DT = 1 / 120;
 
 function run(m: FlightModel, seconds: number, input: FlightInput | ((t: number) => FlightInput)) {
   const events: FlightEvent[] = [];
-  for (let t = 0; t < seconds; t += DT)
+  for (let t = 0; t < seconds && !m.crashed; t += DT)
     m.step(DT, typeof input === 'function' ? input(t) : input, events);
   return events;
 }
 
-function onRunway() {
-  const m = new FlightModel(flat, TR1);
-  m.reset(new Vector3(0, TR1.gearHeight, 0), NORTH, 0, true);
+function onRunway(type: AircraftType = C172) {
+  const m = new FlightModel(flat, type.physics);
+  m.reset(new Vector3(0, type.physics.gearHeight, 0), NORTH, 0, true);
   return m;
 }
 
-function inAir(speed = 75, height = 1000) {
-  const m = new FlightModel(flat, TR1);
-  m.gearDown = false;
+function inAir(type: AircraftType, speed: number, height = 1500) {
+  const m = new FlightModel(flat, type.physics);
+  m.gearDown = type.physics.fixedGear;
   m.reset(new Vector3(0, height, 0), NORTH, speed, false);
-  m.gearDown = false;
+  m.gearDown = type.physics.fixedGear;
   return m;
 }
 
-describe('flight model', () => {
-  it('faces the requested direction after reset', () => {
-    const m = onRunway();
-    expect(m.forward.z).toBeCloseTo(-1, 5);
-    expect(m.up.y).toBeCloseTo(1, 5);
-    expect(m.bank).toBeCloseTo(0, 5);
-  });
+/**
+ * A simple pilot: flies the pitch attitude that gives the wanted vertical speed (flight path
+ * angle + angle of attack) with pitch-rate damping, wings level with the ailerons.
+ */
+function holdVs(m: FlightModel, vs: number, throttle: number): FlightInput {
+  const gamma = Math.asin(Math.max(-1, Math.min(1, vs / Math.max(m.speed, 1))));
+  const correction = Math.max(-0.05, Math.min(0.05, (vs - m.verticalSpeed) * 0.01));
+  const theta = gamma + m.alpha + correction;
+  const pitchRate = -m.omega.x;
+  return {
+    ...idle(),
+    throttle,
+    pitch: Math.max(-1, Math.min(1, (theta - m.pitch) * 4 - pitchRate * 2)),
+    roll: Math.max(-1, Math.min(1, -m.bank * 2 - m.omega.z * 0.5)),
+  };
+}
 
-  it('takes off in less than 1 km with full throttle and a pull at rotate speed', () => {
+describe('6-DOF flight model', () => {
+  it('stands still on the runway, resting on its springs', () => {
     const m = onRunway();
-    // Rotate to 10° nose up, then hold it.
-    const pull = () =>
-      m.speed > TR1.rotateSpeed
-        ? Math.max(-1, Math.min(1, (10 * (Math.PI / 180) - m.pitch) * 4))
-        : 0;
-    const events = run(m, 40, () => ({ ...idle(), throttle: 1, pitch: pull() }));
-    const lo = events.find((e) => e.type === 'liftoff');
-    expect(lo).toBeDefined();
-    expect(m.position.y).toBeGreaterThan(50);
+    run(m, 5, idle());
     expect(m.crashed).toBe(false);
-    // Distance to lift-off: rerun until airborne.
-    const m2 = onRunway();
-    for (let t = 0; t < 40 && m2.onGround; t += DT)
-      m2.step(DT, { ...idle(), throttle: 1, pitch: m2.speed > TR1.rotateSpeed ? 0.6 : 0 });
-    const liftoffAt = -m2.position.z;
-    expect(liftoffAt).toBeLessThan(1000);
-    expect(liftoffAt).toBeGreaterThan(100);
-  });
-
-  it('reaches about 140 m/s in level flight at full throttle', () => {
-    const m = inAir(80, 2000);
-    run(m, 120, () => ({
-      ...idle(),
-      throttle: 1,
-      pitch: Math.max(-1, Math.min(1, -m.verticalSpeed * 0.05 - m.pitch * 2)),
-    }));
-    expect(m.speed).toBeGreaterThan(125);
-    expect(m.speed).toBeLessThan(150);
-  });
-
-  it('turns when banked and returns to wings level (easy assist)', () => {
-    const m = inAir();
-    run(m, 1.0, { ...idle(), throttle: 0.7, roll: 0.4 });
-    expect(m.bank).toBeGreaterThan(0.3);
-    const before = m.forward.clone();
-    run(m, 3, { ...idle(), throttle: 0.7 });
-    // Nose moved to the right (east = +X when facing north = -Z).
-    expect(m.forward.x).toBeGreaterThan(before.x);
-    expect(Math.abs(m.bank)).toBeLessThan(0.1);
-  });
-
-  it('rolls right with positive roll input', () => {
-    const m = inAir();
-    run(m, 0.3, { ...idle(), throttle: 0.7, roll: 1 });
-    expect(m.bank).toBeGreaterThan(0.5);
-  });
-
-  it('pitches up with positive pitch input', () => {
-    const m = inAir();
-    run(m, 0.5, { ...idle(), throttle: 0.7, pitch: 1 });
-    expect(m.pitch).toBeGreaterThan(0.3);
-  });
-
-  it('stalls softly when too slow: sinks and nose drops, no crash at altitude', () => {
-    const m = inAir(32, 1500);
-    run(m, 15, { ...idle(), throttle: 0, pitch: 0.8 });
-    expect(m.crashed).toBe(false);
-    expect(m.position.y).toBeLessThan(1500);
-  });
-
-  function approach(sinkRate: number, gearDown = true) {
-    const m = new FlightModel(flat, TR1);
-    m.reset(new Vector3(0, 40, 0), NORTH, 42, false);
-    m.gearDown = gearDown;
-    m.flaps = 1;
-    // Elevator holds the sink rate, throttle holds 40 m/s (how a pilot flies an approach).
-    return run(m, 60, () => {
-      const vsErr = -sinkRate - m.verticalSpeed;
-      return {
-        ...idle(),
-        pitch: Math.max(-1, Math.min(1, vsErr * 0.25 - m.pitch * 0.5)),
-        throttle: Math.max(0, Math.min(1, 0.45 + (40 - m.speed) * 0.08)),
-      };
-    });
-  }
-
-  it('lands softly from a gentle approach', () => {
-    const events = approach(1.0);
-    const td = events.find((e) => e.type === 'touchdown');
-    expect(events.some((e) => e.type === 'crash')).toBe(false);
-    expect(td).toBeDefined();
-  });
-
-  it('crashes on a too hard landing', () => {
-    const events = approach(8);
-    expect(events.find((e) => e.type === 'crash')).toMatchObject({ reason: 'hard-landing' });
-  });
-
-  it('crashes when landing with the gear up', () => {
-    const events = approach(1.0, false);
-    expect(events.find((e) => e.type === 'crash')).toMatchObject({ reason: 'gear-up' });
-  });
-
-  it('crashes when flying into the ground', () => {
-    const m = inAir(90, 200);
-    const events = run(m, 20, { ...idle(), throttle: 1, pitch: -1 });
-    expect(m.crashed).toBe(true);
-    expect(events.some((e) => e.type === 'crash')).toBe(true);
-  });
-
-  it('brakes to a stop on the runway', () => {
-    const m = onRunway();
-    m.speed = 30;
-    m.direction.copy(m.forward);
-    run(m, 20, { ...idle(), brake: true });
-    expect(m.speed).toBe(0);
     expect(m.onGround).toBe(true);
-  });
-});
-
-describe('trim', () => {
-  it('holds the attitude at release hands-off', () => {
-    const m = inAir(90);
-    run(m, 0.6, { ...idle(), throttle: 0.8, pitch: 0.5 });
-    const held = m.pitch;
-    expect(held).toBeGreaterThan(5 * DEG);
-    run(m, 4, { ...idle(), throttle: 0.8 });
-    expect(Math.abs(m.pitch - held)).toBeLessThan(2 * DEG);
-    expect(m.trim).toBeCloseTo(held, 2);
+    expect(m.speed).toBeLessThan(0.3);
+    expect(Math.abs(m.position.y - C172.physics.gearHeight)).toBeLessThan(0.25);
   });
 
-  it('the trim wheel moves the hands-off attitude', () => {
-    const m = inAir(90);
-    run(m, 1, { ...idle(), throttle: 0.8 });
-    const before = m.pitch;
-    run(m, 2, { ...idle(), throttle: 0.8, trim: 1 });
-    run(m, 3, { ...idle(), throttle: 0.8 });
-    expect(m.pitch - before).toBeGreaterThan(5 * DEG);
-    expect(m.trim).toBeLessThanOrEqual(TR1.trimMax);
-  });
-});
-
-describe('ground handling', () => {
-  it('stays on the runway when the terrain under it drops (detail refinement)', () => {
-    let ground = 0;
-    const env = {
-      up: (_p: Vector3, out: Vector3) => out.set(0, 1, 0),
-      heightAboveGround: (p: Vector3) => p.y - ground,
-    };
-    const m = new FlightModel(env, TR1);
-    m.reset(new Vector3(0, TR1.gearHeight, 0), NORTH, 0, true);
-    run(m, 0.5, idle());
-    ground = -40; // more detailed tile: the real ground is 40 m lower
-    const events = run(m, 2, idle());
+  it('stays put when the terrain under it gets more detailed (jumps up)', () => {
+    let offset = 0;
+    const env = { ...flat, heightAboveGround: (p: Vector3) => p.y - offset };
+    const m = new FlightModel(env, C172.physics);
+    m.reset(new Vector3(0, C172.physics.gearHeight + 0.35, 0), NORTH, 0, true);
+    const ev = run(m, 2, idle());
+    offset = 0.4;
+    ev.push(...run(m, 4, idle()));
+    offset = -1.7; // and a coarser tile under it: the ground drops away
+    ev.push(...run(m, 4, idle()));
+    expect(ev.some((e) => e.type === 'crash')).toBe(false);
     expect(m.onGround).toBe(true);
-    expect(m.crashed).toBe(false);
-    expect(m.position.y).toBeCloseTo(-40 + TR1.gearHeight, 1);
-    expect(events.length).toBe(0);
+    expect(m.speed).toBeLessThan(0.5);
   });
-});
 
-describe('load factor limit', () => {
-  it('keeps a full pull at high speed below ~9 g', () => {
-    const m = new FlightModel(flat, TR1);
-    m.gearDown = false;
-    m.reset(new Vector3(0, 3000, 0), NORTH, 130, false);
-    m.gearDown = false;
-    let maxG = 0;
-    run(m, 2, () => {
-      maxG = Math.max(maxG, m.gLoad);
-      return { ...idle(), throttle: 1, pitch: 1 };
+  it('a trimmed aircraft flies on hands-off without diverging', () => {
+    for (const type of AIRCRAFT) {
+      const v = stallSpeed(type.physics) * 1.5;
+      const m = inAir(type, v);
+      run(m, 20, { ...idle(), throttle: 0.5 });
+      expect(m.crashed, type.id).toBe(false);
+      expect(Math.abs(m.bank), type.id).toBeLessThan(15 * DEG);
+      expect(Math.abs(m.pitch), type.id).toBeLessThan(25 * DEG);
+    }
+  });
+
+  it('ailerons roll right, the elevator pitches the nose up', () => {
+    const r = inAir(C172, 50);
+    run(r, 1, { ...idle(), throttle: 0.6, roll: 1 });
+    expect(r.bank).toBeGreaterThan(20 * DEG);
+    const p = inAir(C172, 50);
+    const before = p.pitch;
+    run(p, 1, { ...idle(), throttle: 0.6, pitch: 1 });
+    expect(p.pitch - before).toBeGreaterThan(8 * DEG);
+  });
+
+  it('stalls when pulled too slow: the nose drops, letting go recovers', () => {
+    const m = inAir(C172, 30);
+    let stalled = false;
+    run(m, 8, () => {
+      stalled ||= m.stalled;
+      return { ...idle(), pitch: 1 };
     });
-    expect(maxG).toBeLessThan(9);
-    expect(maxG).toBeGreaterThan(4);
+    expect(stalled).toBe(true);
+    run(m, 12, () => holdVs(m, 0, 0.8));
+    expect(m.crashed).toBe(false);
+    expect(m.stalled).toBe(false);
+    expect(m.speed).toBeGreaterThan(stallSpeed(C172.physics));
+  });
+
+  it('brakes to a stop', () => {
+    const m = onRunway();
+    m.velocity.copy(m.forward).multiplyScalar(25);
+    const start = m.position.clone();
+    run(m, 30, { ...idle(), brake: true });
+    expect(m.speed).toBeLessThan(0.5);
+    expect(m.position.distanceTo(start)).toBeLessThan(250);
+  });
+
+  it('crashes on a hard landing, without gear, and when flying into the ground', () => {
+    const hard = inAir(C172, 35, 6);
+    hard.velocity.y = -7;
+    expect(run(hard, 3, { ...idle() }).some((e) => e.type === 'crash')).toBe(true);
+    const belly = inAir(PC12, 50, 4);
+    belly.gearDown = false;
+    const ev = run(belly, 4, () => holdVs(belly, -1.5, 0.2));
+    expect(ev.find((e) => e.type === 'crash')).toMatchObject({ reason: 'gear-up' });
+    const dive = inAir(C172, 60, 30);
+    const ev2 = run(dive, 10, { ...idle(), throttle: 1, pitch: -1 });
+    expect(ev2.some((e) => e.type === 'crash')).toBe(true);
   });
 });
 
-describe('fleet', () => {
+describe('fleet performance (published figures)', () => {
+  // Clean stall (m/s), sea-level top speed (m/s).
+  const published: Record<string, { vs: [number, number]; top: [number, number] }> = {
+    c172: { vs: [23, 28], top: [55, 75] },
+    pc12: { vs: [38, 48], top: [110, 145] },
+    phenom100: { vs: [48, 58], top: [180, 260] },
+    f35: { vs: [62, 80], top: [300, 380] },
+    a320: { vs: [70, 82], top: [240, 320] },
+  };
   for (const type of AIRCRAFT) {
-    const p = type.physics;
-    it(`${type.id}: takes off, reaches its top speed, lands softly`, () => {
-      const m = new FlightModel(flat, p);
-      m.reset(new Vector3(0, p.gearHeight, 0), NORTH, 0, true);
-      const events: FlightEvent[] = [];
-      let dist = 0;
-      for (let t = 0; t < 120 && m.onGround; t += DT) {
-        m.step(DT, { ...idle(), throttle: 1, pitch: m.speed > p.rotateSpeed ? 0.5 : 0 }, events);
-        dist = Math.abs(m.position.z);
-      }
-      expect(m.onGround, 'airborne').toBe(false);
-      expect(dist, 'take-off run').toBeLessThan(3000);
+    const ref = published[type.id];
+    if (!ref) continue;
+    it(`${type.id}: stall and top speed match, takes off, lands softly`, () => {
+      const p = type.physics;
+      const vs = stallSpeed(p);
+      expect(vs).toBeGreaterThan(ref.vs[0]);
+      expect(vs).toBeLessThan(ref.vs[1]);
+      const top = topSpeed(p);
+      expect(top).toBeGreaterThan(ref.top[0]);
+      expect(top).toBeLessThan(ref.top[1]);
 
-      const top = Math.sqrt(p.thrust / p.drag) * (p.fixedGear ? 1 / Math.sqrt(1 + p.gearDrag) : 1);
-      const air = new FlightModel(flat, p);
-      air.gearDown = false;
-      air.reset(new Vector3(0, 3000, 0), NORTH, top * 0.6, false);
-      air.gearDown = p.fixedGear;
-      run(air, 240, { ...idle(), throttle: 1 });
-      expect(air.speed / top).toBeGreaterThan(0.95);
-      expect(air.speed / top).toBeLessThan(1.05);
+      // Take-off: half flaps, full power, rotate at 1.1 Vs (half flaps) to ~8 deg.
+      const m = onRunway(type);
+      m.flaps = 0.5;
+      const vr = stallSpeed(p, 0.5) * 1.1;
+      const events = run(m, 90, () => ({
+        ...idle(),
+        throttle: 1,
+        pitch:
+          m.speed > vr ? Math.max(-1, Math.min(1, (8 * DEG - m.pitch) * 3 + m.omega.x * 1.5)) : 0,
+        roll: Math.max(-1, Math.min(1, -m.bank * 2)),
+      }));
+      expect(
+        events.find((e) => e.type === 'liftoff'),
+        `${type.id} lift-off`,
+      ).toBeDefined();
+      expect(m.crashed, JSON.stringify(events)).toBe(false);
+      expect(m.position.y).toBeGreaterThan(30);
 
-      const land = new FlightModel(flat, p);
-      land.gearDown = true;
-      land.reset(new Vector3(0, 30, 0), NORTH, (p.stallSpeed - p.flapStallDrop) * 1.3, false);
-      land.gearDown = true;
-      land.flaps = 1;
-      // A simple approach: hold a sink rate of 2.5 m/s, flare to 0.8 m/s near the ground.
-      const ev = run(land, 120, () => {
-        const target = land.position.y > 8 ? -2.5 : -0.8;
-        const pitch = Math.max(-0.4, Math.min(0.4, (target - land.verticalSpeed) * 0.2));
-        return { ...idle(), throttle: land.onGround ? 0 : 0.35, pitch: land.onGround ? 0 : pitch };
+      // Landing: full flaps, 1.3 Vs on a -3 deg path, flare near the ground.
+      const v = stallSpeed(p, 1) * 1.3;
+      const l = new FlightModel(flat, p);
+      l.flaps = 1;
+      l.gearDown = true;
+      l.reset(new Vector3(0, 40 + p.gearHeight, 0), NORTH, v, false);
+      l.gearDown = true;
+      l.flaps = 1;
+      // Flare height grows with size: about 8 m for a Cessna, 15 m for an A320.
+      const flare = Math.max(8, type.length * 0.4);
+      const ev = run(l, 120, () => {
+        const h = l.position.y - p.gearHeight;
+        const target = h > flare ? -v * 0.052 : -0.6;
+        return l.onGround ? { ...idle(), brake: true } : holdVs(l, target, h > flare ? 0.35 : 0.1);
       });
       expect(
         ev.some((e) => e.type === 'crash'),
         JSON.stringify(ev),
       ).toBe(false);
-      expect(land.onGround).toBe(true);
+      expect(ev.some((e) => e.type === 'touchdown')).toBe(true);
     });
   }
+
+  it('the A320 needs a far faster approach than the Cessna', () => {
+    expect(stallSpeed(A320.physics, 1)).toBeGreaterThan(stallSpeed(C172.physics, 1) * 2);
+  });
 });

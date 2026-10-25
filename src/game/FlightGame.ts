@@ -8,7 +8,7 @@ import type { Quality } from '../core/settings';
 import { type AircraftType, aircraftById, loadAircraftChoice } from '../aircraft/types';
 import { FlightControls } from '../input/FlightControls';
 import { MouseAim } from '../input/MouseAim';
-import { type FlightEnv, type FlightEvent, FlightModel } from '../physics/FlightModel';
+import { type FlightEnv, type FlightEvent, FlightModel, stallSpeed } from '../physics/FlightModel';
 import type { World } from '../world/World';
 import { type Runway, alongRunway, bearingDeg } from './airports';
 import { type ChallengeEvent, ChallengeRun } from './ChallengeRun';
@@ -88,6 +88,7 @@ export class FlightGame {
     this.env = {
       up: (p, out) => world.upAt(p, out),
       heightAboveGround: (p) => world.heightAboveGround(p),
+      altitude: (p) => world.toGeo(p)[2],
     };
     this.type = type;
     this.fm = new FlightModel(this.env, type.physics);
@@ -262,7 +263,9 @@ export class FlightGame {
       this.world.moveCameraTo(pose.lon, pose.lat, (ground ?? pose.h) + 40);
       return;
     }
-    const h = pose.onGround ? ground + 1.53 : Math.max(pose.h, ground + (pose.exact ? 40 : 300));
+    const h = pose.onGround
+      ? ground + this.type.physics.gearHeight
+      : Math.max(pose.h, ground + (pose.exact ? 40 : 300));
     const pos = this.world.fromGeo(pose.lon, pose.lat, h);
     const basis = this.world.basisAt(pos);
     const fwd = basis.north
@@ -309,8 +312,13 @@ export class FlightGame {
     // Mouse flight: aim follows the mouse, the autopilot turns towards it.
     this.aim.update(this.fm.worldUp);
     c.aim.active = this.aim.active;
-    if (this.aim.active)
+    if (this.aim.active) {
       Object.assign(c.aim, this.aim.steer(this.fm.forward, this.fm.up, this.fm.right));
+      // Real aircraft overshoot without damping: pitch and roll rate feedback.
+      const w = this.fm.omega;
+      c.aim.pitch = Math.max(-1, Math.min(1, c.aim.pitch + w.x * 1.2));
+      c.aim.roll = Math.max(-1, Math.min(1, c.aim.roll - w.z * 0.6));
+    }
     this.rig.aim = this.aim.active && this.rig.mode === 'chase' ? this.aim.direction : null;
 
     if (!this.paused && !this.waitingForTerrain) {
@@ -486,11 +494,11 @@ export class FlightGame {
       // Only the landing is left: continue on final, configured for landing.
       const landing = this.challenge.awaitingLanding;
       const p = this.type.physics;
-      const speed = landing ? (p.stallSpeed - p.flapStallDrop) * 1.3 : this.airStartSpeed;
-      this.fm.gearDown = this.gearFor(landing);
-      this.fm.reset(position, forward, speed, false);
+      const speed = landing ? stallSpeed(p, 1) * 1.3 : this.airStartSpeed;
       this.fm.gearDown = this.gearFor(landing);
       this.fm.flaps = landing ? 1 : 0;
+      this.fm.reset(position, forward, speed, false);
+      this.fm.gearDown = this.gearFor(landing);
       if (this.aircraft) this.aircraft.controls.gear = this.fm.gearDown ? 1 : 0;
       this.controls.input.throttle = landing ? 0.3 : 0.7;
       this.aim.reset(forward);
@@ -522,7 +530,9 @@ export class FlightGame {
 
   /** Speed for air starts and respawns: comfortably above the stall speed. */
   private get airStartSpeed() {
-    return Math.max(65, this.type.physics.stallSpeed * 2.2);
+    // Comfortably above the stall, well below the maximum speed.
+    const p = this.type.physics;
+    return Math.min(p.vne * 0.8, stallSpeed(p) * 1.6);
   }
 
   /** Terrain warning: less than ~6 s to impact at the current sink rate. */
