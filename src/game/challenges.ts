@@ -31,6 +31,8 @@ export interface Course {
   medals: { gold: number; silver: number; bronze: number };
   /** Optional finish after the last ring: a landing on this runway. */
   landing?: Runway;
+  /** The aircraft flown on this course (id in src/aircraft/types.ts). */
+  aircraft: string;
 }
 
 export type Medal = 'gold' | 'silver' | 'bronze';
@@ -64,6 +66,7 @@ export const COURSES: Course[] = [
     ],
     radius: 45,
     medals: { gold: 150, silver: 175, bronze: 210 },
+    aircraft: 'pc12',
   },
   {
     id: 'matterhorn',
@@ -85,6 +88,7 @@ export const COURSES: Course[] = [
     ],
     radius: 60,
     medals: { gold: 170, silver: 200, bronze: 245 },
+    aircraft: 'f35',
   },
   {
     id: 'aletsch',
@@ -110,6 +114,7 @@ export const COURSES: Course[] = [
     ],
     radius: 60,
     medals: { gold: 200, silver: 235, bronze: 285 },
+    aircraft: 'phenom100',
   },
   {
     id: 'vierwaldstaettersee',
@@ -135,7 +140,8 @@ export const COURSES: Course[] = [
       p(8.611, 46.905, 544),
     ],
     radius: 60,
-    medals: { gold: 300, silver: 350, bronze: 420 },
+    medals: { gold: 645, silver: 760, bronze: 920 },
+    aircraft: 'c172',
   },
   {
     id: 'samedan',
@@ -156,6 +162,7 @@ export const COURSES: Course[] = [
     radius: 50,
     medals: { gold: 200, silver: 235, bronze: 280 },
     landing: SAMEDAN_03,
+    aircraft: 'a320',
   },
 ];
 

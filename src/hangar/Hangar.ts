@@ -16,20 +16,23 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { Vector3 as V3 } from 'three';
 import { Aircraft } from '../aircraft/Aircraft';
+import { type AircraftType, loadAircraftChoice } from '../aircraft/types';
 import { BuildingSet, CHURCH_TYPES, HOUSE_TYPES, type HouseType } from '../buildings/BuildingSet';
 
-/** Ground height in the model (gear down), metres below the origin. */
+/** Ground height for the building review (#buildings), metres below the origin. */
 const GROUND_Y = -1.53;
 
-export const AIRCRAFT_URL = `${import.meta.env.BASE_URL}assets/aircraft/tr1.glb`;
-
-/** Studio view of the TR-1 with live controls, used for design review (phase 3). */
+/** Studio view of the fleet: pick an aircraft, watch its controls, gear and propeller move. */
 export class Hangar {
   readonly renderer: WebGLRenderer;
   readonly scene = new Scene();
   readonly camera = new PerspectiveCamera(40, 1, 0.1, 500);
   readonly controls: OrbitControls;
   aircraft?: Aircraft;
+  type: AircraftType = loadAircraftChoice();
+  private readonly floor: Mesh;
+  private readonly key: DirectionalLight;
+  private loading = 0;
   /** Animate the control surfaces in a loop. */
   demo = true;
   forcedLod: number | null = null;
@@ -67,12 +70,14 @@ export class Hangar {
     key.shadow.bias = -0.0004;
     key.shadow.normalBias = 0.02;
     this.scene.add(key);
+    this.key = key;
 
     const floor = new Mesh(new CircleGeometry(14, 64), new ShadowMaterial({ opacity: 0.35 }));
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = GROUND_Y;
     floor.receiveShadow = true;
     this.scene.add(floor);
+    this.floor = floor;
 
     this.camera.position.set(-9, 2.2, 11);
     this.controls = new OrbitControls(this.camera, canvas);
@@ -172,9 +177,37 @@ export class Hangar {
     (s as unknown as { target: { position: V3 } }).target.position.set(total / 2, 0, 0);
   }
 
-  async load() {
-    this.aircraft = await Aircraft.load(AIRCRAFT_URL, this.scene.environment ?? undefined);
-    this.scene.add(this.aircraft.root);
+  /** Loads an aircraft type (replacing the shown one) and frames it. */
+  async load(type: AircraftType = this.type) {
+    this.type = type;
+    const ticket = ++this.loading;
+    const a = await Aircraft.load(type, this.scene.environment ?? undefined);
+    if (ticket !== this.loading) return; // a newer choice won
+    if (this.aircraft) this.scene.remove(this.aircraft.root);
+    this.aircraft = a;
+    this.scene.add(a.root);
+    this.frame(type);
+  }
+
+  /** Floor, shadow box and camera follow the aircraft's size. */
+  private frame(type: AircraftType) {
+    const size = Math.max(type.length, type.span);
+    const g = type.physics.gearHeight;
+    this.floor.position.y = -g;
+    this.floor.scale.setScalar(Math.max(1, size / 18));
+    const s = this.key.shadow.camera;
+    s.left = s.bottom = -size * 0.8;
+    s.right = s.top = size * 0.8;
+    s.far = size * 6;
+    s.updateProjectionMatrix();
+    this.key.position.set(-8, 12, 6).multiplyScalar(Math.max(1, size / 12));
+    const k = size / 11;
+    this.camera.position.set(-9 * k, 2.2 * k, 11 * k);
+    this.camera.far = Math.max(500, size * 30);
+    this.camera.updateProjectionMatrix();
+    this.controls.target.set(0, -g * 0.15, 0.3 * k);
+    this.controls.minDistance = size * 0.35;
+    this.controls.update();
   }
 
   start() {

@@ -14,8 +14,7 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:route": "node tools/route-test.mjs",
-    "assets": "blender -b --factory-startup -P tools/blender/build_tr1.py && node tools/optimize-aircraft.mjs",
-    "assets:optimize": "node tools/optimize-aircraft.mjs",
+    "assets": "node tools/build-aircraft.mjs",
     "test:flight": "node tools/flight-test.mjs",
     "benchmark": "node tools/benchmark.mjs",
     "assets:buildings": "blender -b --factory-startup -P tools/blender/build_buildings.py && node tools/optimize-aircraft.mjs build/buildings_raw.glb public/assets/buildings/buildings.glb && blender -b --factory-startup -P tools/blender/build_trees.py && node tools/optimize-aircraft.mjs build/trees_raw.glb public/assets/buildings/trees.glb"

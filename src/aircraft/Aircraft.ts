@@ -13,6 +13,7 @@ import {
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import type { AircraftType } from './types';
 
 /** Control inputs, all normalised. */
 export interface AircraftControls {
@@ -34,9 +35,8 @@ const DEG = Math.PI / 180;
 /** Max deflections. Positive rotation is about each part's local X (hinge) axis. */
 const LIMITS = { aileron: 20 * DEG, elevator: 25 * DEG, rudder: 25 * DEG, flaps: 35 * DEG };
 const GEAR_FOLD = { main: 88 * DEG, nose: 95 * DEG };
-/** LOD switch distances in metres (concept ch. 10.3). */
+/** LOD switch distances for a 10 m aircraft (concept ch. 10.3); scaled with the length. */
 const LOD_DISTANCES = [0, 25, 180];
-const MAX_PROP_RAD_S = 2 * Math.PI * 30; // 1800 rpm
 const AXIS_X = new Vector3(1, 0, 0);
 const AXIS_Z = new Vector3(0, 0, 1);
 const tmpQ = new Quaternion();
@@ -88,8 +88,8 @@ interface Parts {
 }
 
 /**
- * The TR-1 "Alpenfalke": loads tr1.glb (three levels of detail) and animates
- * control surfaces, gear and propeller. Nose points to +Z, up is +Y.
+ * One aircraft of the fleet: loads <type>.glb (three levels of detail) and animates control
+ * surfaces, gear, propellers and fans. Nose points to +Z, up is +Y.
  */
 export class Aircraft {
   readonly root = new Group();
@@ -118,21 +118,24 @@ export class Aircraft {
   private flapPos = 0;
   triangles: number[] = [];
 
-  static async load(url: string, envMap?: Texture): Promise<Aircraft> {
+  constructor(readonly type: AircraftType) {}
+
+  static async load(type: AircraftType, envMap?: Texture): Promise<Aircraft> {
     const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-    const gltf = await loader.loadAsync(url);
-    const a = new Aircraft();
+    const gltf = await loader.loadAsync(type.url);
+    const a = new Aircraft(type);
     a.setup(gltf.scene, envMap);
     return a;
   }
 
   private setup(scene: Object3D, envMap?: Texture) {
-    this.root.name = 'TR1';
+    this.root.name = this.type.id;
     scene.updateMatrixWorld(true);
     this.root.add(this.lod);
+    const k = Math.max(1, this.type.length / 10);
     for (let level = 0; level < 3; level++) {
-      const node = scene.getObjectByName(`TR1_LOD${level}`);
-      if (!node) throw new Error(`tr1.glb: missing TR1_LOD${level}`);
+      const node = scene.getObjectByName(`AC_LOD${level}`);
+      if (!node) throw new Error(`${this.type.id}.glb: missing AC_LOD${level}`);
       let tris = 0;
       node.traverse((o) => {
         if (o instanceof Mesh) {
@@ -143,7 +146,7 @@ export class Aircraft {
         this.register(o);
       });
       this.triangles.push(Math.round(tris));
-      this.lod.addLevel(node, LOD_DISTANCES[level]);
+      this.lod.addLevel(node, LOD_DISTANCES[level]! * k);
     }
   }
 
@@ -159,9 +162,10 @@ export class Aircraft {
         roughness: 0.03,
         metalness: 0,
         transparent: true,
-        opacity: 0.28,
+        // Clear enough to fly from the cockpit, still visibly glass from outside.
+        opacity: 0.16,
         envMap,
-        envMapIntensity: 1.4,
+        envMapIntensity: 0.8,
         clearcoat: 1,
         side: DoubleSide,
         depthWrite: false,
@@ -192,12 +196,13 @@ export class Aircraft {
     if (name === 'Aileron_L') p.aileronL.push(new Joint(o));
     else if (name === 'Aileron_R') p.aileronR.push(new Joint(o));
     else if (name.startsWith('Elevator_')) p.elevator.push(new Joint(o));
-    else if (name === 'Rudder') p.rudder.push(new Joint(o));
+    else if (name.startsWith('Rudder')) p.rudder.push(new Joint(o));
     else if (name.startsWith('Flap_')) p.flaps.push(new Joint(o));
-    else if (name === 'Gear_L' || name === 'Gear_R') p.gearMain.push(new Joint(o));
     else if (name === 'Gear_N') p.gearNose.push(new Joint(o));
-    else if (name === 'Propeller') p.props.push(new Joint(o, AXIS_Z));
-    else if (name === 'PropDisc') o.traverse((m) => m instanceof Mesh && p.discs.push(m));
+    else if (name.startsWith('Gear_')) p.gearMain.push(new Joint(o));
+    else if (name.startsWith('Propeller') || name.startsWith('Fan'))
+      p.props.push(new Joint(o, AXIS_Z));
+    else if (name.startsWith('PropDisc')) o.traverse((m) => m instanceof Mesh && p.discs.push(m));
   }
 
   update(dt: number) {
@@ -216,6 +221,7 @@ export class Aircraft {
     // Rudder hinge points up: a positive angle swings the trailing edge to the right (-X).
     for (const j of p.rudder) j.set(c.rudder * LIMITS.rudder);
     for (const j of p.flaps) j.setDown(this.flapPos * LIMITS.flaps);
+    if (this.type.physics.fixedGear) this.gearPos = 1;
     const fold = 1 - this.gearPos;
     // There are no gear wells: once folded away the gear is hidden so wheels never poke through.
     const stowed = this.gearPos < 0.02;
@@ -228,7 +234,8 @@ export class Aircraft {
       j.node.visible = !stowed;
     }
 
-    this.propAngle = (this.propAngle + c.rpm * MAX_PROP_RAD_S * dt) % (Math.PI * 2);
+    const maxRadS = 2 * Math.PI * this.type.engine.maxRps;
+    this.propAngle = (this.propAngle + c.rpm * maxRadS * dt) % (Math.PI * 2);
     // Above ~40 % rpm the blades blur into a disc.
     const blur = Math.min(1, Math.max(0, (c.rpm - 0.4) / 0.4));
     for (const j of p.props) {

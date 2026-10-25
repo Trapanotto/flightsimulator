@@ -5,7 +5,7 @@ import { Aircraft } from '../aircraft/Aircraft';
 import { WingTrails } from '../aircraft/WingTrails';
 import { CameraRig } from '../camera/CameraRig';
 import type { Quality } from '../core/settings';
-import { AIRCRAFT_URL } from '../hangar/Hangar';
+import { type AircraftType, aircraftById, loadAircraftChoice } from '../aircraft/types';
 import { FlightControls } from '../input/FlightControls';
 import { MouseAim } from '../input/MouseAim';
 import { type FlightEnv, type FlightEvent, FlightModel } from '../physics/FlightModel';
@@ -39,8 +39,8 @@ const RESPAWN_DELAY = 3;
 const DEG = Math.PI / 180;
 
 /**
- * Flying the TR-1 in the streamed world: physics at a fixed 120 Hz, controls, cameras,
- * start places, landing ratings and crash handling.
+ * Flying an aircraft of the fleet in the streamed world: physics at a fixed 120 Hz, controls,
+ * cameras, start places, landing ratings and crash handling.
  */
 export class FlightGame {
   readonly fm: FlightModel;
@@ -79,30 +79,62 @@ export class FlightGame {
   /** Set by the view: ring passed, missed, finished. */
   onChallengeEvent?: (e: ChallengeEvent) => void;
 
-  constructor(private readonly world: World) {
+  type: AircraftType;
+
+  constructor(
+    private readonly world: World,
+    type: AircraftType = loadAircraftChoice(),
+  ) {
     this.env = {
       up: (p, out) => world.upAt(p, out),
       heightAboveGround: (p) => world.heightAboveGround(p),
     };
-    this.fm = new FlightModel(this.env);
+    this.type = type;
+    this.fm = new FlightModel(this.env, type.physics);
     this.aim = new MouseAim(world.canvas);
     this.rig = new CameraRig(world.camera, world.canvas, (p) => world.heightAboveGround(p));
+    this.rig.setType(type);
+    this.audio.setEngine(type.engine);
   }
 
   async load() {
     // Only the aircraft gets the sky reflection. Not via scene.environment: since three r17x
     // that also lights Lambert materials (terrain, houses, trees) and washes the world out.
-    const env = this.makeEnvironment();
-    this.envMap = env;
-    this.aircraft = await Aircraft.load(AIRCRAFT_URL, env);
-    this.aircraft.root.traverse((o) => {
+    this.envMap ??= this.makeEnvironment();
+    const type = this.type;
+    const a = await Aircraft.load(type, this.envMap);
+    if (type !== this.type) return; // another aircraft was chosen meanwhile
+    a.root.traverse((o) => {
       // The sky is very bright; full-strength reflections wash the white paint out.
       const m = (o as { material?: { envMapIntensity?: number; name?: string } }).material;
       if (m && m.envMapIntensity !== undefined && m.name !== 'Glass') m.envMapIntensity = 0.45;
     });
-    this.world.scene.add(this.aircraft.root, this.trails.group);
+    if (this.aircraft) this.world.scene.remove(this.aircraft.root);
+    this.aircraft = a;
+    this.world.scene.add(a.root, this.trails.group);
     this.applyQuality(this.world.quality);
     this.syncModel();
+  }
+
+  /** Switches the aircraft type and restarts at the current start place (ends a challenge). */
+  async setAircraft(type: AircraftType) {
+    if (type === this.type) return;
+    this.applyType(type);
+    this.endChallenge();
+    if (this.place) this.start(this.place);
+    await this.load();
+  }
+
+  private applyType(type: AircraftType) {
+    this.type = type;
+    this.fm.setPhysics(type.physics);
+    this.rig.setType(type);
+    this.audio.setEngine(type.engine);
+  }
+
+  /** Gear down if the type cannot retract it. */
+  private gearFor(down: boolean) {
+    return down || this.type.physics.fixedGear;
   }
 
   /** Shadows and trails follow the graphics preset. */
@@ -147,6 +179,12 @@ export class FlightGame {
   /** Starts (or restarts) a ring challenge: air start in front of the first ring. */
   startChallenge(course: Course) {
     this.endChallenge();
+    // Each course is flown with its own aircraft.
+    const type = aircraftById(course.aircraft);
+    if (type !== this.type) {
+      this.applyType(type);
+      void this.load();
+    }
     const s = course.start;
     // Create the run before start(): moving the camera rebases, and the run must follow.
     this.challenge = new ChallengeRun(course, (lon, lat, h) => this.world.fromGeo(lon, lat, h));
@@ -231,14 +269,14 @@ export class FlightGame {
       .clone()
       .multiplyScalar(Math.cos(pose.heading * DEG))
       .addScaledVector(basis.east, Math.sin(pose.heading * DEG));
-    this.fm.gearDown = pose.onGround;
+    this.fm.gearDown = this.gearFor(pose.onGround);
     this.fm.flaps = 0;
-    this.fm.reset(pos, fwd, pose.onGround ? 0 : 65, pose.onGround);
-    this.fm.gearDown = pose.onGround;
+    this.fm.reset(pos, fwd, pose.onGround ? 0 : this.airStartSpeed, pose.onGround);
+    this.fm.gearDown = this.gearFor(pose.onGround);
     this.controls.input.throttle = pose.onGround ? 0 : 0.7;
     this.aim.reset(fwd);
     this.rig.snap();
-    if (this.aircraft) this.aircraft.controls.gear = pose.onGround ? 1 : 0;
+    if (this.aircraft) this.aircraft.controls.gear = this.fm.gearDown ? 1 : 0;
     this.lastPos.copy(pos);
     this.pendingPose = undefined;
     this.waitingForTerrain = false;
@@ -371,7 +409,7 @@ export class FlightGame {
   private onAction(a: string) {
     switch (a) {
       case 'gear':
-        if (!this.fm.onGround) {
+        if (!this.fm.onGround && !this.type.physics.fixedGear) {
           this.fm.gearDown = !this.fm.gearDown;
           this.servoUntil = this.time + 2.2;
           this.say(this.fm.gearDown ? 'gearDown' : 'gearUp', 'info');
@@ -445,9 +483,9 @@ export class FlightGame {
     if (this.challenge && !this.challenge.finished) {
       // Challenge: back at the last ring passed, pointing at the next one.
       const { position, forward } = this.challenge.respawnPose();
-      this.fm.gearDown = false;
-      this.fm.reset(position, forward, 65, false);
-      this.fm.gearDown = false;
+      this.fm.gearDown = this.gearFor(false);
+      this.fm.reset(position, forward, this.airStartSpeed, false);
+      this.fm.gearDown = this.gearFor(false);
       this.controls.input.throttle = 0.7;
       this.aim.reset(forward);
       this.rig.snap();
@@ -460,9 +498,9 @@ export class FlightGame {
     const ground = this.world.groundAt(lon, lat) ?? 0;
     const pos = this.world.fromGeo(lon, lat, ground + 500);
     const fwd = this.fm.forward.clone();
-    this.fm.gearDown = false;
-    this.fm.reset(pos, fwd, 65, false);
-    this.fm.gearDown = false;
+    this.fm.gearDown = this.gearFor(false);
+    this.fm.reset(pos, fwd, this.airStartSpeed, false);
+    this.fm.gearDown = this.gearFor(false);
     this.controls.input.throttle = 0.7;
     this.aim.reset(this.fm.forward);
     this.rig.snap();
@@ -474,6 +512,11 @@ export class FlightGame {
   /** Message keys are translated by the view; "key|value" carries a number. */
   private say(text: string, kind: GameMessage['kind'], seconds = 4) {
     this.message = { text, kind, until: this.time + seconds };
+  }
+
+  /** Speed for air starts and respawns: comfortably above the stall speed. */
+  private get airStartSpeed() {
+    return Math.max(65, this.type.physics.stallSpeed * 2.2);
   }
 
   /** Terrain warning: less than ~6 s to impact at the current sink rate. */

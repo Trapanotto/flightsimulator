@@ -1,6 +1,9 @@
+import type { EngineProfile } from '../aircraft/types';
+
 /**
- * Procedural flight audio with WebAudio (no sound files): turboprop engine, wind, boost,
- * warnings, touchdown and crash. All levels follow the aircraft state every frame.
+ * Procedural flight audio with WebAudio (no sound files): engine (piston, turboprop, jet or
+ * fighter), wind, boost/afterburner, warnings, touchdown and crash. All levels follow the
+ * aircraft state every frame.
  */
 
 export interface AudioState {
@@ -23,9 +26,28 @@ export interface AudioState {
   paused: boolean;
 }
 
-const BLADES = 4;
-const MAX_RPS = 30; // 1800 rpm
 const SOUND = 343;
+
+/**
+ * Mix per engine kind. "prop" is the tonal part (propeller blade pass, or the fan whine of a
+ * jet), "roar" the broadband part (exhaust, combustion), "am" how much the roar pulses.
+ */
+const MIX: Record<
+  EngineProfile['kind'],
+  {
+    prop: number;
+    propLp: [number, number];
+    roar: number;
+    roarLo: number;
+    roarHi: number;
+    am: number;
+  }
+> = {
+  piston: { prop: 1.25, propLp: [120, 320], roar: 0.9, roarLo: 140, roarHi: 420, am: 0.55 },
+  turboprop: { prop: 1, propLp: [140, 400], roar: 1, roarLo: 200, roarHi: 650, am: 0.35 },
+  jet: { prop: 0.22, propLp: [1400, 3800], roar: 1.4, roarLo: 260, roarHi: 1300, am: 0.06 },
+  fighter: { prop: 0.18, propLp: [1100, 3000], roar: 1.9, roarLo: 180, roarHi: 1000, am: 0.1 },
+};
 
 const smooth = (param: AudioParam, value: number, ctx: AudioContext, time = 0.08) =>
   param.setTargetAtTime(value, ctx.currentTime, time);
@@ -52,6 +74,15 @@ export class FlightAudio {
     servoGain: GainNode;
   };
   private volume = 0.7;
+  private engine: EngineProfile = {
+    kind: 'turboprop',
+    display: 'rpm',
+    idle: 0,
+    max: 1,
+    blades: 4,
+    maxRps: 30,
+  };
+  private amDepth?: GainNode;
   private enabled = true;
   private warnPhase = 0;
   private spokenPullUp = false;
@@ -132,7 +163,8 @@ export class FlightAudio {
     const roarAm = ctx.createGain();
     const amOsc = ctx.createOscillator();
     const amDepth = ctx.createGain();
-    amDepth.gain.value = 0.35;
+    amDepth.gain.value = MIX[this.engine.kind].am;
+    this.amDepth = amDepth;
     amOsc.connect(amDepth).connect(roarAm.gain);
     roarAm.gain.value = 0.65;
     const roarGain = ctx.createGain();
@@ -189,6 +221,12 @@ export class FlightAudio {
     };
   }
 
+  /** Engine of the current aircraft type. */
+  setEngine(e: EngineProfile) {
+    this.engine = e;
+    if (this.amDepth) this.amDepth.gain.value = MIX[e.kind].am;
+  }
+
   update(dt: number, s: AudioState) {
     const ctx = this.ctx;
     const n = this.nodes;
@@ -197,18 +235,28 @@ export class FlightAudio {
 
     // Doppler in outside views: the aircraft sounds higher when it comes closer.
     const doppler = Math.min(1.25, Math.max(0.8, SOUND / (SOUND - s.approach)));
-    const rps = s.rpm * MAX_RPS;
-    const blade = Math.max(rps * BLADES, 1) * doppler;
+    const mix = MIX[this.engine.kind];
+    const rps = s.rpm * this.engine.maxRps;
+    const blade = Math.max(rps * this.engine.blades, 1) * doppler;
     smooth(n.propOsc.frequency, blade, ctx);
     smooth(n.propSub.frequency, blade / 2, ctx);
-    smooth(n.amOsc.frequency, blade, ctx);
-    smooth(n.propFilter.frequency, 140 + 260 * s.throttle, ctx);
+    // Jets pulse slowly with the spool; pistons and props with the blade pass.
+    smooth(n.amOsc.frequency, mix.am > 0.2 ? blade : 6 + 10 * s.throttle, ctx);
+    smooth(
+      n.propFilter.frequency,
+      mix.propLp[0] + (mix.propLp[1] - mix.propLp[0]) * s.throttle,
+      ctx,
+    );
     const running = s.rpm > 0.05 ? 1 : 0;
-    smooth(n.propGain.gain, mute * running * (0.1 + 0.14 * s.throttle), ctx, 0.15);
-    smooth(n.roarFilter.frequency, (200 + 450 * s.throttle - (s.boost ? 120 : 0)) * doppler, ctx);
+    smooth(n.propGain.gain, mute * running * mix.prop * (0.1 + 0.14 * s.throttle), ctx, 0.15);
+    smooth(
+      n.roarFilter.frequency,
+      (mix.roarLo + (mix.roarHi - mix.roarLo) * s.throttle - (s.boost ? 120 : 0)) * doppler,
+      ctx,
+    );
     smooth(
       n.roarGain.gain,
-      mute * running * (0.05 + 0.16 * s.throttle + (s.boost ? 0.12 : 0)),
+      mute * running * mix.roar * (0.05 + 0.16 * s.throttle + (s.boost ? 0.12 : 0)),
       ctx,
       0.15,
     );

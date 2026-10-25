@@ -1,7 +1,8 @@
+import { AIRCRAFT, aircraftById, saveAircraftChoice } from '../aircraft/types';
 import { type Lang, t } from '../i18n';
 import type { Hangar } from '../hangar/Hangar';
 
-/** Buttons and info for the hangar: gear, flaps, propeller, control demo, LOD. */
+/** Aircraft choice and studio controls: gear, flaps, propeller, control demo, LOD. */
 export class HangarView {
   readonly el: HTMLElement;
   private readonly info: HTMLElement;
@@ -20,9 +21,15 @@ export class HangarView {
         <button class="btn btn-small" data-action="back">← ${t(lang, 'view.back')}</button>
       </div>
       <div class="hangar-card">
-        <p class="brand-kicker">Trapanotto</p>
-        <h2>TR-1 Alpenfalke</h2>
-        <p class="hangar-sub">${t(lang, 'hangar.sub')}</p>
+        <p class="brand-kicker">Trapanotto Airlines</p>
+        <div class="fleet" role="radiogroup" aria-label="${t(lang, 'hangar.fleet')}">
+          ${AIRCRAFT.map(
+            (a) => `<button class="chip" role="radio" data-aircraft="${a.id}"
+              aria-checked="${a.id === hangar.type.id}">${a.name}</button>`,
+          ).join('')}
+        </div>
+        <h2 data-v="name">${hangar.type.name}</h2>
+        <p class="hangar-sub" data-v="sub">${hangar.type.info[lang]} · ${hangar.type.registration}</p>
         <div class="hangar-controls">
           <button class="chip" data-toggle="gear" aria-pressed="true">${t(lang, 'hangar.gear')}</button>
           <button class="chip" data-toggle="flaps" aria-pressed="false">${t(lang, 'hangar.flaps')}</button>
@@ -44,6 +51,28 @@ export class HangarView {
     parent.appendChild(this.el);
     this.info = this.el.querySelector('.hangar-info')!;
     this.el.querySelector('[data-action="back"]')!.addEventListener('click', onBack);
+    const gearChip = this.el.querySelector<HTMLButtonElement>('[data-toggle="gear"]')!;
+    const showType = () => {
+      const type = hangar.type;
+      this.el.querySelector('[data-v="name"]')!.textContent = type.name;
+      this.el.querySelector('[data-v="sub"]')!.textContent =
+        `${type.info[lang]} · ${type.registration}`;
+      gearChip.disabled = type.physics.fixedGear;
+      gearChip.setAttribute('aria-pressed', 'true');
+      this.el
+        .querySelectorAll<HTMLButtonElement>('[data-aircraft]')
+        .forEach((b) => b.setAttribute('aria-checked', String(b.dataset.aircraft === type.id)));
+    };
+    showType();
+    this.el.querySelectorAll<HTMLButtonElement>('[data-aircraft]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const type = aircraftById(b.dataset.aircraft);
+        saveAircraftChoice(type.id);
+        hangar.type = type;
+        showType();
+        void hangar.load(type);
+      }),
+    );
 
     this.el.querySelectorAll<HTMLButtonElement>('[data-toggle]').forEach((b) =>
       b.addEventListener('click', () => {

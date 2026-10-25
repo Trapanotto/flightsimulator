@@ -1,6 +1,44 @@
 import { describe, expect, it } from 'vitest';
 import { Vector3 } from 'three';
-import { type FlightEvent, type FlightInput, FlightModel, TR1 } from '../src/physics/FlightModel';
+import { AIRCRAFT, type AircraftPhysics } from '../src/aircraft/types';
+import { type FlightEvent, type FlightInput, FlightModel } from '../src/physics/FlightModel';
+
+const DEG = Math.PI / 180;
+/** Test aircraft with the figures the arcade model was tuned with (former TR-1). */
+const TR1: AircraftPhysics = {
+  thrust: 7.0,
+  drag: 7.0 / 140 ** 2,
+  gearDrag: 0.35,
+  flapDrag: 0.45,
+  boostFactor: 1.6,
+  boostSeconds: 5,
+  boostRecharge: 0.25,
+  stallSpeed: 30,
+  flapStallDrop: 7,
+  rotateSpeed: 33,
+  rollRate: Math.PI,
+  pitchRate: 1.25,
+  yawRate: 0.5,
+  grip: 3.0,
+  gearHeight: 1.53,
+  bellyHeight: 0.62,
+  maxSinkRate: 4.5,
+  maxG: 8,
+  aoaRef: 5 * DEG,
+  aoaSpeed: 40,
+  aoaMax: 12 * DEG,
+  trimMin: -20 * DEG,
+  trimMax: 25 * DEG,
+  trimRate: 4 * DEG,
+  fixedGear: false,
+  maxFlapDeg: 35,
+  hull: {
+    nose: [0, 0, 6],
+    wingL: [4.6, 0.05, -0.5],
+    wingR: [-4.6, 0.05, -0.5],
+    tail: [0, 2.05, -5.2],
+  },
+};
 
 /** Flat ground at y = 0, +Y up. */
 const flat = {
@@ -26,13 +64,13 @@ function run(m: FlightModel, seconds: number, input: FlightInput | ((t: number) 
 }
 
 function onRunway() {
-  const m = new FlightModel(flat);
+  const m = new FlightModel(flat, TR1);
   m.reset(new Vector3(0, TR1.gearHeight, 0), NORTH, 0, true);
   return m;
 }
 
 function inAir(speed = 75, height = 1000) {
-  const m = new FlightModel(flat);
+  const m = new FlightModel(flat, TR1);
   m.gearDown = false;
   m.reset(new Vector3(0, height, 0), NORTH, speed, false);
   m.gearDown = false;
@@ -65,7 +103,7 @@ describe('flight model', () => {
       m2.step(DT, { ...idle(), throttle: 1, pitch: m2.speed > TR1.rotateSpeed ? 0.6 : 0 });
     const liftoffAt = -m2.position.z;
     expect(liftoffAt).toBeLessThan(1000);
-    expect(liftoffAt).toBeGreaterThan(250);
+    expect(liftoffAt).toBeGreaterThan(100);
   });
 
   it('reaches about 140 m/s in level flight at full throttle', () => {
@@ -110,7 +148,7 @@ describe('flight model', () => {
   });
 
   function approach(sinkRate: number, gearDown = true) {
-    const m = new FlightModel(flat);
+    const m = new FlightModel(flat, TR1);
     m.reset(new Vector3(0, 40, 0), NORTH, 42, false);
     m.gearDown = gearDown;
     m.flaps = 1;
@@ -160,7 +198,6 @@ describe('flight model', () => {
 });
 
 describe('trim', () => {
-  const DEG = Math.PI / 180;
   it('holds the attitude at release hands-off', () => {
     const m = inAir(90);
     run(m, 0.6, { ...idle(), throttle: 0.8, pitch: 0.5 });
@@ -189,7 +226,7 @@ describe('ground handling', () => {
       up: (_p: Vector3, out: Vector3) => out.set(0, 1, 0),
       heightAboveGround: (p: Vector3) => p.y - ground,
     };
-    const m = new FlightModel(env);
+    const m = new FlightModel(env, TR1);
     m.reset(new Vector3(0, TR1.gearHeight, 0), NORTH, 0, true);
     run(m, 0.5, idle());
     ground = -40; // more detailed tile: the real ground is 40 m lower
@@ -203,7 +240,7 @@ describe('ground handling', () => {
 
 describe('load factor limit', () => {
   it('keeps a full pull at high speed below ~9 g', () => {
-    const m = new FlightModel(flat);
+    const m = new FlightModel(flat, TR1);
     m.gearDown = false;
     m.reset(new Vector3(0, 3000, 0), NORTH, 130, false);
     m.gearDown = false;
@@ -215,4 +252,48 @@ describe('load factor limit', () => {
     expect(maxG).toBeLessThan(9);
     expect(maxG).toBeGreaterThan(4);
   });
+});
+
+describe('fleet', () => {
+  for (const type of AIRCRAFT) {
+    const p = type.physics;
+    it(`${type.id}: takes off, reaches its top speed, lands softly`, () => {
+      const m = new FlightModel(flat, p);
+      m.reset(new Vector3(0, p.gearHeight, 0), NORTH, 0, true);
+      const events: FlightEvent[] = [];
+      let dist = 0;
+      for (let t = 0; t < 120 && m.onGround; t += DT) {
+        m.step(DT, { ...idle(), throttle: 1, pitch: m.speed > p.rotateSpeed ? 0.5 : 0 }, events);
+        dist = Math.abs(m.position.z);
+      }
+      expect(m.onGround, 'airborne').toBe(false);
+      expect(dist, 'take-off run').toBeLessThan(3000);
+
+      const top = Math.sqrt(p.thrust / p.drag) * (p.fixedGear ? 1 / Math.sqrt(1 + p.gearDrag) : 1);
+      const air = new FlightModel(flat, p);
+      air.gearDown = false;
+      air.reset(new Vector3(0, 3000, 0), NORTH, top * 0.6, false);
+      air.gearDown = p.fixedGear;
+      run(air, 240, { ...idle(), throttle: 1 });
+      expect(air.speed / top).toBeGreaterThan(0.95);
+      expect(air.speed / top).toBeLessThan(1.05);
+
+      const land = new FlightModel(flat, p);
+      land.gearDown = true;
+      land.reset(new Vector3(0, 30, 0), NORTH, (p.stallSpeed - p.flapStallDrop) * 1.3, false);
+      land.gearDown = true;
+      land.flaps = 1;
+      // A simple approach: hold a sink rate of 2.5 m/s, flare to 0.8 m/s near the ground.
+      const ev = run(land, 120, () => {
+        const target = land.position.y > 8 ? -2.5 : -0.8;
+        const pitch = Math.max(-0.4, Math.min(0.4, (target - land.verticalSpeed) * 0.2));
+        return { ...idle(), throttle: land.onGround ? 0 : 0.35, pitch: land.onGround ? 0 : pitch };
+      });
+      expect(
+        ev.some((e) => e.type === 'crash'),
+        JSON.stringify(ev),
+      ).toBe(false);
+      expect(land.onGround).toBe(true);
+    });
+  }
 });

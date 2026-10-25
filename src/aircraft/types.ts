@@ -1,0 +1,171 @@
+/**
+ * Aircraft types of the Trapanotto Airlines fleet: model file, arcade flight figures, cameras,
+ * engine sound and HUD display per type. Models are built in Blender
+ * (tools/blender/types/<id>.py); the numbers marked "model" come from the build's META.
+ *
+ * Model axes: x = left wing, y = up, z = nose; origin = reference point `gearHeight` above
+ * the ground with the gear down.
+ */
+
+const DEG = Math.PI / 180;
+
+type V3 = [number, number, number];
+
+export interface AircraftPhysics {
+  /** Acceleration along the path at full throttle, m/s². */
+  thrust: number;
+  /** Drag coefficient; top speed in level flight is sqrt(thrust / drag). */
+  drag: number;
+  /** Extra drag factors with gear down / full flaps. */
+  gearDrag: number;
+  flapDrag: number;
+  /** Boost (afterburner on the F-35): thrust factor, seconds available, recharge per second. */
+  boostFactor: number;
+  boostSeconds: number;
+  boostRecharge: number;
+  /** Clean stall speed and how much full flaps lower it, m/s. */
+  stallSpeed: number;
+  flapStallDrop: number;
+  /** The nose may lift above this speed on the runway, m/s. */
+  rotateSpeed: number;
+  rollRate: number;
+  pitchRate: number;
+  yawRate: number;
+  /** How fast the flight path follows the nose (1/s). */
+  grip: number;
+  /** Model origin above ground: gear down / on the belly. */
+  gearHeight: number;
+  bellyHeight: number;
+  maxSinkRate: number;
+  /** Highest load factor a full pull can produce. */
+  maxG: number;
+  /** Angle of attack: aoaRef at aoaSpeed, growing with 1/v², capped at aoaMax. */
+  aoaRef: number;
+  aoaSpeed: number;
+  aoaMax: number;
+  /** Hands-off pitch attitude range of the trim and wheel speed, radians (per second). */
+  trimMin: number;
+  trimMax: number;
+  trimRate: number;
+  /** Fixed gear: always down, the gear key does nothing. */
+  fixedGear: boolean;
+  /** Flap angle at full flaps, degrees (HUD). */
+  maxFlapDeg: number;
+  /** Points that must stay above the terrain (model coordinates). */
+  hull: { nose: V3; wingL: V3; wingR: V3; tail: V3 };
+}
+
+export interface EngineProfile {
+  kind: 'piston' | 'turboprop' | 'jet' | 'fighter';
+  /** HUD: propeller rpm or fan speed N1 in %. */
+  display: 'rpm' | 'n1';
+  /** Idle and maximum (rpm, or N1 %). */
+  idle: number;
+  max: number;
+  /** Propeller / fan: blade count and revolutions per second at full power (visual + sound). */
+  blades: number;
+  maxRps: number;
+}
+
+export interface AircraftType {
+  id: string;
+  name: string;
+  /** Short line for the selection list. */
+  info: { de: string; en: string };
+  registration: string;
+  url: string;
+  physics: AircraftPhysics;
+  engine: EngineProfile;
+  /** Cameras: pilot eye, wing camera, chase distance and height (model coordinates / metres). */
+  eye: V3;
+  wingCam: V3;
+  chaseDistance: number;
+  chaseHeight: number;
+  /** Overall size for LOD distances and the hangar camera, metres. */
+  length: number;
+  span: number;
+}
+
+const base = import.meta.env?.BASE_URL ?? '/';
+
+export const C172: AircraftType = {
+  id: 'c172',
+  name: 'Cessna 172 Skyhawk',
+  info: {
+    de: 'Einmotoriger Hochdecker · 4 Sitze · bis 226 km/h',
+    en: 'Single-engine high-wing · 4 seats · up to 226 km/h',
+  },
+  registration: 'HB-TCA',
+  url: `${base}assets/aircraft/c172.glb`,
+  physics: {
+    thrust: 2.2,
+    drag: 2.2 / 63 ** 2,
+    gearDrag: 0,
+    flapDrag: 0.6,
+    boostFactor: 1,
+    boostSeconds: 0,
+    boostRecharge: 0,
+    stallSpeed: 25,
+    flapStallDrop: 4,
+    rotateSpeed: 27,
+    rollRate: 1.5,
+    pitchRate: 1.0,
+    yawRate: 0.45,
+    grip: 3.0,
+    gearHeight: 1.19, // model
+    bellyHeight: 0.62,
+    maxSinkRate: 3.5,
+    maxG: 4.4,
+    aoaRef: 5 * DEG,
+    aoaSpeed: 32,
+    aoaMax: 13 * DEG,
+    trimMin: -15 * DEG,
+    trimMax: 20 * DEG,
+    trimRate: 4 * DEG,
+    fixedGear: true,
+    maxFlapDeg: 30,
+    hull: {
+      nose: [0, -0.04, 4.02],
+      wingL: [5.5, 0.99, 0.75],
+      wingR: [-5.5, 0.99, 0.75],
+      tail: [0, 1.6, -4.3],
+    }, // model
+  },
+  engine: { kind: 'piston', display: 'rpm', idle: 700, max: 2700, blades: 2, maxRps: 45 },
+  eye: [0.27, 0.62, 0.78], // model
+  wingCam: [2.4, 0.55, 0.2],
+  chaseDistance: 12,
+  chaseHeight: 3.0,
+  length: 8.28,
+  span: 11.0,
+};
+
+export const AIRCRAFT: AircraftType[] = [C172];
+export const DEFAULT_AIRCRAFT = C172;
+
+/** The type with this id, if it is in the fleet already. */
+export function findAircraft(id: string | null | undefined): AircraftType | undefined {
+  return AIRCRAFT.find((a) => a.id === id);
+}
+
+export function aircraftById(id: string | null | undefined): AircraftType {
+  return AIRCRAFT.find((a) => a.id === id) ?? DEFAULT_AIRCRAFT;
+}
+
+const KEY = 'tfs.aircraft';
+
+export function loadAircraftChoice(): AircraftType {
+  try {
+    return aircraftById(localStorage.getItem(KEY));
+  } catch {
+    return DEFAULT_AIRCRAFT;
+  }
+}
+
+export function saveAircraftChoice(id: string) {
+  try {
+    localStorage.setItem(KEY, id);
+  } catch {
+    // Not critical.
+  }
+}

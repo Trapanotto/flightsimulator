@@ -21,7 +21,6 @@
   "view.routeStop": "Stop test flight",
   "view.forward": "Forward",
   "menu.hangar": "Hangar",
-  "hangar.sub": "Single-engine turboprop trainer · span 9.1 m · length 11.4 m",
   "hangar.gear": "Gear",
   "hangar.flaps": "Flaps",
   "hangar.demo": "Control demo",
@@ -104,5 +103,8 @@
   "hud.rpm": "rpm",
   "hud.trim": "Trim",
   "hud.altitude": "Altitude",
-  "hud.vs": "Vertical speed"
+  "hud.vs": "Vertical speed",
+  "hangar.fleet": "Fleet",
+  "flight.aircraft": "Aircraft",
+  "challenge.planeSoon": "Aircraft coming soon"
 }

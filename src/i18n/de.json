@@ -21,7 +21,6 @@
   "view.routeStop": "Testflug stoppen",
   "view.forward": "Vorwärts",
   "menu.hangar": "Hangar",
-  "hangar.sub": "Einmotoriger Turboprop-Trainer · Spannweite 9,1 m · Länge 11,4 m",
   "hangar.gear": "Fahrwerk",
   "hangar.flaps": "Klappen",
   "hangar.demo": "Ruder-Demo",
@@ -99,10 +98,13 @@
   "medal.bronze": "Bronze",
   "flight.mainMenu": "Hauptmenü",
   "flight.controls": "Steuerung",
-  "hud.airspeed": "Fahrt",
+  "hud.airspeed": "Tempo",
   "hud.engine": "Motor",
   "hud.rpm": "U/min",
   "hud.trim": "Trimm",
   "hud.altitude": "Höhe",
-  "hud.vs": "Steigrate"
+  "hud.vs": "Steigrate",
+  "hangar.fleet": "Flotte",
+  "flight.aircraft": "Flugzeug",
+  "challenge.planeSoon": "Flugzeug folgt bald"
 }

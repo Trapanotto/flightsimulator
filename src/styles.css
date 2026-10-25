@@ -909,6 +909,15 @@ body {
   font-size: 13px;
   color: var(--ink-dim);
 }
+.course-plane {
+  font: 600 12px/1.2 var(--font-display);
+  letter-spacing: 0.06em;
+  color: #ffb05c;
+}
+.course:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .course-desc {
   font-size: 13px;
   color: var(--ink-dim);

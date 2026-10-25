@@ -1,4 +1,5 @@
 import { Quaternion, Vector3 } from 'three';
+import { type AircraftPhysics, DEFAULT_AIRCRAFT } from '../aircraft/types';
 
 /**
  * Arcade flight model (concept ch. 9). Not a simulation: the velocity follows the nose
@@ -50,50 +51,12 @@ export interface LiftoffEvent {
 }
 export type FlightEvent = TouchdownEvent | CrashEvent | LiftoffEvent;
 
-/** TR-1 performance figures (concept ch. 9). */
-export const TR1 = {
-  thrust: 7.0, // m/s² at full throttle
-  boostFactor: 1.6,
-  boostSeconds: 5,
-  boostRecharge: 0.25, // seconds of boost regained per second
-  /** Drag coefficient: thrust = drag at ~140 m/s. */
-  drag: 7.0 / 140 ** 2,
-  gearDrag: 0.35,
-  flapDrag: 0.45,
-  stallSpeed: 30, // m/s clean, flaps lower it by up to 7 m/s
-  rotateSpeed: 33,
-  rollRate: Math.PI, // rad/s (180°/s)
-  pitchRate: 1.25,
-  yawRate: 0.5,
-  grip: 3.0, // how fast the flight path follows the nose (1/s)
-  gearHeight: 1.53, // model origin above ground with gear down
-  bellyHeight: 0.62,
-  maxSinkRate: 4.5,
-  /** Highest load factor a full pull can produce (arcade: generous, but no 15 g turns). */
-  maxG: 8,
-  /** Angle of attack: aoaRef at aoaSpeed, growing with 1/v², capped at aoaMax. */
-  aoaRef: 5 * (Math.PI / 180),
-  aoaSpeed: 40,
-  aoaMax: 12 * (Math.PI / 180),
-  /** Hands-off pitch attitude range of the trim, radians. */
-  trimMin: -20 * (Math.PI / 180),
-  trimMax: 25 * (Math.PI / 180),
-  /** Trim wheel speed, radians of hands-off attitude per second. */
-  trimRate: 4 * (Math.PI / 180),
-};
-
 const G = 9.81;
 const DEG = Math.PI / 180;
 const LOCAL_F = new Vector3(0, 0, 1);
 const LOCAL_U = new Vector3(0, 1, 0);
 const LOCAL_R = new Vector3(-1, 0, 0);
 /** Points that must not touch the ground (model coordinates). */
-const HULL = {
-  nose: new Vector3(0, 0.0, 6.0),
-  wingL: new Vector3(4.6, 0.05, -0.5),
-  wingR: new Vector3(-4.6, 0.05, -0.5),
-  tail: new Vector3(0, 2.05, -5.2),
-};
 
 const tmpQ = new Quaternion();
 const tmp = new Vector3();
@@ -115,7 +78,7 @@ export class FlightModel {
   /** 0 .. 1 */
   flaps = 0;
   throttle = 0;
-  boostLeft = TR1.boostSeconds;
+  boostLeft = 0;
   boosting = false;
   assist: Assist = 'easy';
   /**
@@ -136,7 +99,24 @@ export class FlightModel {
   /** Local vertical at the aircraft. */
   readonly worldUp = new Vector3(0, 1, 0);
 
-  constructor(private readonly env: FlightEnv) {}
+  /** Hull points that must stay above the terrain (model coordinates). */
+  private hull: Array<[string, Vector3]> = [];
+  p!: AircraftPhysics;
+
+  constructor(
+    private readonly env: FlightEnv,
+    physics: AircraftPhysics = DEFAULT_AIRCRAFT.physics,
+  ) {
+    this.setPhysics(physics);
+  }
+
+  /** Switches the aircraft type (figures, hull points). */
+  setPhysics(p: AircraftPhysics) {
+    this.p = p;
+    this.hull = Object.entries(p.hull).map(([k, v]) => [k, new Vector3(...v)]);
+    this.boostLeft = p.boostSeconds;
+    if (p.fixedGear) this.gearDown = true;
+  }
 
   /** Places the aircraft level, nose along `forward` (projected onto the horizon). */
   reset(position: Vector3, forward: Vector3, speed: number, onGround: boolean) {
@@ -151,9 +131,9 @@ export class FlightModel {
     this.sink = 0;
     this.onGround = onGround;
     this.crashed = false;
-    this.gearDown = onGround || this.gearDown;
+    this.gearDown = onGround || this.gearDown || this.p.fixedGear;
     this.throttle = onGround ? 0 : 0.7;
-    this.boostLeft = TR1.boostSeconds;
+    this.boostLeft = this.p.boostSeconds;
     this.sinceGroundChange = 10;
     this.updateAxes();
     this.trim = this.pitch;
@@ -172,7 +152,7 @@ export class FlightModel {
   }
 
   get stallSpeed(): number {
-    return TR1.stallSpeed - 7 * this.flaps;
+    return this.p.stallSpeed - this.p.flapStallDrop * this.flaps;
   }
 
   get stalled(): boolean {
@@ -194,7 +174,7 @@ export class FlightModel {
     this.boosting = input.boost && this.boostLeft > 0 && this.throttle > 0.5;
     this.boostLeft = this.boosting
       ? Math.max(0, this.boostLeft - dt)
-      : Math.min(TR1.boostSeconds, this.boostLeft + TR1.boostRecharge * dt);
+      : Math.min(this.p.boostSeconds, this.boostLeft + this.p.boostRecharge * dt);
 
     const s = this.speed;
     const eff = Math.min(1, Math.max(0.12, (s - 10) / 40));
@@ -203,8 +183,9 @@ export class FlightModel {
     else this.stepAir(dt, input, eff);
 
     // Speed along the path: thrust, drag, gravity along the path, ground friction.
-    const thrust = this.throttle * TR1.thrust * (this.boosting ? TR1.boostFactor : 1);
-    const dragK = TR1.drag * (1 + (this.gearDown ? TR1.gearDrag : 0) + this.flaps * TR1.flapDrag);
+    const thrust = this.throttle * this.p.thrust * (this.boosting ? this.p.boostFactor : 1);
+    const dragK =
+      this.p.drag * (1 + (this.gearDown ? this.p.gearDrag : 0) + this.flaps * this.p.flapDrag);
     let accel = thrust - dragK * s * s - G * this.direction.dot(this.worldUp);
     if (this.onGround) accel -= 0.25 + (input.brake ? 3.5 : 0);
     this.speed = Math.max(0, s + accel * dt);
@@ -238,11 +219,11 @@ export class FlightModel {
 
   private stepAir(dt: number, input: FlightInput, eff: number) {
     // Body rates.
-    let roll = input.roll * TR1.rollRate * eff;
+    let roll = input.roll * this.p.rollRate * eff;
     // Pitch rate limited so the load factor stays below ~maxG at high speed.
-    const pitchLimit = Math.min(TR1.pitchRate, (TR1.maxG * G) / Math.max(this.speed, 1));
+    const pitchLimit = Math.min(this.p.pitchRate, (this.p.maxG * G) / Math.max(this.speed, 1));
     let pitch = input.pitch * pitchLimit * eff;
-    const yaw = input.yaw * TR1.yawRate * eff;
+    const yaw = input.yaw * this.p.yawRate * eff;
     const bank = this.bank;
     const upright = this.up.dot(this.worldUp) > 0;
 
@@ -250,8 +231,8 @@ export class FlightModel {
     const handsOff = Math.abs(input.pitch) < 0.05;
     if (!handsOff || !upright) this.trim = this.pitch;
     this.trim = Math.max(
-      TR1.trimMin,
-      Math.min(TR1.trimMax, this.trim + (input.trim ?? 0) * TR1.trimRate * dt),
+      this.p.trimMin,
+      Math.min(this.p.trimMax, this.trim + (input.trim ?? 0) * this.p.trimRate * dt),
     );
     if (handsOff && upright && !this.stalled) {
       pitch += Math.max(-0.25, Math.min(0.25, (this.trim - this.pitch) * 1.5)) * eff;
@@ -287,14 +268,15 @@ export class FlightModel {
 
     // Grip: the flight path follows the nose (weaker when slow), a few degrees below it:
     // slow flight needs a higher angle of attack, flaps reduce it.
-    const grip = TR1.grip * eff * (this.stalled ? 0.4 : 1);
+    const grip = this.p.grip * eff * (this.stalled ? 0.4 : 1);
     this.direction.lerp(this.pathTarget(tmp), Math.min(1, grip * dt)).normalize();
   }
 
   /** Angle of attack in radians for the current speed and flap setting. */
   get angleOfAttack(): number {
-    const a = TR1.aoaRef * (TR1.aoaSpeed / Math.max(this.speed, 15)) ** 2 * (1 - 0.35 * this.flaps);
-    return Math.min(a, TR1.aoaMax);
+    const a =
+      this.p.aoaRef * (this.p.aoaSpeed / Math.max(this.speed, 15)) ** 2 * (1 - 0.35 * this.flaps);
+    return Math.min(a, this.p.aoaMax);
   }
 
   /** Where the flight path wants to point: the nose, lowered by the angle of attack. */
@@ -316,23 +298,24 @@ export class FlightModel {
 
     // Rotation: above rotate speed the nose may lift, otherwise it settles on the nose wheel.
     const pitchNow = this.pitch;
-    const canRotate = this.speed > TR1.rotateSpeed - 6 * this.flaps;
+    const canRotate = this.speed > this.p.rotateSpeed - 0.8 * this.p.flapStallDrop * this.flaps;
     const wanted =
-      canRotate && input.pitch > 0.1 ? Math.min(14 * DEG, pitchNow + input.pitch * 0.6 * dt) : 0;
-    this.rotateLocal(LOCAL_R, (wanted - pitchNow) * Math.min(1, dt * 6));
+      canRotate && input.pitch > 0.1 ? Math.min(14 * DEG, pitchNow + input.pitch * 0.15 * dt) : 0;
+    // Pulling rotates directly; letting go settles the nose wheel softly.
+    this.rotateLocal(LOCAL_R, (wanted - pitchNow) * (wanted > pitchNow ? 1 : Math.min(1, dt * 6)));
     // Wings level on the ground.
     this.rotateLocal(LOCAL_F, -this.bank * Math.min(1, dt * 8));
     this.quaternion.normalize();
     this.updateAxes();
 
     // The path follows the nose; once the nose is up and fast enough, the aircraft lifts off.
-    this.direction.lerp(this.pathTarget(tmp), Math.min(1, TR1.grip * eff * dt)).normalize();
+    this.direction.lerp(this.pathTarget(tmp), Math.min(1, this.p.grip * eff * dt)).normalize();
   }
 
   private handleGround(events: FlightEvent[]) {
     const hag = this.env.heightAboveGround(this.position);
     if (hag === undefined) return;
-    const contact = this.gearDown ? TR1.gearHeight : TR1.bellyHeight;
+    const contact = this.gearDown ? this.p.gearHeight : this.p.bellyHeight;
     const vs = this.velocity.dot(this.worldUp);
 
     if (hag <= contact && (vs <= 0.05 || this.onGround)) {
@@ -341,7 +324,7 @@ export class FlightModel {
         const bankDeg = Math.abs(this.bank) / DEG;
         const pitchDeg = this.pitch / DEG;
         if (!this.gearDown) return this.crash(events, 'gear-up');
-        if (sinkRate > TR1.maxSinkRate || bankDeg > 12 || pitchDeg < -5 || pitchDeg > 18) {
+        if (sinkRate > this.p.maxSinkRate || bankDeg > 12 || pitchDeg < -5 || pitchDeg > 18) {
           return this.crash(events, 'hard-landing');
         }
         this.onGround = true;
@@ -375,7 +358,7 @@ export class FlightModel {
   }
 
   private checkHull(events: FlightEvent[]) {
-    for (const [name, local] of Object.entries(HULL)) {
+    for (const [name, local] of this.hull) {
       tmp2.copy(local).applyQuaternion(this.quaternion).add(this.position);
       const h = this.env.heightAboveGround(tmp2);
       if (h !== undefined && h < 0) {

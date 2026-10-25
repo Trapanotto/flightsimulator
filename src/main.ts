@@ -8,6 +8,7 @@ import type { HangarView } from './ui/HangarView';
 import type { FlightGame } from './game/FlightGame';
 import type { FlightView } from './ui/FlightView';
 import { type Course, courseById } from './game/challenges';
+import { findAircraft } from './aircraft/types';
 
 const lang = detectLang();
 document.documentElement.lang = lang;
@@ -165,5 +166,5 @@ if (!document.createElement('canvas').getContext('webgl2')) {
   if (location.hash === '#fly') void openFlight(lang);
   // #challenge=lauterbrunnen starts a course directly (tests, links).
   const course = courseById(location.hash.match(/^#challenge=([\w-]+)/)?.[1] ?? '');
-  if (course) void openFlight(lang, course);
+  if (course && findAircraft(course.aircraft)) void openFlight(lang, course);
 }

@@ -58,14 +58,20 @@ Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
   Schnee in der Höhe, Flugzeugschatten, Kondensstreifen, Bloom, SMAA, Sonnen-Glanzlicht;
   vier Qualitätsstufen (automatisch nach GPU), Einstellungen für Grafik, Tageszeit und Wetter.
   Messwerte: [docs/BENCHMARK.md](docs/BENCHMARK.md).
-- **Fliegen** mit dem TR-1: Arcade-Flugmodell (Start, Kurvenflug, sanfter Strömungsabriss, Landung
+- **Fliegen** mit der Flotte von Trapanotto Airlines: Arcade-Flugmodell mit eigenen Werten je Typ (Start, Kurvenflug, sanfter Strömungsabriss, Landung
   mit Bewertung, Absturz mit Neustart in der Luft), Start auf sechs echten Pisten
   (Bern-Belp, Sion, Zürich, Samedan, Lugano, Genf) oder in der Luft über Lauterbrunnen und am Matterhorn.
   Steuerung per Tastatur, Maus («fliege, wohin du schaust»), Gamepad oder Touch; Kameras
   Verfolger, Cockpit, Flügel, Orbit.
-- **Flugzeug TR-1 «Alpenfalke»** – komplett per Python-Skript in Blender erzeugt: Rumpf aus Querschnitten,
-  NACA-Profile, bewegliche Ruder, Klappen, Fahrwerk, 4-Blatt-Propeller, Cockpit; Lackierung und
-  Schriftzüge in einer 2048er-Textur; drei Detailstufen; 0,7 MB als GLB. Im Spiel unter **Hangar**.
+- **Flotte «Trapanotto Airlines»** – jedes Flugzeug komplett per Python-Skript in Blender erzeugt
+  (`tools/blender/types/<typ>.py` auf einer gemeinsamen Bibliothek in `tools/blender/ac/`):
+  Rumpf aus Querschnitten mit echten Fensteröffnungen und Kabine, NACA-Profile, bewegliche Ruder
+  und Klappen, Fahrwerk, Propeller bzw. Triebwerke, Lackierung mit Logo und Schriftzug in einer
+  2048er-Textur, drei Detailstufen. Auswahl im **Hangar** oder im Flugmenü.
+  - ✅ **Cessna 172 Skyhawk** (HB-TCA): Hochdecker mit Streben, starres Fahrwerk mit Radverkleidungen,
+    Glascockpit; 0,8 MB.
+  - ⏳ Pilatus PC-12, Embraer Phenom 100, Lockheed Martin F-35 Lightning II, Airbus A320, Boeing 747
+    ![Cessna 172 von Trapanotto Airlines](docs/screenshots/c172.png)
 
 - **Ganze Schweiz streamen:** Terrain (Quantized-Mesh) und SWISSIMAGE-Luftbilder direkt von geo.admin.ch,
   Detail nach Bildschirmfehler (Quadtree, Zoom 7–15), Vorausladen in Flugrichtung, Speicherbudget
@@ -110,11 +116,11 @@ Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
 
 ## Flugzeug neu bauen
 
-Braucht Blender 5.x im `PATH`. Erzeugt Modell, Texturen, Vorschaubilder (`build/`) und
-`public/assets/aircraft/tr1.glb`:
+Braucht Blender 5.x (im `PATH`, unter `$BLENDER` oder am Windows-Standardort). Erzeugt Modell,
+Texturen, Vorschaubilder (`build/`) und `public/assets/aircraft/<typ>.glb` – ohne Typ die ganze Flotte:
 
 ```bash
-npm run assets
+npm run assets -- c172 -- --preview
 ```
 
 Renderbild für Startbildschirm und Link-Vorschau (Hintergrund ist ein Screenshot der eigenen Engine):
@@ -124,7 +130,7 @@ AFTER=30000 node tools/screenshot.mjs "http://localhost:5180/flightsimulator/" b
 ```
 
 ```bash
-blender -b build/tr1.blend -P tools/blender/render_hero.py
+blender -b build/c172.blend -P tools/blender/render_hero.py
 ```
 
 ## Entwickeln

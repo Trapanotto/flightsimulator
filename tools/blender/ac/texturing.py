@@ -1,6 +1,7 @@
 """
-TR-1 texturing: shared UV atlas, Cycles bakes (position, normal, AO, decals) and a livery
-computed per texel with numpy. Produces the base colour and a packed roughness/metallic map.
+Aircraft texturing (shared): one UV atlas over the painted skin parts, Cycles bakes (AO,
+decals) and a livery computed per texel with numpy by the aircraft type.
+Produces the base colour and a packed occlusion/roughness/metallic map.
 """
 
 import math
@@ -11,21 +12,16 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Vector
 
-import tr1_geometry as geo
-
-ATLAS_PARTS = ["Fuselage", "Wing_R", "Wing_L", "Flap_R", "Flap_L", "Aileron_R", "Aileron_L",
-               "HStab", "Elevator_R", "Elevator_L", "Fin", "Rudder", "Spinner"]
-
-FONT_CANDIDATES = ["/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-                   "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
-
-# Colours (sRGB)
+# Trapanotto Airlines house colours (sRGB)
 WHITE = (0.93, 0.93, 0.91)
 RED = (0.76, 0.05, 0.07)
+NAVY = (0.07, 0.10, 0.20)
 BELLY = (0.80, 0.81, 0.83)
+GREY = (0.62, 0.64, 0.66)
 DARK = (0.13, 0.14, 0.15)
 WALK = (0.30, 0.31, 0.32)
-NAVY = (0.07, 0.10, 0.20)
+WINDOW = (0.05, 0.07, 0.10)
+METAL = (0.74, 0.75, 0.77)
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +65,7 @@ def bake_target_node(mat):
 
 
 def bake(objs, bake_type, image, mat, samples=16, selected_to_active=None, margin=12, clear=True,
-         **kw):
+         cage_extrusion=0.03, max_ray_distance=0.06):
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
     scene.cycles.device = "CPU"
@@ -87,9 +83,9 @@ def bake(objs, bake_type, image, mat, samples=16, selected_to_active=None, margi
     bk.use_clear = clear
     bk.use_selected_to_active = selected_to_active is not None
     if selected_to_active is not None:
-        bk.cage_extrusion = kw.pop("cage_extrusion", 0.03)
-        bk.max_ray_distance = kw.pop("max_ray_distance", 0.06)
-    bpy.ops.object.bake(type=bake_type, **kw)
+        bk.cage_extrusion = cage_extrusion
+        bk.max_ray_distance = max_ray_distance
+    bpy.ops.object.bake(type=bake_type)
 
 
 def pixels(img):
@@ -101,7 +97,6 @@ def pixels(img):
 def set_pixels(img, arr):
     img.pixels.foreach_set(arr.astype(np.float32).ravel())
     img.update()
-
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +127,7 @@ def rasterize_parts(objs, size):
         tris = tris.reshape(-1, 3)
         mw = np.array(obj.matrix_world, np.float32)
         co = co @ mw[:3, :3].T + mw[:3, 3]
+        cn = cn @ mw[:3, :3].T
         for t in tris:
             a, b, c = uv[t[0]], uv[t[1]], uv[t[2]]
             x0 = max(int(np.floor(min(a[0], b[0], c[0]))), 0)
@@ -172,14 +168,34 @@ def rasterize_parts(objs, size):
             missing = ~covered
     return pos, nrm, pid
 
+
 # ---------------------------------------------------------------------------
-# Decals (lettering, Swiss cross)
+# Decals (lettering, logos)
 # ---------------------------------------------------------------------------
 
+def font_paths():
+    """Inter (SIL OFL, shipped with Blender), then common system fonts."""
+    v = f"{bpy.app.version[0]}.{bpy.app.version[1]}"
+    base = os.path.dirname(bpy.app.binary_path)
+    return [os.path.join(base, v, "datafiles", "fonts", "Inter.woff2"),
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
+
+
+_FONT = []
+
+
 def load_font():
-    for path in FONT_CANDIDATES:
+    if _FONT:
+        return _FONT[0]
+    for path in font_paths():
         if os.path.exists(path):
-            return bpy.data.fonts.load(path)
+            try:
+                _FONT.append(bpy.data.fonts.load(path))
+                return _FONT[0]
+            except RuntimeError:
+                continue
+    _FONT.append(None)
     return None
 
 
@@ -190,13 +206,26 @@ def basis(x_axis, y_axis):
     return m.to_4x4()
 
 
-def text_mesh(col, name, body, size, center, x_axis, y_axis, color, font):
+def side_axes(side):
+    """
+    (reading direction, up) for lettering on the +X (side=1) or -X (side=-1) side.
+    A viewer standing at +X has the tail (+Y) on the right, at -X the nose: text reads left to
+    right for the viewer on both sides.
+    """
+    return ((0, 1, 0), (0, 0, 1)) if side > 0 else ((0, -1, 0), (0, 0, 1))
+
+
+def text_mesh(col, name, body, size, center, x_axis, y_axis, color, font=None, bold=0.02,
+              spacing=1.05):
+    """Flat lettering in the plane spanned by x_axis (reading direction) and y_axis (up)."""
+    font = font or load_font()
     curve = bpy.data.curves.new(name, "FONT")
     curve.body = body
     curve.size = size
     curve.align_x = "CENTER"
     curve.align_y = "CENTER"
-    curve.space_character = 1.05
+    curve.space_character = spacing
+    curve.offset = bold * size
     if font:
         curve.font = font
     tmp = bpy.data.objects.new(name + "_tmp", curve)
@@ -212,12 +241,8 @@ def text_mesh(col, name, body, size, center, x_axis, y_axis, color, font):
     return obj
 
 
-def swiss_cross(col, name, size, center, x_axis, y_axis, color):
-    """Swiss cross: arms 1/6 longer than wide (arm width 6, arm length 7 of 20 units)."""
-    u = size / 20.0
-    a, b = 3 * u, 10 * u  # half arm width, half total length
-    outline = [(-a, b), (a, b), (a, a), (b, a), (b, -a), (a, -a), (a, -b), (-a, -b),
-               (-a, -a), (-b, -a), (-b, a), (-a, a)]
+def polygon_decal(col, name, outline, center, x_axis, y_axis, color, layer=0):
+    """Flat polygon decal (logos); outline in 2D decal coordinates."""
     verts = [(x, y, 0) for x, y in outline]
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata(verts, [], [tuple(range(len(verts)))])
@@ -225,7 +250,39 @@ def swiss_cross(col, name, size, center, x_axis, y_axis, color):
     col.objects.link(obj)
     mesh.transform(Matrix.Translation(Vector(center)) @ basis(x_axis, y_axis))
     finish_decal(obj, color)
+    obj["layer"] = layer
     return obj
+
+
+def circle_outline(r, n=40, cx=0.0, cy=0.0):
+    return [(cx + r * math.cos(2 * math.pi * k / n), cy + r * math.sin(2 * math.pi * k / n))
+            for k in range(n)]
+
+
+def swiss_flag(col, name, size, center, x_axis, y_axis):
+    """Small square Swiss flag (registration marking): red square + white cross."""
+    h = size / 2
+    sq = polygon_decal(col, name + "_bg", [(-h, -h), (h, -h), (h, h), (-h, h)], center, x_axis,
+                       y_axis, RED)
+    u = size * 0.6 / 20.0
+    a, b = 3 * u, 10 * u
+    outline = [(-a, b), (a, b), (a, a), (b, a), (b, -a), (a, -a), (a, -b), (-a, -b),
+               (-a, -a), (-b, -a), (-b, a), (-a, a)]
+    cross = polygon_decal(col, name + "_x", outline, center, x_axis, y_axis, WHITE, layer=1)
+    return [sq, cross]
+
+
+def trapanotto_logo(col, name, size, center, x_axis, y_axis, ring=WHITE, letter=NAVY):
+    """Airline logo: a white disc with a bold navy 'T' and a red wing stroke."""
+    objs = [polygon_decal(col, name + "_disc", circle_outline(size / 2), center, x_axis, y_axis,
+                          ring)]
+    t = size
+    bar = [(-0.30 * t, 0.26 * t), (0.30 * t, 0.26 * t), (0.30 * t, 0.12 * t), (0.07 * t, 0.12 * t),
+           (0.07 * t, -0.32 * t), (-0.07 * t, -0.32 * t), (-0.07 * t, 0.12 * t), (-0.30 * t, 0.12 * t)]
+    objs.append(polygon_decal(col, name + "_t", bar, center, x_axis, y_axis, letter, layer=1))
+    wing = [(-0.40 * t, 0.02 * t), (0.42 * t, 0.20 * t), (0.40 * t, 0.10 * t), (-0.38 * t, -0.06 * t)]
+    objs.append(polygon_decal(col, name + "_w", wing, center, x_axis, y_axis, RED, layer=2))
+    return objs
 
 
 def finish_decal(obj, color):
@@ -266,30 +323,8 @@ def shrinkwrap_onto(obj, target, offset=0.004):
     bpy.data.meshes.remove(old)
 
 
-def build_decals(col, parts):
-    font = load_font()
-    fus, fin, wing_l = parts["Fuselage"], parts["Fin"], parts["Wing_L"]
-    decals = {"Fuselage": [], "Fin": [], "Wing_L": []}
-    R, L = ((0, 1, 0), (0, 0, 1)), ((0, -1, 0), (0, 0, 1))
-    for side, axes in ((1, R), (-1, L)):
-        decals["Fuselage"].append(text_mesh(col, f"D_name_{side}", "TRAPANOTTO", 0.30,
-                                            (side * 0.6, 2.05, 0.17), *axes, NAVY, font))
-        decals["Fuselage"].append(text_mesh(col, f"D_model_{side}", "TR-1 ALPENFALKE", 0.10,
-                                            (side * 0.6, -4.55, 0.10), *axes, WHITE, font))
-        decals["Fin"].append(text_mesh(col, f"D_reg_{side}", "HB-TRP", 0.19,
-                                       (side * 0.2, 4.30, 0.56), *axes, NAVY, font))
-        decals["Fin"].append(swiss_cross(col, f"D_cross_{side}", 0.42,
-                                         (side * 0.2, 4.78, 1.36), *axes, WHITE))
-    decals["Wing_L"].append(text_mesh(col, "D_reg_wing", "HB-TRP", 0.52, (2.75, -0.55, -0.6),
-                                      (1, 0, 0), (0, -1, 0), NAVY, font))
-    for target_name, objs in decals.items():
-        for o in objs:
-            shrinkwrap_onto(o, parts[target_name])
-    return decals
-
-
 # ---------------------------------------------------------------------------
-# Livery
+# Livery painting
 # ---------------------------------------------------------------------------
 
 def srgb_to_linear(c):
@@ -314,136 +349,149 @@ def value_noise(p, scale):
     return n / 3
 
 
-def paint(pos, nrm, ao, pid):
-    x, y, z = pos[..., 0], pos[..., 1], pos[..., 2]
-    ax = np.abs(x)
-    nz = nrm[..., 2]
-    shape = pos.shape[:2]
-    col = np.empty(shape + (3,), np.float32)
-    col[:] = WHITE
-    rough = np.full(shape, 0.32, np.float32)
+class Masks:
+    """Per-texel data handed to a livery: world position, normal and part masks."""
 
-    def put(mask, c, r=None):
-        col[mask] = c
-        if r is not None:
-            rough[mask] = r
+    def __init__(self, pos, nrm, pid, names):
+        self.pos, self.nrm, self.pid, self.names = pos, nrm, pid, names
+        self.x, self.y, self.z = pos[..., 0], pos[..., 1], pos[..., 2]
+        self.ax = np.abs(self.x)
+        self.nx, self.ny, self.nz = nrm[..., 0], nrm[..., 1], nrm[..., 2]
+        self.shape = pos.shape[:2]
 
-    def part(*names):
-        m = np.zeros(shape, bool)
-        for n in names:
-            m |= pid == ATLAS_PARTS.index(n)
+    def part(self, *names):
+        """Mask of parts; a name ending in '*' matches as a prefix."""
+        m = np.zeros(self.shape, bool)
+        for i, n in enumerate(self.names):
+            for p in names:
+                if (p.endswith("*") and n.startswith(p[:-1])) or n == p:
+                    m |= self.pid == i
         return m
 
-    spinner = part("Spinner")
-    fin = part("Fin", "Rudder")
-    tail_h = part("HStab", "Elevator_R", "Elevator_L")
-    wing = part("Wing_R", "Wing_L", "Flap_R", "Flap_L", "Aileron_R", "Aileron_L")
-    fuse = part("Fuselage")
 
-    # Fuselage
-    put(fuse & (nz < -0.55), BELLY, 0.4)
-    nose = fuse & (y < -3.70 - 0.5 * z)
-    put(nose, RED, 0.3)
-    t = np.clip((y + 3.9) / 7.8, 0, 1)
-    zc = -0.12 + 0.17 * t
-    w = 0.075 - 0.035 * t
-    stripe = fuse & (np.abs(z - zc) < w) & (y > -3.95) & (y < 3.9) & (np.abs(nz) < 0.7)
-    put(stripe, RED, 0.3)
-    pin = fuse & (np.abs(z - (zc + w + 0.03)) < 0.008) & (y > -3.7) & (y < 3.75) & (np.abs(nz) < 0.7)
-    put(pin, NAVY, 0.3)
-    glare = fuse & (y > -3.95) & (y < -1.80) & (nz > 0.78) & (ax < 0.33)
-    put(glare, DARK, 0.85)
-    put(spinner, RED, 0.28)
+class Canvas:
+    """Colour, roughness and metalness being painted."""
 
-    # Fin / rudder: red top, slanted boundary
-    put(fin & (z > 0.80 + 0.10 * (y - 4.3)), RED, 0.3)
-    # Tail plane and wing tips
-    put(tail_h & (ax > 1.48), RED, 0.3)
-    put(wing & (ax > 3.86), RED, 0.3)
-    walk = wing & (nz > 0.6) & (ax > 0.62) & (ax < 1.28) & (y > -1.05) & (y < 0.35)
-    put(walk, WALK, 0.95)
+    def __init__(self, masks, base, rough=0.32):
+        self.m = masks
+        self.col = np.empty(masks.shape + (3,), np.float32)
+        self.col[:] = base
+        self.rough = np.full(masks.shape, rough, np.float32)
+        self.metal = np.zeros(masks.shape, np.float32)
 
-    # Panel lines
-    lines = np.zeros(shape, bool)
-    for yy in (-3.72, -2.95, -1.92, 1.42, 2.62, 3.55):
-        lines |= fuse & (np.abs(y - yy) < 0.0045)
-    cowl = fuse & (ax > 0.25) & (y > -5.05) & (y < -4.05)
-    lines |= cowl & ((np.abs(z - 0.32) < 0.0045) | (np.abs(z + 0.30) < 0.0045))
-    for xx in (0.64, 1.32, 2.6, 3.86):
-        lines |= wing & (np.abs(ax - xx) < 0.0045)
-    for xx in (0.7, 1.48):
-        lines |= tail_h & (np.abs(ax - xx) < 0.004)
-    col[lines] *= 0.62
+    def put(self, mask, color, rough=None, metal=None):
+        self.col[mask] = color
+        if rough is not None:
+            self.rough[mask] = rough
+        if metal is not None:
+            self.metal[mask] = metal
 
-    # Exhaust soot along the sides
-    soot = fuse & (ax > 0.3) & (y > -3.95)
-    s = np.exp(-np.clip(y + 3.85, 0, None) / 1.3) * smoothstep(0.22, 0.0, np.abs(z - 0.0))
-    s = np.where(soot, s, 0)
-    col *= (1 - 0.5 * s)[..., None]
-    col += (s * 0.04)[..., None] * np.array([0.6, 0.45, 0.3])
-    rough = rough + 0.35 * s
+    def shade(self, mask, k):
+        """Multiplies colour (panel lines, soot)."""
+        self.col[mask] *= k
 
-    # Subtle grime + ambient occlusion
-    g = value_noise(pos, 3.0) * 0.5 + value_noise(pos, 11.0) * 0.5
-    col *= (1 + 0.035 * g)[..., None]
-    rough = np.clip(rough + 0.05 * g, 0.05, 1)
-    col *= (0.55 + 0.45 * ao)[..., None]
-    return np.clip(col, 0, 1), rough
+    def finish(self, ao, grime=0.035):
+        g = value_noise(self.m.pos, 3.0) * 0.5 + value_noise(self.m.pos, 11.0) * 0.5
+        self.col *= (1 + grime * g)[..., None]
+        self.rough = np.clip(self.rough + 0.05 * g, 0.05, 1)
+        self.col *= (0.55 + 0.45 * ao)[..., None]
+        return np.clip(self.col, 0, 1), self.rough, self.metal
 
 
-def texture_atlas(parts, size=2048, ao_samples=64):
-    objs = [parts[n] for n in ATLAS_PARTS]
+def near(values, targets, width):
+    """True where `values` is within width of any target (panel lines)."""
+    m = np.zeros(values.shape, bool)
+    for t in targets:
+        m |= np.abs(values - t) < width
+    return m
+
+
+def rounded_rect(u, v, cu, cv, hu, hv, r):
+    """Mask of a rounded rectangle in (u, v) coordinates (windows, doors)."""
+    du = np.maximum(np.abs(u - cu) - (hu - r), 0)
+    dv = np.maximum(np.abs(v - cv) - (hv - r), 0)
+    return du * du + dv * dv <= r * r
+
+
+# ---------------------------------------------------------------------------
+# Atlas
+# ---------------------------------------------------------------------------
+
+def dimension(objs):
+    """Largest extent of the parts in metres (scales bake distances for big aircraft)."""
+    lo = [1e9, 1e9, 1e9]
+    hi = [-1e9, -1e9, -1e9]
+    for o in objs:
+        for c in o.bound_box:
+            w = o.matrix_world @ Vector(c)
+            lo = [min(a, b) for a, b in zip(lo, w)]
+            hi = [max(a, b) for a, b in zip(hi, w)]
+    return max(b - a for a, b in zip(lo, hi))
+
+
+def texture_atlas(parts, names, livery, decals_fn, size=2048, ao_samples=64, base_name="AC",
+                  material="Airframe"):
+    """
+    parts: {name: object}; names: the painted skin parts (atlas order).
+    livery(masks) -> Canvas; decals_fn(col, parts) -> {target part: [decal objects]}.
+    """
+    objs = [parts[n] for n in names]
     unwrap_atlas(objs)
-    mat = bpy.data.materials["Airframe"]
+    mat = bpy.data.materials[material]
+    dim = dimension(objs)
+    k = max(1.0, dim / 12)
 
     img_ao = new_image("bake_ao", size, non_color=True)
-    # AO reach ~1 m: dark only in real creases (wing root, canopy sill, tail junction).
     scene = bpy.context.scene
     if scene.world is None:
         scene.world = bpy.data.worlds.new("BakeWorld")
-    scene.world.light_settings.distance = 0.9
-    # AO sees the whole aircraft (gear, canopy, exhausts darken the skin around them).
+    # AO reach ~1 m on a light aircraft, more on big ones: dark only in real creases.
+    scene.world.light_settings.distance = 0.9 * k
     bake(objs, "AO", img_ao, mat, samples=ao_samples)
     pos, n, pid = rasterize_parts(objs, size)
     covered = pid >= 0
 
-    # Decals: colour pass and coverage mask, baked from decal meshes onto each skin part.
     col = bpy.data.collections.new("Decals")
     bpy.context.scene.collection.children.link(col)
-    decals = build_decals(col, parts)
+    decals = decals_fn(col, parts)
+    for target, ds in decals.items():
+        for o in ds:
+            # Stacked decals (logo layers) keep their order: the outer one is hit first.
+            shrinkwrap_onto(o, parts[target], 0.004 * k + 0.003 * o.get("layer", 0))
     img_dc = new_image("bake_decal_color", size, float_buffer=True)
     img_dm = new_image("bake_decal_mask", size, float_buffer=True, non_color=True)
-    first = True
-    for target, ds in decals.items():
-        # margin=0: rays that miss a letter must not be smeared into the gaps.
-        bake(ds, "EMIT", img_dc, mat, samples=16, selected_to_active=parts[target], clear=first,
-             margin=0)
-        first = False
-    for ds in decals.values():
-        for d in ds:
-            em = d.data.materials[0].node_tree.nodes["Emission"]
-            em.inputs["Color"].default_value = (1, 1, 1, 1)
-    first = True
-    for target, ds in decals.items():
-        bake(ds, "EMIT", img_dm, mat, samples=16, selected_to_active=parts[target], clear=first,
-             margin=0)
-        first = False
+    baked = False
+    for img, white in ((img_dc, False), (img_dm, True)):
+        first = True
+        for target, ds in decals.items():
+            if not ds:
+                continue
+            if white:
+                for d in ds:
+                    em = d.data.materials[0].node_tree.nodes["Emission"]
+                    em.inputs["Color"].default_value = (1, 1, 1, 1)
+            # margin=0: rays that miss a letter must not be smeared into the gaps.
+            bake(ds, "EMIT", img, mat, samples=16, selected_to_active=parts[target], clear=first,
+                 margin=0, cage_extrusion=0.03 * k, max_ray_distance=0.06 * k)
+            first = False
+            baked = True
 
-    # Blender images start at the bottom row; the rasteriser used the same convention.
     ao = pixels(img_ao)[..., 0]
-    color, rough = paint(pos, n, np.where(covered, ao, 1.0), pid)
-    dmask = np.clip(pixels(img_dm)[..., 0], 0, 1)
-    dcol = linear_to_srgb(pixels(img_dc)[..., :3])
-    color = color * (1 - dmask[..., None]) + dcol * dmask[..., None]
-    rough = rough * (1 - dmask) + 0.3 * dmask
-    # Unused atlas space: neutral white so mip levels do not bleed dark borders.
-    color[~covered] = WHITE
+    canvas = livery(Masks(pos, n, pid, names))
+    color, rough, metal = canvas.finish(np.where(covered, ao, 1.0))
+    if baked:
+        dmask = np.clip(pixels(img_dm)[..., 0], 0, 1)
+        dcol = linear_to_srgb(pixels(img_dc)[..., :3])
+        color = color * (1 - dmask[..., None]) + dcol * dmask[..., None]
+        rough = rough * (1 - dmask) + 0.3 * dmask
+        metal = metal * (1 - dmask)
+    color[~covered] = (0.9, 0.9, 0.9)
 
-    base = new_image("TR1_BaseColor", size)
+    base = new_image(f"{base_name}_BaseColor", size)
     rgba = np.concatenate([color, np.ones(color.shape[:2] + (1,), np.float32)], axis=-1)
     set_pixels(base, rgba)
-    orm_arr = np.stack([np.ones_like(rough), rough, np.zeros_like(rough), np.ones_like(rough)], -1)
-    orm = new_image("TR1_ORM", size, non_color=True)
+    orm_arr = np.stack([np.ones_like(rough), rough, metal, np.ones_like(rough)], -1)
+    orm = new_image(f"{base_name}_ORM", size, non_color=True)
     set_pixels(orm, orm_arr)
     orm.scale(size // 2, size // 2)
 

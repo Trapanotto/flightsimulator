@@ -7,6 +7,7 @@ import {
   loadBestTimes,
   medalFor,
 } from '../game/challenges';
+import { findAircraft } from '../aircraft/types';
 import { type Lang, type MessageKey, t } from '../i18n';
 
 /** Small round medal badge (CSS colours); empty string for no medal. */
@@ -32,9 +33,10 @@ export function openChallengePicker(lang: Lang, onPick: (course: Course) => void
       ${COURSES.map((c) => {
         const b = best[c.id];
         const m = c.medals;
+        const plane = findAircraft(c.aircraft);
         return `
         <li>
-          <button class="course" data-course="${c.id}">
+          <button class="course" data-course="${c.id}" ${plane ? '' : 'disabled'}>
             <span class="course-head">
               <b>${c.name[lang]}</b>
               <span class="course-best">${
@@ -44,6 +46,7 @@ export function openChallengePicker(lang: Lang, onPick: (course: Course) => void
               }</span>
             </span>
             <span class="course-desc">${c.description[lang]}</span>
+            <span class="course-plane">${plane ? `✈ ${plane.name}` : `✈ ${tr('challenge.planeSoon')}`}</span>
             <span class="course-meta">
               ${(courseLength(c) / 1000).toFixed(1)} km · ${c.gates.length} ${tr('challenge.rings')}${
                 c.landing ? ` · ${tr('challenge.land')}` : ''

@@ -28,6 +28,10 @@ class MemoryStore implements BestStore {
 }
 
 describe('courses', () => {
+  it('every course names an aircraft type id', () => {
+    for (const c of COURSES) expect(c.aircraft).toMatch(/^[a-z0-9]+$/);
+  });
+
   it('has five courses with unique ids', () => {
     expect(COURSES).toHaveLength(5);
     expect(new Set(COURSES.map((c) => c.id)).size).toBe(5);
@@ -50,11 +54,11 @@ describe('courses', () => {
     }
   });
 
-  it('gold is reachable but not trivial (TR-1 tops out around 140 m/s, boost aside)', () => {
+  it('medal times fit the fleet (Cessna ~63 m/s up to jets)', () => {
     for (const c of COURSES) {
       const len = courseLength(c);
       expect(len / c.medals.gold, c.id).toBeLessThan(140);
-      expect(len / c.medals.bronze, c.id).toBeGreaterThan(40);
+      expect(len / c.medals.bronze, c.id).toBeGreaterThan(25);
     }
   });
 
@@ -173,6 +177,7 @@ describe('ChallengeRun', () => {
     ],
     radius: 50,
     medals: { gold: 50, silver: 60, bronze: 70 },
+    aircraft: 'c172',
   };
 
   it('counts rings in order and finishes with a time and medal', () => {

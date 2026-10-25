@@ -10,7 +10,7 @@ import { medalBadge, openChallengePicker } from './ChallengePicker';
 import { type MapMarker, Minimap } from './Minimap';
 import { PlaceSearch } from './PlaceSearch';
 import type { World } from '../world/World';
-import { TR1 } from '../physics/FlightModel';
+import { AIRCRAFT, aircraftById, saveAircraftChoice } from '../aircraft/types';
 
 /** Start places in flight mode: all runways, plus two air starts in the Alps. */
 export const FLIGHT_PLACES: Array<{ label: string; place: StartPlace }> = [
@@ -65,6 +65,10 @@ export class FlightView {
           <button class="btn btn-small" data-action="back">← ${tr('flight.mainMenu')}</button>
           <button class="btn btn-small btn-primary" data-action="challenges">${tr('menu.challenges')}</button>
           <button class="btn btn-small" data-action="settings">${tr('menu.settings')}</button>
+          <p class="fmenu-label">${tr('flight.aircraft')}</p>
+          <div class="places" role="radiogroup" aria-label="${tr('flight.aircraft')}">
+            ${AIRCRAFT.map((a) => `<button class="chip" role="radio" data-aircraft="${a.id}" aria-checked="${a.id === game.type.id}">${a.name}</button>`).join('')}
+          </div>
           <p class="fmenu-label">${tr('view.places')}</p>
           <div class="places" role="group" aria-label="${tr('view.places')}">
             ${FLIGHT_PLACES.map((p, i) => `<button class="chip" data-place="${i}">${p.label}</button>`).join('')}
@@ -87,7 +91,7 @@ export class FlightView {
 
       <div class="fstrip left">
         <div class="fcell"><span>${tr('hud.airspeed')}</span><b><i data-v="speed">0</i><small>km/h</small></b></div>
-        <div class="fcell" data-v="engineCell"><span>${tr('hud.engine')}</span><b><i data-v="rpm">0</i><small>${tr('hud.rpm')}</small></b></div>
+        <div class="fcell" data-v="engineCell"><span>${tr('hud.engine')}</span><b><i data-v="rpm">0</i><small data-v="rpmUnit">${tr('hud.rpm')}</small></b></div>
       </div>
       <div class="fstrip right">
         <div class="fcell"><span>${tr('hud.flaps')}</span><b><i data-v="flaps">0°</i></b></div>
@@ -135,6 +139,17 @@ export class FlightView {
         game.start(FLIGHT_PLACES[Number(b.dataset.place)]!.place);
         b.blur();
         this.toggleMenu(false);
+      }),
+    );
+    this.el.querySelectorAll<HTMLButtonElement>('[data-aircraft]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const type = aircraftById(b.dataset.aircraft);
+        saveAircraftChoice(type.id);
+        this.el
+          .querySelectorAll('[data-aircraft]')
+          .forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+        this.toggleMenu(false);
+        void game.setAircraft(type);
       }),
     );
     this.el.querySelectorAll<HTMLButtonElement>('[data-act]').forEach((b) => {
@@ -356,12 +371,14 @@ export class FlightView {
     if (this.frame++ % 3 === 0) {
       const [, , alt] = this.world.toGeo(fm.position);
       this.set('speed', String(Math.round(fm.speed * 3.6)));
-      // TR-1 turboprop: 30 % idle to 100 % at 2700 rpm.
-      const rpm = fm.crashed ? 0 : Math.round(((0.3 + 0.7 * fm.throttle) * 2700) / 10) * 10;
-      this.set('rpm', String(rpm));
+      // Engine: propeller rpm or fan speed N1 %, from idle to max with the throttle.
+      const e = g.type.engine;
+      const v = fm.crashed ? 0 : e.idle + (e.max - e.idle) * fm.throttle;
+      this.set('rpm', e.display === 'rpm' ? String(Math.round(v / 10) * 10) : v.toFixed(1));
+      this.set('rpmUnit', e.display === 'rpm' ? this.tr('hud.rpm') : '% N1');
       this.q('[data-v="engineCell"]').classList.toggle('boost', fm.boosting);
-      this.set('flaps', `${Math.round(fm.flaps * 30)}°`);
-      const trimRange = fm.trim >= 0 ? TR1.trimMax : -TR1.trimMin;
+      this.set('flaps', `${Math.round(fm.flaps * fm.p.maxFlapDeg)}°`);
+      const trimRange = fm.trim >= 0 ? fm.p.trimMax : -fm.p.trimMin;
       this.set('trim', `${Math.round((fm.trim / trimRange) * 100)} %`);
       this.set('alt', String(Math.round(alt)));
       const vs = fm.verticalSpeed;
