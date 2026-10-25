@@ -76,7 +76,11 @@ Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
   - ✅ **Embraer Phenom 100** (HB-TEP): Businessjet mit gepfeiltem Flügel, T-Leitwerk und zwei
     Heck-Turbofans (drehender Fan); Challenge «Aletsch Gletscher-Express»; 0,8 MB.
     ![Embraer Phenom 100 von Trapanotto Airlines](docs/screenshots/phenom100.png)
-  - ⏳ Lockheed Martin F-35 Lightning II, Airbus A320, Boeing 747
+  - ✅ **Lockheed Martin F-35 Lightning II** (T-35, Ausstellungsbemalung): Chine-Nase, Blasenhaube,
+    geneigte Doppelleitwerke, Stabilatoren, Nachbrenner (Leertaste); Challenge «Matterhorn-Umrundung»
+    – Gold nur mit Nachbrenner; 0,7 MB.
+    ![Lockheed Martin F-35 von Trapanotto Airlines](docs/screenshots/f35.png)
+  - ⏳ Airbus A320, Boeing 747
     ![Cessna 172 von Trapanotto Airlines](docs/screenshots/c172.png)
 
 - **Ganze Schweiz streamen:** Terrain (Quantized-Mesh) und SWISSIMAGE-Luftbilder direkt von geo.admin.ch,

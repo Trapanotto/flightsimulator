@@ -87,7 +87,7 @@ export const COURSES: Course[] = [
       p(7.6586, 46.0033, 3100),
     ],
     radius: 60,
-    medals: { gold: 170, silver: 200, bronze: 245 },
+    medals: { gold: 69, silver: 82, bronze: 100 },
     aircraft: 'f35',
   },
   {

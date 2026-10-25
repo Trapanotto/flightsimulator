@@ -244,7 +244,59 @@ export const PHENOM100: AircraftType = {
   span: 12.3,
 };
 
-export const AIRCRAFT: AircraftType[] = [C172, PC12, PHENOM100];
+export const F35: AircraftType = {
+  id: 'f35',
+  name: 'Lockheed Martin F-35 Lightning II',
+  info: {
+    de: 'Kampfjet · Nachbrenner statt Boost · bis 1190 km/h im Tiefflug',
+    en: 'Fighter jet · afterburner instead of boost · up to 1190 km/h down low',
+  },
+  registration: 'T-35',
+  url: `${base}assets/aircraft/f35.glb`,
+  physics: {
+    thrust: 9,
+    drag: 9 / 330 ** 2,
+    gearDrag: 0.3,
+    flapDrag: 0.4,
+    boostFactor: 1.5,
+    boostSeconds: 10,
+    boostRecharge: 0.5,
+    stallSpeed: 58,
+    flapStallDrop: 10,
+    rotateSpeed: 68,
+    rollRate: 4.0,
+    pitchRate: 1.8,
+    yawRate: 0.7,
+    grip: 3.5,
+    gearHeight: 1.76, // model
+    bellyHeight: 0.6,
+    maxSinkRate: 4.0,
+    maxG: 9,
+    aoaRef: 4 * DEG,
+    aoaSpeed: 80,
+    aoaMax: 16 * DEG,
+    trimMin: -20 * DEG,
+    trimMax: 30 * DEG,
+    trimRate: 5 * DEG,
+    fixedGear: false,
+    maxFlapDeg: 30,
+    hull: {
+      nose: [0, 0, 8.2],
+      wingL: [5.35, -0.24, -2.4],
+      wingR: [-5.35, -0.24, -2.4],
+      tail: [0, 2.62, -5.6],
+    }, // model
+  },
+  engine: { kind: 'fighter', display: 'n1', idle: 30, max: 100, blades: 18, maxRps: 70 },
+  eye: [0, 0.86, 4.25], // model
+  wingCam: [3.2, 0.25, -1.4],
+  chaseDistance: 20,
+  chaseHeight: 4.0,
+  length: 15.67,
+  span: 10.7,
+};
+
+export const AIRCRAFT: AircraftType[] = [C172, PC12, PHENOM100, F35];
 export const DEFAULT_AIRCRAFT = C172;
 
 /** The type with this id, if it is in the fleet already. */
