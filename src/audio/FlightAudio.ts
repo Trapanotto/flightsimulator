@@ -211,23 +211,23 @@ export class FlightAudio {
     smooth(n.propOsc.frequency, blade, ctx);
     smooth(n.propSub.frequency, blade / 2, ctx);
     smooth(n.amOsc.frequency, blade, ctx);
-    smooth(n.propFilter.frequency, 250 + 900 * s.throttle, ctx);
+    smooth(n.propFilter.frequency, 200 + 600 * s.throttle, ctx);
     const running = s.rpm > 0.05 ? 1 : 0;
     smooth(n.propGain.gain, mute * running * (0.08 + 0.14 * s.throttle), ctx, 0.15);
-    smooth(n.roarFilter.frequency, (300 + 700 * s.throttle) * doppler, ctx);
+    smooth(n.roarFilter.frequency, (200 + 450 * s.throttle) * doppler, ctx);
     smooth(n.roarGain.gain, mute * running * (0.05 + 0.16 * s.throttle), ctx, 0.15);
-    smooth(n.whineOsc.frequency, (2800 + 2600 * s.rpm + (s.boost ? 900 : 0)) * doppler, ctx, 0.4);
+    smooth(n.whineOsc.frequency, (900 + 500 * s.rpm + (s.boost ? 250 : 0)) * doppler, ctx, 0.4);
     smooth(
       n.whineGain.gain,
-      mute * running * (0.006 + 0.012 * s.throttle + (s.boost ? 0.03 : 0)),
+      mute * running * (0.0012 + 0.0025 * s.throttle + (s.boost ? 0.007 : 0)),
       ctx,
       0.3,
     );
 
     const v = Math.min(1.6, s.speed / 100);
-    smooth(n.windFilter.frequency, 300 + 1400 * v, ctx);
+    smooth(n.windFilter.frequency, 180 + 520 * v, ctx);
     smooth(n.windGain.gain, mute * (s.onGround ? 0.3 : 1) * 0.22 * v * v, ctx, 0.2);
-    smooth(n.cockpit.frequency, s.inside ? 1400 : 16_000, ctx, 0.1);
+    smooth(n.cockpit.frequency, s.inside ? 900 : 6500, ctx, 0.1);
 
     smooth(n.servoGain.gain, mute * (s.servo ? 0.03 : 0), ctx, 0.1);
 
