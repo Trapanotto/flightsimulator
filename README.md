@@ -7,17 +7,17 @@ Three.js · Geodaten von [geo.admin.ch](https://docs.geo.admin.ch/) (swisstopo) 
 
 ## Stand
 
-| Phase | Inhalt                                                | Status |
-| ----- | ----------------------------------------------------- | ------ |
-| 0     | Fundament: Projekt, CI, GitHub Pages, Startbildschirm | ✅     |
-| 1     | Geo-Grundlagen & erstes Terrain                       | ⏳     |
-| 2     | Streaming-Terrain (LOD, Floating Origin)              | ⏳     |
-| 3     | Flugzeug aus Blender                                  | ⏳     |
-| 4     | Flugmodell, Steuerung, Kameras                        | ⏳     |
-| 5     | Grafik-Politur                                        | ⏳     |
-| 6     | Gebäude, HUD & UI                                     | ⏳     |
-| 7     | Gameplay & Audio                                      | ⏳     |
-| 8     | Release 1.0                                           | ⏳     |
+| Phase | Inhalt                                                | Status      |
+| ----- | ----------------------------------------------------- | ----------- |
+| 0     | Fundament: Projekt, CI, GitHub Pages, Startbildschirm | ✅          |
+| 1     | Geo-Grundlagen & erstes Terrain                       | ✅          |
+| 2     | Streaming-Terrain (LOD, Floating Origin)              | ✅          |
+| 3     | Flugzeug aus Blender                                  | ✅          |
+| 4     | Flugmodell, Steuerung, Kameras                        | ✅          |
+| 5     | Grafik-Politur                                        | ✅          |
+| 6     | Gebäude, HUD & UI                                     | ✅          |
+| 7     | Gameplay & Audio                                      | 🔊 Audio ✅ |
+| 8     | Release 1.0                                           | ⏳          |
 
 Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
 
@@ -69,7 +69,9 @@ Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
 | Fahrwerk / Klappen    | G / V                            | X / Steuerkreuz             |
 | Bremse                | B                                | B                           |
 | Kamera                | C                                | Y                           |
-| Maus-Steuerung an/aus | M (Klick ins Bild aktiviert sie) | –                           |
+| Maus-Steuerung an/aus | N (Klick ins Bild aktiviert sie) | –                           |
+| Karte gross / klein   | M                                | –                           |
+| Ton an / aus          | O                                | –                           |
 | Pause / Neustart      | P / Backspace                    | Start / Back                |
 
 ![Tiefflug im Lauterbrunnental](docs/screenshots/lauterbrunnen.png)

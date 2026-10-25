@@ -57,6 +57,11 @@ export function openSettings(lang: Lang, onChange: (s: Settings) => void) {
       <legend>${tr('settings.controls')}</legend>
       <label class="toggle"><input type="checkbox" data-key="invertPitch" ${settings.invertPitch ? 'checked' : ''} /> ${tr('settings.invertPitch')}</label>
     </fieldset>
+    <fieldset>
+      <legend>${tr('settings.sound')}</legend>
+      <label class="toggle"><input type="checkbox" data-key="sound" ${settings.sound ? 'checked' : ''} /> ${tr('settings.soundOn')}</label>
+      <label class="toggle">${tr('settings.volume')} <input type="range" data-key="volume" min="0" max="1" step="0.05" value="${settings.volume}" /></label>
+    </fieldset>
     <form method="dialog"><button class="btn">${tr('credits.close')}</button></form>
   `;
   document.body.appendChild(dialog);
@@ -79,6 +84,18 @@ export function openSettings(lang: Lang, onChange: (s: Settings) => void) {
     .querySelector<HTMLInputElement>('input[data-key="invertPitch"]')!
     .addEventListener('change', (e) => {
       settings.invertPitch = (e.target as HTMLInputElement).checked;
+      apply();
+    });
+  dialog
+    .querySelector<HTMLInputElement>('input[data-key="sound"]')!
+    .addEventListener('change', (e) => {
+      settings.sound = (e.target as HTMLInputElement).checked;
+      apply();
+    });
+  dialog
+    .querySelector<HTMLInputElement>('input[data-key="volume"]')!
+    .addEventListener('input', (e) => {
+      settings.volume = Number((e.target as HTMLInputElement).value);
       apply();
     });
   dialog.addEventListener('close', () => dialog.remove());

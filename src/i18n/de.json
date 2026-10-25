@@ -5,7 +5,7 @@
   "menu.settings": "Einstellungen",
   "menu.credits": "Credits",
   "menu.soon": "bald",
-  "status.phase": "Phase 6 · Szenerie & HUD",
+  "status.phase": "Phase 7 · Audio",
   "status.webglMissing": "Dein Browser unterstützt kein WebGL 2. Bitte nutze eine aktuelle Version von Chrome, Edge, Firefox oder Safari.",
   "credits.title": "Credits",
   "credits.data": "Geodaten: © swisstopo (Bundesamt für Landestopografie), bereitgestellt über geo.admin.ch",
@@ -39,7 +39,7 @@
   "camera.orbit": "Orbit",
   "flight.waiting": "Lade Gelände am Startort …",
   "flight.paused": "Pause – P zum Fortsetzen",
-  "flight.help": "Klick: Maus-Steuerung (N an/aus) · W/S: Nase runter/rauf · A/D: rollen · Q/E: gieren · Shift/Ctrl: Schub · Leertaste: Boost · G: Fahrwerk · V: Klappen · B: Bremse · C: Kamera · M: Karte · P: Pause · ⌫: Neustart",
+  "flight.help": "Klick: Maus-Steuerung (N an/aus) · W/S: Nase runter/rauf · A/D: rollen · Q/E: gieren · Shift/Ctrl: Schub · Leertaste: Boost · G: Fahrwerk · V: Klappen · B: Bremse · C: Kamera · M: Karte · O: Ton · P: Pause · ⌫: Neustart",
   "gearDown": "Fahrwerk ausgefahren",
   "gearUp": "Fahrwerk eingefahren",
   "landing.butter": "Butterweiche Landung",
@@ -68,5 +68,10 @@
   "weather.fair": "Heiter",
   "weather.cloudy": "Bewölkt",
   "search.placeholder": "Ort suchen …",
-  "hud.near": "bei"
+  "hud.near": "bei",
+  "sound.on": "Ton an",
+  "sound.off": "Ton aus",
+  "settings.sound": "Ton",
+  "settings.soundOn": "Ton an",
+  "settings.volume": "Lautstärke"
 }

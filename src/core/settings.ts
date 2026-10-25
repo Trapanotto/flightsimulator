@@ -112,10 +112,20 @@ export interface Settings {
   time: TimeOfDay;
   weather: Weather;
   invertPitch: boolean;
+  sound: boolean;
+  /** 0..1 */
+  volume: number;
 }
 
 const KEY = 'tfs.settings';
-const DEFAULTS: Settings = { quality: 'auto', time: 'real', weather: 'fair', invertPitch: false };
+const DEFAULTS: Settings = {
+  quality: 'auto',
+  time: 'real',
+  weather: 'fair',
+  invertPitch: false,
+  sound: true,
+  volume: 0.7,
+};
 
 export function loadSettings(): Settings {
   let s: Settings = { ...DEFAULTS };

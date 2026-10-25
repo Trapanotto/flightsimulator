@@ -1,5 +1,6 @@
 import { PMREMGenerator, Scene, Vector3 } from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
+import { FlightAudio } from '../audio/FlightAudio';
 import { Aircraft } from '../aircraft/Aircraft';
 import { WingTrails } from '../aircraft/WingTrails';
 import { CameraRig } from '../camera/CameraRig';
@@ -36,6 +37,10 @@ export class FlightGame {
   readonly rig: CameraRig;
   aircraft?: Aircraft;
   readonly trails = new WingTrails();
+  readonly audio = new FlightAudio();
+  /** Sound setting; the O key toggles `muted` on top of it. */
+  sound = { enabled: true, volume: 0.7 };
+  muted = false;
   paused = false;
   /** Waiting for terrain under the start place. */
   waitingForTerrain = true;
@@ -50,6 +55,9 @@ export class FlightGame {
   private waitStarted = 0;
   private readonly events: FlightEvent[] = [];
   private readonly tmp = new Vector3();
+  private servoUntil = 0;
+  private lastCamDist = -1;
+  private approach = 0;
 
   constructor(private readonly world: World) {
     this.env = {
@@ -90,6 +98,7 @@ export class FlightGame {
     this.controls.dispose();
     this.aim.dispose();
     this.rig.dispose();
+    this.audio.dispose();
     if (this.aircraft) this.world.scene.remove(this.aircraft.root, this.trails.group);
     this.world.scene.environment = null;
   }
@@ -207,6 +216,7 @@ export class FlightGame {
     }
 
     this.syncModel(dt);
+    this.updateAudio(dt);
     // While the start place loads, the camera stays where start() put it (that is what streams
     // the terrain in); the chase camera takes over once the aircraft is placed.
     if (this.waitingForTerrain) return;
@@ -218,6 +228,36 @@ export class FlightGame {
       velocity: this.fm.velocity,
       speed: this.fm.speed,
       worldUp: this.fm.worldUp,
+    });
+  }
+
+  setSound(enabled: boolean, volume: number) {
+    this.sound = { enabled, volume };
+    this.audio.setVolume(enabled && !this.muted, volume);
+  }
+
+  private updateAudio(dt: number) {
+    const f = this.fm;
+    // Doppler: how fast the camera and the aircraft close in (orbit/chase views move little).
+    const dist = this.world.camera.position.distanceTo(f.position);
+    if (dt > 0 && this.lastCamDist >= 0) {
+      const rate = (this.lastCamDist - dist) / dt;
+      this.approach += (rate - this.approach) * Math.min(1, dt * 6);
+    }
+    this.lastCamDist = dist;
+    const inside = this.rig.mode === 'cockpit';
+    this.audio.update(dt, {
+      throttle: f.throttle,
+      rpm: this.aircraft?.controls.rpm ?? 0,
+      speed: f.speed,
+      boost: f.boosting,
+      inside,
+      approach: inside ? 0 : this.approach,
+      pullUp: this.pullUp && !f.crashed,
+      stall: f.stalled && !f.onGround && !f.crashed,
+      servo: this.time < this.servoUntil,
+      onGround: f.onGround,
+      paused: this.paused || this.waitingForTerrain,
     });
   }
 
@@ -254,11 +294,13 @@ export class FlightGame {
       case 'gear':
         if (!this.fm.onGround) {
           this.fm.gearDown = !this.fm.gearDown;
+          this.servoUntil = this.time + 2.2;
           this.say(this.fm.gearDown ? 'gearDown' : 'gearUp', 'info');
         }
         break;
       case 'flaps':
         this.fm.flaps = this.fm.flaps >= 1 ? 0 : this.fm.flaps + 0.5;
+        this.servoUntil = this.time + 1.4;
         break;
       case 'camera':
         this.rig.next();
@@ -268,6 +310,11 @@ export class FlightGame {
         break;
       case 'pause':
         this.paused = !this.paused;
+        break;
+      case 'mute':
+        this.muted = !this.muted;
+        this.setSound(this.sound.enabled, this.sound.volume);
+        this.say(this.muted ? 'sound.off' : 'sound.on', 'info', 2);
         break;
       case 'map':
         this.onToggleMap?.();
@@ -282,10 +329,12 @@ export class FlightGame {
   private onEvent(e: FlightEvent) {
     if (e.type === 'touchdown') {
       this.say(`landing.${e.rating}|${e.sinkRate.toFixed(1)}`, 'good');
+      this.audio.impact('touchdown', Math.max(0.4, e.sinkRate / 2));
     } else if (e.type === 'crash') {
       this.crashTime = this.time;
       this.say(`crash.${e.reason}`, 'bad', RESPAWN_DELAY);
       this.rig.shake = 1;
+      this.audio.impact('crash');
       this.controls.rumble(1, 600);
     }
   }

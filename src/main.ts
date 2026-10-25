@@ -54,7 +54,10 @@ async function showSettings(currentLang: Lang) {
   const { openSettings } = await import('./ui/SettingsDialog');
   openSettings(currentLang, (s) => {
     world?.applySettings(s);
-    if (game) game.controls.invertPitch = s.invertPitch;
+    if (game) {
+      game.controls.invertPitch = s.invertPitch;
+      game.setSound(s.sound, s.volume);
+    }
   });
 }
 
@@ -87,6 +90,7 @@ async function openFlight(currentLang: Lang) {
     (window as unknown as { __game: FlightGame }).__game = game;
   w.game = game;
   game.controls.invertPitch = w.settings.invertPitch;
+  game.setSound(w.settings.sound, w.settings.volume);
   flightView = new FlightView(
     document.body,
     currentLang,
