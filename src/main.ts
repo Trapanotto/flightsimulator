@@ -1,5 +1,6 @@
 import './styles.css';
 import { StartScreen } from './ui/StartScreen';
+import { PLACES } from './world/places';
 import { type Lang, detectLang, t } from './i18n';
 import type { World } from './world/World';
 import type { WorldView } from './ui/WorldView';
@@ -7,6 +8,7 @@ import type { Hangar } from './hangar/Hangar';
 import type { HangarView } from './ui/HangarView';
 import type { FlightGame } from './game/FlightGame';
 import type { FlightView } from './ui/FlightView';
+import type { Showcase } from './game/Showcase';
 import { type Course, courseById } from './game/challenges';
 import { findAircraft } from './aircraft/types';
 
@@ -25,6 +27,8 @@ let game: FlightGame | undefined;
 let flightView: FlightView | undefined;
 
 async function openWorld(currentLang: Lang) {
+  const wasShowing = !!showcase;
+  stopShowcase();
   ui.hidden = true;
   worldCanvas.hidden = false;
 
@@ -38,6 +42,7 @@ async function openWorld(currentLang: Lang) {
     closeWorld,
     () => void showSettings(currentLang),
   );
+  if (wasShowing) w.goTo(PLACES[3]!);
   w.start();
   // ?route starts the Geneva -> St. Moritz test flight right away (optionally ?route=900 km/h).
   const route = new URLSearchParams(location.search).get('route');
@@ -49,7 +54,7 @@ function closeWorld() {
   view?.destroy();
   view = undefined;
   worldCanvas.hidden = true;
-  ui.hidden = false;
+  menuShown();
 }
 
 async function showSettings(currentLang: Lang) {
@@ -79,7 +84,58 @@ async function ensureWorld() {
   return world;
 }
 
+// ---- animated start screen: the fleet over the Alps behind the menu ----
+
+let showcase: Showcase | undefined;
+let showcaseToken = 0;
+
+/** Live 3D background for the menu (not on reduced motion or weak/mobile GPUs). */
+async function startShowcase() {
+  if (showcase || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const token = ++showcaseToken;
+  const [{ Showcase }, { World }] = await Promise.all([
+    import('./game/Showcase'),
+    import('./world/World'),
+  ]);
+  void World;
+  const w = await ensureWorld();
+  if (token !== showcaseToken || ui.hidden || w.qualityLevel === 'low') return;
+  const s = new Showcase(w);
+  showcase = s;
+  // State on #ui (not .start): the start screen re-renders on a language switch.
+  s.onReady = () => ui.classList.add('live');
+  s.onCut = () => {
+    ui.classList.remove('cut');
+    void ui.offsetWidth;
+    ui.classList.add('cut');
+  };
+  w.game = s;
+  worldCanvas.hidden = false;
+  w.start();
+}
+
+/** Ends the menu background before another mode takes over the world. */
+function stopShowcase() {
+  showcaseToken++;
+  if (!showcase) return;
+  showcase.dispose();
+  showcase = undefined;
+  ui.classList.remove('live', 'cut');
+  if (world) {
+    world.stop();
+    world.game = undefined;
+  }
+  worldCanvas.hidden = true;
+}
+
+/** Back in the menu: let the fleet fly again. */
+function menuShown() {
+  ui.hidden = false;
+  setTimeout(() => void startShowcase(), 400);
+}
+
 async function openFlight(currentLang: Lang, course?: Course) {
+  stopShowcase();
   ui.hidden = true;
   worldCanvas.hidden = false;
   const [{ FlightGame }, { FlightView, FLIGHT_PLACES }] = await Promise.all([
@@ -118,10 +174,11 @@ function closeFlight() {
   game = undefined;
   if (document.pointerLockElement) document.exitPointerLock();
   worldCanvas.hidden = true;
-  ui.hidden = false;
+  menuShown();
 }
 
 async function openHangar(currentLang: Lang) {
+  stopShowcase();
   ui.hidden = true;
   hangarCanvas.hidden = false;
   const [{ Hangar }, { HangarView }] = await Promise.all([
@@ -149,7 +206,7 @@ function closeHangar() {
   hangarView?.destroy();
   hangarView = undefined;
   hangarCanvas.hidden = true;
-  ui.hidden = false;
+  menuShown();
 }
 
 if (!document.createElement('canvas').getContext('webgl2')) {
@@ -167,4 +224,5 @@ if (!document.createElement('canvas').getContext('webgl2')) {
   // #challenge=lauterbrunnen starts a course directly (tests, links).
   const course = courseById(location.hash.match(/^#challenge=([\w-]+)/)?.[1] ?? '');
   if (course && findAircraft(course.aircraft)) void openFlight(lang, course);
+  if (!location.hash) setTimeout(() => void startShowcase(), 300);
 }

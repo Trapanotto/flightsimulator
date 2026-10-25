@@ -39,7 +39,18 @@ import { SunFlare } from '../render/SunFlare';
 import { resolveTime } from '../render/sun';
 import { DEFAULT_TERRAIN, TerrainEngine } from '../terrain/TerrainEngine';
 import { loadTerrainSource } from '../terrain/sources';
-import type { FlightGame } from '../game/FlightGame';
+import type { Quality as WorldQuality } from '../core/settings';
+
+/** Something that drives the camera and the floating origin: the flight game or the showcase. */
+export interface WorldDriver {
+  update(dt: number): void;
+  /** The point the floating origin follows. */
+  readonly anchor: Vector3;
+  /** While true, the camera (not the anchor) is the origin. */
+  readonly waitingForTerrain: boolean;
+  rebase(delta: Vector3): void;
+  applyQuality(q: WorldQuality): void;
+}
 import { type Basis, FreeCamera } from './FreeCamera';
 import { PLACES, type Place, TEST_ROUTE } from './places';
 
@@ -152,7 +163,7 @@ export class World {
   private ground: number | undefined;
   private route?: { leg: number; stats: RouteStats; speed: number };
   /** When set, the world is in flight mode: the game moves the camera and anchors the origin. */
-  game?: FlightGame;
+  game?: WorldDriver;
 
   constructor(readonly canvas: HTMLCanvasElement) {
     this.reversedDepth = supportsClipControl();
@@ -246,6 +257,8 @@ export class World {
   start() {
     this.active = true;
     this.flare.el.hidden = false;
+    // The canvas may have been hidden (zero size) when the world was built.
+    this.resize();
     this.run();
   }
 

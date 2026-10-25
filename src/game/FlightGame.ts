@@ -1,5 +1,5 @@
-import { PMREMGenerator, Scene, type Texture, Vector3 } from 'three';
-import { Sky } from 'three/examples/jsm/objects/Sky.js';
+import { type Texture, Vector3 } from 'three';
+import { makeSkyEnvironment, softenReflections } from '../render/skyEnvironment';
 import { FlightAudio } from '../audio/FlightAudio';
 import { Aircraft } from '../aircraft/Aircraft';
 import { WingTrails } from '../aircraft/WingTrails';
@@ -101,15 +101,11 @@ export class FlightGame {
   async load() {
     // Only the aircraft gets the sky reflection. Not via scene.environment: since three r17x
     // that also lights Lambert materials (terrain, houses, trees) and washes the world out.
-    this.envMap ??= this.makeEnvironment();
+    this.envMap ??= makeSkyEnvironment(this.world.renderer, this.world.sky);
     const type = this.type;
     const a = await Aircraft.load(type, this.envMap);
     if (type !== this.type) return; // another aircraft was chosen meanwhile
-    a.root.traverse((o) => {
-      // The sky is very bright; full-strength reflections wash the white paint out.
-      const m = (o as { material?: { envMapIntensity?: number; name?: string } }).material;
-      if (m && m.envMapIntensity !== undefined && m.name !== 'Glass') m.envMapIntensity = 0.45;
-    });
+    softenReflections(a.root);
     if (this.aircraft) this.world.scene.remove(this.aircraft.root);
     this.aircraft = a;
     this.world.scene.add(a.root, this.trails.group);
@@ -157,24 +153,6 @@ export class FlightGame {
     if (this.aircraft) this.world.scene.remove(this.aircraft.root, this.trails.group);
     this.endChallenge();
     this.envMap?.dispose();
-  }
-
-  /** Reflections for the aircraft: a pre-filtered copy of the sky. */
-  private makeEnvironment() {
-    const sky = new Sky();
-    sky.scale.setScalar(1000);
-    const src = this.world.sky.material.uniforms;
-    const dst = sky.material.uniforms;
-    for (const k of Object.keys(src)) {
-      const v = src[k]!.value;
-      dst[k]!.value = v?.clone ? v.clone() : v;
-    }
-    const scene = new Scene();
-    scene.add(sky);
-    const pmrem = new PMREMGenerator(this.world.renderer);
-    const tex = pmrem.fromScene(scene, 0, 1, 2000).texture;
-    pmrem.dispose();
-    return tex;
   }
 
   /** Starts (or restarts) a ring challenge: air start in front of the first ring. */
