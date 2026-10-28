@@ -35,6 +35,9 @@ export interface AtmosphereUniforms {
   uNoise: { value: DataTexture };
   uCloudCoverage: { value: number };
   uCloudAltitude: { value: number };
+  /** Volumetric cumulus layer, metres above sea level. */
+  uCloudBase: { value: number };
+  uCloudTop: { value: number };
   uCloudShadow: { value: number };
   /** Local vertical at the camera (render space). */
   uUp: { value: Vector3 };
@@ -157,6 +160,8 @@ export class Atmosphere {
       uNoise: { value: makeNoiseTexture() },
       uCloudCoverage: { value: 0.45 },
       uCloudAltitude: { value: 3600 },
+      uCloudBase: { value: 2300 },
+      uCloudTop: { value: 3700 },
       uCloudShadow: { value: 0.45 },
       uUp: { value: new Vector3(0, 1, 0) },
       uFogTop: { value: 1100 },

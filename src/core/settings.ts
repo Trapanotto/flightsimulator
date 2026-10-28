@@ -12,6 +12,8 @@ export interface Quality {
   maxTiles: number;
   terrainDetail: boolean;
   cloudLayers: number;
+  /** Ray-marched volumetric clouds (replace the flat layers): march steps, 0 = off. */
+  volumetricClouds: number;
   cloudShadows: boolean;
   /** Aircraft shadow map size, 0 = off. */
   shadowMap: number;
@@ -36,6 +38,7 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     maxTiles: 260,
     terrainDetail: false,
     cloudLayers: 1,
+    volumetricClouds: 0,
     cloudShadows: false,
     shadowMap: 0,
     bloom: false,
@@ -54,6 +57,7 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     maxTiles: 400,
     terrainDetail: true,
     cloudLayers: 2,
+    volumetricClouds: 0,
     cloudShadows: true,
     shadowMap: 1024,
     bloom: true,
@@ -72,6 +76,7 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     maxTiles: 560,
     terrainDetail: true,
     cloudLayers: 3,
+    volumetricClouds: 40,
     cloudShadows: true,
     shadowMap: 2048,
     bloom: true,
@@ -90,6 +95,7 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     maxTiles: 720,
     terrainDetail: true,
     cloudLayers: 4,
+    volumetricClouds: 64,
     cloudShadows: true,
     shadowMap: 2048,
     bloom: true,
@@ -118,6 +124,15 @@ export const WEATHER_COVERAGE: Record<Weather, number> = {
  * Hochnebel: the autumn/winter sea of fog over the Mittelland, the Alps above it in sunshine.
  * Nebel: ground fog in the lowlands up to ~640 m.
  */
+/** Cumulus layer of the weather (base and top, metres above sea level). */
+export const WEATHER_CLOUDS: Record<Weather, { base: number; top: number }> = {
+  clear: { base: 2600, top: 3600 },
+  fair: { base: 2300, top: 3700 },
+  cloudy: { base: 1700, top: 3500 },
+  hochnebel: { base: 2600, top: 3400 },
+  nebel: { base: 2200, top: 3300 },
+};
+
 export const WEATHER_FOG: Record<Weather, { top: number; base: number; density: number } | null> = {
   clear: null,
   fair: null,

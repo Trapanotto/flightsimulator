@@ -11,13 +11,15 @@ import {
 } from 'postprocessing';
 import {
   ACESFilmicToneMapping,
-  type Camera,
   HalfFloatType,
   NoToneMapping,
+  type PerspectiveCamera,
   type Scene,
   type WebGLRenderer,
 } from 'three';
 import type { Quality } from '../core/settings';
+import type { AtmosphereUniforms } from './Atmosphere';
+import { CloudCompositeEffect, CloudMarchPass } from './VolumetricClouds';
 
 /**
  * Post-processing chain (one merged effect pass): bloom for the sun, lights and reflections,
@@ -27,17 +29,32 @@ import type { Quality } from '../core/settings';
 export class PostFX {
   private composer?: EffectComposer;
   enabled = false;
+  /** Volumetric clouds are running (the flat cloud layers can go). */
+  volumetric = false;
+  private march?: CloudMarchPass;
+
+  /** Cloud transmittance at a screen position (1 = no cloud), from the volumetric clouds. */
+  cloudTransmittanceAt(u: number, v: number): number {
+    return this.march ? this.march.transmittanceAt(this.renderer, u, v) : 1;
+  }
+
+  /** The view jumped (teleport, origin shift): no cloud history to blend with. */
+  resetHistory() {
+    this.march?.resetHistory();
+  }
 
   constructor(
     private readonly renderer: WebGLRenderer,
     private readonly scene: Scene,
-    private readonly camera: Camera,
+    private readonly camera: PerspectiveCamera,
+    private readonly atmosphere: AtmosphereUniforms,
   ) {}
 
   configure(q: Quality) {
     this.composer?.dispose();
     this.composer = undefined;
     this.enabled = q.bloom || q.smaa;
+    this.volumetric = this.enabled && q.volumetricClouds > 0;
     if (!this.enabled) {
       this.renderer.toneMapping = ACESFilmicToneMapping;
       return;
@@ -47,6 +64,27 @@ export class PostFX {
     const composer = new EffectComposer(this.renderer, { frameBufferType: HalfFloatType });
     composer.addPass(new RenderPass(this.scene, this.camera));
     const effects: Effect[] = [];
+    if (this.volumetric) {
+      const a = this.atmosphere;
+      const march = new CloudMarchPass(
+        this.camera,
+        a,
+        { base: a.uCloudBase, top: a.uCloudTop },
+        0.5,
+        q.volumetricClouds,
+        this.renderer.capabilities.reversedDepthBuffer
+          ? 'reversed'
+          : this.renderer.capabilities.logarithmicDepthBuffer
+            ? 'log'
+            : 'standard',
+      );
+      composer.addPass(march);
+      const composite = new CloudCompositeEffect(march.target.texture);
+      march.onResize = (w, h) => composite.setTexel(w, h);
+      march.onOutput = (t) => composite.setClouds(t);
+      this.march = march;
+      effects.push(composite);
+    }
     if (q.bloom) {
       effects.push(
         new BloomEffect({

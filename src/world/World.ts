@@ -26,6 +26,7 @@ import {
   type Quality,
   type QualityLevel,
   type Settings,
+  WEATHER_CLOUDS,
   WEATHER_COVERAGE,
   WEATHER_FOG,
   loadSettings,
@@ -218,7 +219,7 @@ export class World {
     this.scene.add(this.clouds.group);
     this.fogDome = new FogDome(this.atmosphere.uniforms);
     this.scene.add(this.fogDome.mesh);
-    this.post = new PostFX(this.renderer, this.scene, this.camera);
+    this.post = new PostFX(this.renderer, this.scene, this.camera, this.atmosphere.uniforms);
     this.flare = new SunFlare(document.body);
     this.applySettings(this.settings);
 
@@ -293,8 +294,13 @@ export class World {
     this.atmosphere.apply(this.sun, this.hemi, this.sky);
     this.renderer.toneMappingExposure = this.atmosphere.exposure;
     this.atmosphere.uniforms.uCloudCoverage.value = WEATHER_COVERAGE[s.weather];
-    const fog = WEATHER_FOG[s.weather];
     const fu = this.atmosphere.uniforms;
+    const layer = WEATHER_CLOUDS[s.weather];
+    fu.uCloudBase.value = layer.base;
+    fu.uCloudTop.value = layer.top;
+    // Flat layers and the cloud shadows sit in the lower third of the cumulus layer.
+    fu.uCloudAltitude.value = layer.base + 0.3 * (layer.top - layer.base);
+    const fog = WEATHER_FOG[s.weather];
     fu.uFogDensity.value = fog ? fog.density : 0;
     if (fog) {
       // ?fogtop=1300 moves the top of the fog (testing, sharing a look).
@@ -302,8 +308,9 @@ export class World {
       fu.uFogTop.value = top > 0 ? top : fog.top;
       fu.uFogBase.value = Math.min(fog.base, fu.uFogTop.value - 150);
     }
-    this.clouds.setLayers(quality.cloudLayers);
     this.post.configure(quality);
+    // Volumetric clouds replace the flat layers (they need the post-processing chain).
+    this.clouds.setLayers(this.post.volumetric ? 0 : quality.cloudLayers);
     this.flare.enabled = quality.flare;
     this.terrain?.applyQuality(quality);
     if (this.buildings) {
@@ -535,13 +542,28 @@ export class World {
     const u = this.atmosphere.uniforms;
     // Inside or below the fog the sun is only a bright patch, no glare.
     if (this.atmosphere.underFog(cameraElevation) > 0.5) return 1;
-    const toCloud = (u.uCloudAltitude.value - cameraElevation) / Math.max(sunDir.y, 0.05);
-    if (toCloud > 0 && u.uCloudCoverage.value > 0) {
-      p.copy(this.camera.position).addScaledVector(sunDir, toCloud);
-      const s = this.shift;
-      return Math.min(1, this.atmosphere.cloudDensityAt(p.x + s.x, p.z + s.z) * 1.2);
+    if (u.uCloudCoverage.value <= 0) return 0;
+    // Clouds between the camera and the sun: sample the coverage where the sun ray crosses the
+    // layer (several heights for the volumetric clouds, the flat layer otherwise).
+    if (this.post.volumetric) {
+      // Exact: what the ray-marched clouds let through at the sun's position on screen.
+      const sp = p.copy(this.camera.position).addScaledVector(sunDir, 1000).project(this.camera);
+      if (sp.z < 1) return 1 - this.post.cloudTransmittanceAt(sp.x * 0.5 + 0.5, sp.y * 0.5 + 0.5);
     }
-    return 0;
+    const heights = this.post.volumetric
+      ? [0.15, 0.4, 0.65].map(
+          (f) => u.uCloudBase.value + f * (u.uCloudTop.value - u.uCloudBase.value),
+        )
+      : [u.uCloudAltitude.value];
+    const s = this.shift;
+    let occ = 0;
+    for (const h of heights) {
+      const toCloud = (h - cameraElevation) / Math.max(sunDir.y, 0.05);
+      if (toCloud <= 0) continue;
+      p.copy(this.camera.position).addScaledVector(sunDir, toCloud);
+      occ = Math.max(occ, this.atmosphere.cloudDensityAt(p.x + s.x, p.z + s.z) * 1.2);
+    }
+    return Math.min(1, occ);
   }
 
   private measure(dtMs: number) {
@@ -602,6 +624,7 @@ export class World {
     this.shift.add(delta);
     this.terrain?.rebase(delta);
     this.buildings?.rebase(delta);
+    this.post.resetHistory();
     this.camera.position.sub(delta);
     this.game?.rebase(delta);
   }
