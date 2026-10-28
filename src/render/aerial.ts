@@ -1,3 +1,5 @@
+import { SCATTERING_GLSL } from './scattering';
+
 /**
  * Shared GLSL for everything seen through the air: terrain, buildings, trees, the fog dome.
  *
@@ -23,6 +25,7 @@ export const NOISE_DECLARATIONS = /* glsl */ `
 
 export const AERIAL_GLSL = /* glsl */ `
   ${NOISE_DECLARATIONS}
+  ${SCATTERING_GLSL}
   #ifndef AERIAL_DECLARED
   #define AERIAL_DECLARED
   uniform vec3 uSunDir;
@@ -96,12 +99,10 @@ export const AERIAL_GLSL = /* glsl */ `
       vec3 fogCol = tTop >= 0.0 ? fogTopColor(cameraPosition + toFrag * tTop) : inside;
       col = mix(col, fogCol, fogAmt);
     }
-    // Aerial perspective: haze thins out with altitude and glows towards the sun.
-    float hAvg = 0.5 * (hc + hf);
-    float density = uHazeDensity * exp(-max(hAvg - 400.0, 0.0) / uHazeHeight);
-    float hazeAmt = 1.0 - exp(-dist * density);
-    float sunAmt = pow(max(dot(toFrag / max(dist, 1.0), uSunDir), 0.0), 14.0) * 0.8;
-    return mix(col, mix(uHazeColor, uHazeSunColor, sunAmt), hazeAmt);
+    // Aerial perspective: Rayleigh (blue distance) and Mie (haze, sun glow), physically.
+    vec3 T;
+    vec3 light = inscatter(toFrag / max(dist, 1.0), dist, hc, hf, uSunDir, dot(uSunDir, uUp), T);
+    return col * T + light;
   }
   #endif
 `;

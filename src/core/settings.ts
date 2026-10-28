@@ -124,6 +124,15 @@ export const WEATHER_COVERAGE: Record<Weather, number> = {
  * Hochnebel: the autumn/winter sea of fog over the Mittelland, the Alps above it in sunshine.
  * Nebel: ground fog in the lowlands up to ~640 m.
  */
+/** Haze of the weather: Mie scattering at sea level (1/m). Visibility ~ 3.9 / (1.1 x this). */
+export const WEATHER_HAZE: Record<Weather, number> = {
+  clear: 0.9e-5,
+  fair: 1.6e-5,
+  cloudy: 2.6e-5,
+  hochnebel: 2.4e-5,
+  nebel: 3.2e-5,
+};
+
 /** Cumulus layer of the weather (base and top, metres above sea level). */
 export const WEATHER_CLOUDS: Record<Weather, { base: number; top: number }> = {
   clear: { base: 2600, top: 3600 },

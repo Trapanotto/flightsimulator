@@ -29,6 +29,7 @@ import {
   WEATHER_CLOUDS,
   WEATHER_COVERAGE,
   WEATHER_FOG,
+  WEATHER_HAZE,
   loadSettings,
   resolveQuality,
   timeSpec,
@@ -295,6 +296,9 @@ export class World {
     this.renderer.toneMappingExposure = this.atmosphere.exposure;
     this.atmosphere.uniforms.uCloudCoverage.value = WEATHER_COVERAGE[s.weather];
     const fu = this.atmosphere.uniforms;
+    fu.uMie.value = WEATHER_HAZE[s.weather];
+    this.atmosphere.update();
+    this.atmosphere.apply(this.sun, this.hemi, this.sky);
     const layer = WEATHER_CLOUDS[s.weather];
     fu.uCloudBase.value = layer.base;
     fu.uCloudTop.value = layer.top;

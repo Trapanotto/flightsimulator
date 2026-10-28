@@ -13,6 +13,16 @@ import {
 } from 'three';
 import type { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { solarPosition } from './sun';
+import {
+  BETA_R,
+  H_MIE,
+  H_RAYLEIGH,
+  MIE_EXT,
+  MIE_G,
+  SUN_SCALE,
+  opticalDepth,
+  sunTransmittance,
+} from './scattering';
 
 const DEG = Math.PI / 180;
 /** Period of the shared noise texture in metres (cloud and detail patterns repeat after this). */
@@ -46,6 +56,10 @@ export interface AtmosphereUniforms {
   uFogBase: { value: number };
   uFogDensity: { value: number };
   uFogColor: { value: Color };
+  /** Mie scattering at sea level (1/m): haze of the weather. */
+  uMie: { value: number };
+  /** Multiple-scattered sky light added to the haze. */
+  uSkyLight: { value: Color };
 }
 
 function smoothstep(a: number, b: number, x: number) {
@@ -53,34 +67,12 @@ function smoothstep(a: number, b: number, x: number) {
   return t * t * (3 - 2 * t);
 }
 
-const lerpColor = (out: Color, stops: Array<[number, Color]>, x: number) => {
-  if (x <= stops[0]![0]) return out.copy(stops[0]![1]);
-  for (let i = 1; i < stops.length; i++) {
-    const [x1, c1] = stops[i]!;
-    const [x0, c0] = stops[i - 1]!;
-    if (x <= x1) return out.copy(c0).lerp(c1, (x - x0) / (x1 - x0));
-  }
-  return out.copy(stops[stops.length - 1]![1]);
-};
-
 // Colour ramps over sun elevation (degrees), linear RGB.
 const SUN_COLOR: Array<[number, Color]> = [
   [-2, new Color(0.9, 0.35, 0.18)],
   [3, new Color(1.0, 0.55, 0.3)],
   [12, new Color(1.0, 0.82, 0.62)],
   [35, new Color(1.0, 0.95, 0.88)],
-];
-const HAZE_AWAY: Array<[number, Color]> = [
-  [-2, new Color(0.18, 0.2, 0.3)],
-  [4, new Color(0.42, 0.45, 0.58)],
-  [15, new Color(0.55, 0.64, 0.78)],
-  [40, new Color(0.6, 0.7, 0.84)],
-];
-const HAZE_SUN: Array<[number, Color]> = [
-  [-2, new Color(0.5, 0.25, 0.15)],
-  [4, new Color(0.88, 0.56, 0.36)],
-  [15, new Color(0.86, 0.78, 0.68)],
-  [40, new Color(0.85, 0.87, 0.9)],
 ];
 
 /** Tileable value-noise texture (fbm, 4 octaves) used for clouds, cloud shadows and detail. */
@@ -168,6 +160,8 @@ export class Atmosphere {
       uFogBase: { value: 750 },
       uFogDensity: { value: 0 },
       uFogColor: { value: new Color(0.95, 0.96, 0.98) },
+      uMie: { value: 1.8e-5 },
+      uSkyLight: { value: new Color(0.1, 0.14, 0.22) },
     };
     this.update();
   }
@@ -190,9 +184,7 @@ export class Atmosphere {
       Math.sin(el),
       -Math.cos(el) * Math.cos(az),
     );
-    lerpColor(this.uniforms.uSunColor.value, SUN_COLOR, elevation);
-    lerpColor(this.uniforms.uHazeColor.value, HAZE_AWAY, elevation);
-    lerpColor(this.uniforms.uHazeSunColor.value, HAZE_SUN, elevation);
+    this.updateScattering(elevation);
     // Sunlit stratus: white by day, warm at low sun, dim at dusk.
     this.uniforms.uFogColor.value
       .setRGB(0.95, 0.96, 0.98)
@@ -202,6 +194,44 @@ export class Atmosphere {
     this.uniforms.uHazeDensity.value =
       (1 / 60_000) * (1 + 0.8 * (1 - smoothstep(5, 30, elevation)));
     this.exposure = 0.85 + 0.25 * (1 - smoothstep(4, 25, elevation));
+  }
+
+  /**
+   * Sun colour from the air mass it crosses (scattering.ts), sky light, and the haze colours
+   * other effects use (horizontal view at 500 m, 60 km, away from and towards the sun).
+   */
+  updateScattering(elevation: number) {
+    const u = this.uniforms;
+    const mie = u.uMie.value;
+    const sinEl = Math.sin(elevation * DEG);
+    const t = sunTransmittance(600, sinEl, mie);
+    const peak = Math.max(...t, 1e-4);
+    u.uSunColor.value.setRGB(t[0] / peak, t[1] / peak, t[2] / peak);
+    if (elevation < -1) u.uSunColor.value.lerp(SUN_COLOR[0]![1], smoothstep(-1, -3, elevation));
+    const day = smoothstep(-6, 10, elevation);
+    u.uSkyLight.value.setRGB(0.1, 0.14, 0.22).multiplyScalar(0.15 + 0.85 * day);
+    // CPU twin of inscatter() for a horizontal ray.
+    const haze = (cosToSun: number, out: Color) => {
+      const d = 60_000;
+      const tauR = opticalDepth(500, 500, d, H_RAYLEIGH);
+      const tauM = opticalDepth(500, 500, d, H_MIE);
+      const phaseR = (3 / (16 * Math.PI)) * (1 + cosToSun * cosToSun);
+      const g2 = MIE_G * MIE_G;
+      const phaseM = (1 - g2) / (4 * Math.PI * (1 + g2 - 2 * MIE_G * cosToSun) ** 1.5);
+      const sun = sunTransmittance(500, sinEl, mie);
+      const lit = SUN_SCALE * smoothstep(-0.08, 0.04, sinEl);
+      const c = [0, 1, 2].map((i) => {
+        const ext = BETA_R[i]! * tauR + MIE_EXT * mie * tauM;
+        const scat = BETA_R[i]! * tauR * phaseR + mie * tauM * phaseM;
+        const oneMinusT = 1 - Math.exp(-ext);
+        const sky = [u.uSkyLight.value.r, u.uSkyLight.value.g, u.uSkyLight.value.b][i]!;
+        return ((lit * sun[i]! * scat) / ext) * oneMinusT + sky * oneMinusT;
+      });
+      out.setRGB(c[0]!, c[1]!, c[2]!);
+    };
+    const cosEl = Math.cos(Math.max(elevation, 0) * DEG);
+    haze(0, u.uHazeColor.value);
+    haze(cosEl, u.uHazeSunColor.value);
   }
 
   /** Light intensities for the time of day (before the fog dims them). */
