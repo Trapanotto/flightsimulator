@@ -229,6 +229,11 @@ const PALETTES: Record<Region | 'urban', Array<[number, number, number]>> = {
     [1, 0.93, 0.78],
     [0.92, 0.9, 0.86],
     [0.97, 0.9, 0.85],
+    [1, 0.88, 0.72],
+    [0.9, 0.95, 0.88],
+    [0.88, 0.92, 0.98],
+    [1, 0.86, 0.8],
+    [0.97, 0.97, 0.97],
   ],
   engadin: [
     [1, 1, 0.97],
@@ -237,6 +242,8 @@ const PALETTES: Record<Region | 'urban', Array<[number, number, number]>> = {
   mittelland: [
     [1, 0.97, 0.92],
     [0.97, 0.95, 0.9],
+    [1, 0.94, 0.84],
+    [0.95, 0.95, 0.95],
   ],
   oberland: [[1, 0.97, 0.92]],
   valais: [[0.98, 0.96, 0.9]],
@@ -246,6 +253,78 @@ const PALETTES: Record<Region | 'urban', Array<[number, number, number]>> = {
   ],
 };
 
+// ---------------------------------------------------------------------------
+// Texture variants (4 per material family, see tools/blender/bld_textures.py)
+// ---------------------------------------------------------------------------
+
+/** Deterministic 0..1 hash of a position (salted). */
+function hash(lon: number, lat: number, salt: number): number {
+  return Math.abs(Math.sin(lon * (12_989.8 + salt) + lat * (78_233.1 - salt)) * 43_758.5453) % 1;
+}
+
+/** Index into weights (not normalised) for a 0..1 hash. */
+function pick(h: number, weights: number[]): number {
+  const total = weights.reduce((a, b) => a + b, 0);
+  let acc = 0;
+  for (let i = 0; i < weights.length; i++) {
+    acc += weights[i]! / total;
+    if (h < acc) return i;
+  }
+  return weights.length - 1;
+}
+
+/**
+ * Wall and roof texture variants for a building: shutters, wood, balconies, glass facades,
+ * roof colours, green and solar roofs - weighted like Swiss villages and towns look.
+ */
+export function variantOf(
+  type: HouseType,
+  region: Region,
+  f: Pick<Footprint, 'lon' | 'lat' | 'area'>,
+): [number, number] {
+  const hw = hash(f.lon, f.lat, 17.3);
+  const hr = hash(f.lon, f.lat, 41.9);
+  switch (type) {
+    case 'farmhouse':
+      return [pick(hw, [4, 2.5, 1.5, 2]), pick(hr, [4.5, 3, 1.5, 1])];
+    case 'chalet':
+      return [pick(hw, [4, 3, 2, 1.5]), pick(hr, [4, 2.5, 2.5, 1])];
+    case 'valais':
+    case 'rustico':
+      return [pick(hw, [1, 1, 1, 1]), pick(hr, [1, 1, 1, 1])];
+    case 'engadin':
+      return [pick(hw, [3, 2, 2, 2]), pick(hr, [5, 2.5, 1.5, 1])];
+    case 'ticino':
+      return [pick(hw, [3, 2, 2, 2]), pick(hr, [6, 3, 0, 1])];
+    case 'urban':
+      return [
+        pick(hw, [4, 3.5, 2.5, 0]),
+        region === 'mittelland' ? pick(hr, [4, 3, 2, 0.5]) : pick(hr, [5, 3, 1, 0.5]),
+      ];
+    case 'block':
+      // Large blocks (offices, terminals, malls) mostly get glass facades.
+      return [
+        f.area > 1500 && hw < 0.7 ? 3 : pick(hw, [4, 3.5, 2.5, 0.5]),
+        pick(hr, [5.5, 3, 1.2, 1]),
+      ];
+    case 'hall':
+      return [pick(hw, [3, 3, 2, 2]), pick(hr, [5, 1.5, 1.5, 1])];
+    case 'shed':
+      return [pick(hw, [3, 2, 2, 1]), pick(hr, [5, 2, 2, 0])];
+  }
+}
+
+/** Metal cladding colours for halls (tint over light grey). */
+const HALL_COLOURS: Array<[number, number, number]> = [
+  [1, 1, 1],
+  [0.92, 0.95, 1.02],
+  [0.78, 0.86, 0.96],
+  [0.98, 0.94, 0.84],
+  [0.7, 0.8, 0.72],
+  [0.82, 0.62, 0.55],
+  [0.62, 0.64, 0.68],
+];
+
 /** Deterministic plaster tint for a building (same house, same colour on every visit). */
 export function tintOf(
   region: Region,
@@ -253,6 +332,10 @@ export function tintOf(
   lon: number,
   lat: number,
 ): [number, number, number] {
+  if (type === 'hall') {
+    const h = hash(lon, lat, 5.1);
+    return HALL_COLOURS[Math.floor(h * HALL_COLOURS.length) % HALL_COLOURS.length]!;
+  }
   const palette =
     type === 'urban' || type === 'block'
       ? region === 'ticino'

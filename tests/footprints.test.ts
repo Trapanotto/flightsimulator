@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { houseTypeOf, orientedBox, regionOf, wallHeight } from '../src/buildings/footprints';
+import { HOUSE_TYPES } from '../src/buildings/BuildingSet';
+import {
+  houseTypeOf,
+  orientedBox,
+  regionOf,
+  tintOf,
+  variantOf,
+  wallHeight,
+} from '../src/buildings/footprints';
 
 const rotated = (w: number, h: number, deg: number, ox = 5, oy = -3): Array<[number, number]> => {
   const a = (deg * Math.PI) / 180;
@@ -66,5 +74,32 @@ describe('regions and house types', () => {
   it('keeps a sensible wall height under a steep roof', () => {
     expect(wallHeight('farmhouse', f(300, 9))).toBeGreaterThanOrEqual(3.2);
     expect(wallHeight('block', f(400, 20))).toBeCloseTo(20, 5);
+  });
+
+  it('varies walls and roofs per building, the same on every visit', () => {
+    const seen = new Map<string, Set<string>>();
+    for (const type of HOUSE_TYPES) {
+      const variants = new Set<string>();
+      for (let i = 0; i < 400; i++) {
+        const fp = { lon: 7.4 + i * 0.00137, lat: 46.9 + i * 0.00071, area: 2000 };
+        const [w, r] = variantOf(type, 'mittelland', fp);
+        expect(w).toBeGreaterThanOrEqual(0);
+        expect(w).toBeLessThanOrEqual(3);
+        expect(r).toBeGreaterThanOrEqual(0);
+        expect(r).toBeLessThanOrEqual(3);
+        expect(variantOf(type, 'mittelland', fp)).toEqual([w, r]);
+        variants.add(`${w}/${r}`);
+      }
+      seen.set(type, variants);
+    }
+    // Every type shows several looks.
+    for (const [type, v] of seen) expect(v.size, type).toBeGreaterThanOrEqual(4);
+  });
+
+  it('gives halls coloured cladding', () => {
+    const colours = new Set<string>();
+    for (let i = 0; i < 200; i++)
+      colours.add(tintOf('mittelland', 'hall', 8 + i * 0.001, 47).join());
+    expect(colours.size).toBeGreaterThanOrEqual(5);
   });
 });

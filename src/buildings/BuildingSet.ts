@@ -45,6 +45,8 @@ export interface HouseInstance {
   width: number;
   height: number;
   tint: Color;
+  /** Texture variants (0..3) for the walls and the roof, see footprints.variantOf. */
+  variant?: [number, number];
   /** Full orientation (local vertical + yaw); overrides `yaw` and the shared `up`. */
   q?: Quaternion;
 }
@@ -131,6 +133,12 @@ export class BuildingSet {
           tint[i * 3 + 2] = h.tint.b;
         });
         geo.setAttribute('iTint', new InstancedBufferAttribute(tint, 3));
+        const variant = new Float32Array(list.length * 2);
+        list.forEach((h, i) => {
+          variant[i * 2] = h.variant?.[0] ?? 0;
+          variant[i * 2 + 1] = h.variant?.[1] ?? 0;
+        });
+        geo.setAttribute('iVar', new InstancedBufferAttribute(variant, 2));
         const mesh = new InstancedMesh(geo, this.material, list.length);
         list.forEach((h, i) => {
           if (h.q) q.copy(h.q);
@@ -163,6 +171,7 @@ export class BuildingSet {
         'iTint',
         new InstancedBufferAttribute(new Float32Array(list.length * 3).fill(1), 3),
       );
+      geo.setAttribute('iVar', new InstancedBufferAttribute(new Float32Array(list.length * 2), 2));
       const mesh = new InstancedMesh(geo, this.material, list.length);
       list.forEach((c, i) => {
         if (c.q) q.copy(c.q);

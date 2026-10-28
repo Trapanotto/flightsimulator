@@ -1,17 +1,19 @@
 """
 Facade and roof texture atlas for the regional building set (numpy, runs inside Blender).
 
-Atlas: 4 x 4 cells of CELL px. Wall cells show one bay (3.5 m wide x 3.0 m high, one window);
-roof cells a 2 x 2 m patch. Alpha = tint mask: 1.0 = plaster that may be tinted per instance,
+Atlas: 8 x 8 cells of CELL px: 16 material families (CELLS) with 4 variants each, cell index
+= family * 4 + variant. The game picks the wall and roof variant per building. Wall cells show
+one bay (3.5 m wide x 3.0 m high, one window); roof cells a 2.6 x 2.6 m patch. Alpha = tint mask: 1.0 = plaster that may be tinted per instance,
 0.5 = keep colour. Never 0: lossy WebP drops the colour of fully transparent pixels.
 """
 
 import numpy as np
 
-CELL = 512
-GRID = 4
+CELL = 256
+GRID = 8
+VARIANTS = 4
 
-# Cell indices (shared with src/buildings/buildingMaterial.ts)
+# Material families (shared with src/buildings/buildingMaterial.ts and footprints.ts)
 CELLS = {
     "plaster_window": 0,
     "chalet_wood": 1,
@@ -154,11 +156,85 @@ def roof_tiles(color, rows=10, var=0.18):
     return img
 
 
+def balcony(img, y=0.62, color=rgb(70, 60, 52), wood=False):
+    """Railing across the bay: top rail and balusters (or boards for chalets)."""
+    rect(img, 0.0, y, 1.0, y + 0.03, color)
+    rect(img, 0.0, 0.94, 1.0, 0.97, color * 0.8)
+    if wood:
+        for k in range(16):
+            x = k / 16
+            rect(img, x + 0.005, y + 0.03, x + 0.05, 0.94, color * rng.uniform(0.85, 1.1))
+    else:
+        for k in range(24):
+            x = k / 24
+            rect(img, x + 0.008, y + 0.03, x + 0.016, 0.94, color)
+    # Slab edge and its shadow below.
+    rect(img, 0.0, 0.97, 1.0, 1.0, rgb(205, 202, 195))
+
+
+def roller_blind(img, x0, y0, x1, y1, down=0.45, color=rgb(200, 196, 186)):
+    rect(img, x0 + 0.02, y0 + 0.02, x1 - 0.02, y0 + 0.02 + (y1 - y0 - 0.04) * down, color)
+    for k in range(int(30 * down)):
+        yy = y0 + 0.02 + k * (y1 - y0) / 30
+        rect(img, x0 + 0.02, yy, x1 - 0.02, yy + 0.003, color * 0.82)
+
+
+def curtain_wall(tint, mullion=rgb(70, 76, 82), rows=2, cols=3):
+    """Glass facade: reflective panes in a mullion grid (offices, terminals)."""
+    img = np.zeros((CELL, CELL, 3), np.float32)
+    t = np.linspace(0, 1, CELL)[:, None, None]
+    sky = rgb(150, 175, 195) * (1 - t) + rgb(55, 72, 92) * t
+    img[:] = sky * tint
+    img *= (0.9 + 0.2 * noise(CELL, CELL, 3, 2))[..., None]
+    for c in range(cols + 1):
+        x = c / cols
+        rect(img, x - 0.012, 0, x + 0.012, 1, mullion)
+    for r in range(rows + 1):
+        y = r / rows
+        rect(img, 0, y - 0.015, 1, y + 0.015, mullion)
+    rect(img, 0, 0.92, 1, 1, mullion * 0.8)  # floor slab band
+    return img
+
+
+def panels(color, horizontal=True, n=6, gap=0.012):
+    """Metal or concrete cladding panels with joints."""
+    img = fill(color, 0.04, 5)
+    for k in range(n + 1):
+        p = k / n
+        if horizontal:
+            rect(img, 0, p - gap, 1, p + gap, color * 0.7)
+        else:
+            rect(img, p - gap, 0, p + gap, 1, color * 0.7)
+    return img
+
+
+def corrugated(color, ribs=22):
+    img = fill(color, 0.03, 4)
+    u = np.arange(CELL) / CELL
+    return img * (0.88 + 0.12 * np.sin(u * np.pi * 2 * ribs))[None, :, None]
+
+
+def solar(img, x0, y0, x1, y1):
+    """Photovoltaic modules: dark blue cells with a thin silver grid."""
+    rect(img, x0, y0, x1, y1, rgb(190, 192, 196))
+    for i in range(6):
+        for j in range(3):
+            a = x0 + (x1 - x0) * i / 6
+            b = y0 + (y1 - y0) * j / 3
+            rect(img, a + 0.006, b + 0.006, a + (x1 - x0) / 6 - 0.006, b + (y1 - y0) / 3 - 0.006,
+                 rgb(28, 40, 72) * rng.uniform(0.9, 1.1))
+
+
+def wood_shingles(color, rows=26, cols=20):
+    """Schindelschirm: small overlapping wooden shingles on walls (grey with age)."""
+    return roof_tiles(color, rows=rows, var=0.22) * (0.95 + 0.1 * noise(CELL, CELL, 8))[..., None]
+
+
 def build_atlas():
     atlas = np.zeros((CELL * GRID, CELL * GRID, 4), np.float32)
 
-    def put(name, img, tint_mask=None):
-        i = CELLS[name]
+    def put(family, variant, img, tint_mask=None):
+        i = CELLS[family] * VARIANTS + variant
         cx, cy = i % GRID, i // GRID
         m = np.zeros((CELL, CELL), np.float32) if tint_mask is None else tint_mask
         a = 0.5 + 0.5 * m
@@ -166,89 +242,188 @@ def build_atlas():
         atlas[cy * CELL:(cy + 1) * CELL, cx * CELL:(cx + 1) * CELL, :3] = np.clip(img, 0, 1)
         atlas[cy * CELL:(cy + 1) * CELL, cx * CELL:(cx + 1) * CELL, 3] = a
 
-    def plaster_mask(img_fn):
-        return img_fn
+    def plaster_mask(x0, y0, x1, y1):
+        """Tintable plaster everywhere except the window area."""
+        m = np.ones((CELL, CELL), np.float32)
+        m[int(y0 * CELL):int(y1 * CELL), int(x0 * CELL):int(x1 * CELL)] = 0
+        return m
 
-    # 0 White plaster with a window and green shutters (farmhouse ground floor, generic).
-    img = fill(rgb(236, 232, 222), 0.05, 6)
-    mask = np.ones((CELL, CELL), np.float32)
-    window(img, 0.36, 0.3, 0.64, 0.72, shutters=rgb(52, 92, 60))
-    mask[int(0.27 * CELL):int(0.75 * CELL), int(0.18 * CELL):int(0.82 * CELL)] = 0
-    put("plaster_window", img, mask)
+    # ---- 0 plaster_window: farmhouse / generic plaster with shutters ----
+    for v, shutter in enumerate([rgb(52, 92, 60), rgb(122, 40, 32), rgb(78, 96, 112), None]):
+        img = fill(rgb(236, 232, 222), 0.05, 6)
+        window(img, 0.36, 0.3, 0.64, 0.72, shutters=shutter)
+        if shutter is None:
+            # Flower box instead of shutters.
+            rect(img, 0.32, 0.72, 0.68, 0.78, rgb(96, 62, 36))
+            for k in range(10):
+                x = 0.33 + k * 0.034
+                rect(img, x, 0.67, x + 0.026, 0.72, rgb(205, 40, 50) if k % 3 else rgb(240, 200, 60))
+            put("plaster_window", v, img, plaster_mask(0.3, 0.27, 0.7, 0.8))
+        else:
+            put("plaster_window", v, img, plaster_mask(0.18, 0.27, 0.82, 0.75))
 
-    # 1 Chalet: horizontal dark wood, window with red-white shutters, flower box.
-    img = planks(rgb(118, 74, 42), horizontal=True, width=0.07)
-    window(img, 0.36, 0.28, 0.64, 0.7, frame=rgb(235, 230, 220), shutters=rgb(150, 40, 35))
-    rect(img, 0.3, 0.7, 0.7, 0.76, rgb(90, 55, 30))
-    for k in range(9):
-        x = 0.31 + k * 0.043
-        rect(img, x, 0.66, x + 0.03, 0.7, rgb(200, 40, 50) if k % 2 else rgb(220, 60, 120))
-    put("chalet_wood", img)
+    # ---- 1 chalet_wood ----
+    specs = [
+        (rgb(118, 74, 42), rgb(150, 40, 35), True),    # classic dark brown, red-white shutters
+        (rgb(168, 112, 62), rgb(48, 90, 56), True),     # honey-coloured, green shutters
+        (rgb(96, 62, 38), None, False),                 # dark, double window
+        (rgb(128, 118, 104), rgb(110, 110, 104), True),  # weathered grey wood
+    ]
+    for v, (wood, shut, flowers) in enumerate(specs):
+        img = planks(wood, horizontal=True, width=0.07)
+        if shut is None:
+            window(img, 0.18, 0.28, 0.46, 0.7, frame=rgb(235, 230, 220))
+            window(img, 0.54, 0.28, 0.82, 0.7, frame=rgb(235, 230, 220))
+        else:
+            window(img, 0.36, 0.28, 0.64, 0.7, frame=rgb(235, 230, 220), shutters=shut)
+        if flowers:
+            rect(img, 0.3, 0.7, 0.7, 0.76, wood * 0.75)
+            for k in range(9):
+                x = 0.31 + k * 0.043
+                rect(img, x, 0.66, x + 0.03, 0.7, rgb(200, 40, 50) if k % 2 else rgb(220, 60, 120))
+        put("chalet_wood", v, img)
 
-    # 2 Valais larch: almost black weathered wood, tiny window.
-    img = planks(rgb(62, 44, 32), horizontal=True, width=0.09, var=0.18)
-    img *= (0.85 + 0.3 * noise(CELL, CELL, 5))[..., None]
-    window(img, 0.42, 0.38, 0.58, 0.62, frame=rgb(200, 195, 180), cross=False)
-    put("larch_dark", img)
+    # ---- 2 larch_dark (Valais) ----
+    for v, (wood, var) in enumerate([(rgb(62, 44, 32), 0.18), (rgb(80, 54, 36), 0.15),
+                                     (rgb(48, 36, 28), 0.2), (rgb(92, 74, 58), 0.2)]):
+        img = planks(wood, horizontal=True, width=0.09, var=var)
+        img *= (0.85 + 0.3 * noise(CELL, CELL, 5))[..., None]
+        window(img, 0.42, 0.38, 0.58, 0.62, frame=rgb(200, 195, 180), cross=False,
+               shutters=rgb(90, 30, 28) if v == 1 else None)
+        put("larch_dark", v, img)
 
-    # 3 Rubble stone with a small deep window (rustico, plinths).
-    img = stones(rgb(150, 145, 138))
-    window(img, 0.43, 0.38, 0.57, 0.62, frame=rgb(120, 90, 60), cross=False)
-    put("stone_rubble", img)
+    # ---- 3 stone_rubble ----
+    for v, base in enumerate([rgb(150, 145, 138), rgb(168, 150, 124), rgb(118, 116, 112), rgb(140, 132, 118)]):
+        img = stones(base)
+        window(img, 0.43, 0.38, 0.57, 0.62, frame=rgb(120, 90, 60), cross=False)
+        put("stone_rubble", v, img)
 
-    # 4 Engadin: thick white walls, grey sgraffito band, small funnel window.
-    img = fill(rgb(240, 238, 232), 0.04, 5)
-    rect(img, 0.0, 0.08, 1.0, 0.12, rgb(120, 120, 118))
-    for k in range(12):
-        x = k / 12
-        rect(img, x + 0.01, 0.13, x + 0.05, 0.17, rgb(130, 130, 126))
-    rect(img, 0.38, 0.33, 0.62, 0.67, rgb(200, 198, 190))   # funnel reveal
-    rect(img, 0.33, 0.29, 0.67, 0.71, rgb(170, 168, 160), 0.35)
-    window(img, 0.43, 0.4, 0.57, 0.6, frame=rgb(245, 245, 240))
-    put("engadin", img, np.ones((CELL, CELL), np.float32) * 0)
+    # ---- 4 engadin: thick plaster, sgraffito, funnel windows (tintable) ----
+    for v in range(4):
+        img = fill(rgb(240, 238, 232), 0.04, 5)
+        band = [rgb(120, 120, 118), rgb(150, 90, 70), rgb(80, 90, 100), rgb(120, 110, 90)][v]
+        rect(img, 0.0, 0.08, 1.0, 0.12, band)
+        for k in range(12):
+            x = k / 12
+            if v % 2:
+                rect(img, x + 0.02, 0.13, x + 0.06, 0.16, band)
+                rect(img, x + 0.035, 0.16, x + 0.045, 0.19, band)
+            else:
+                rect(img, x + 0.01, 0.13, x + 0.05, 0.17, band * 1.08)
+        rect(img, 0.38, 0.33, 0.62, 0.67, rgb(200, 198, 190))
+        rect(img, 0.33, 0.29, 0.67, 0.71, rgb(170, 168, 160), 0.35)
+        window(img, 0.43, 0.4, 0.57, 0.6, frame=rgb(245, 245, 240),
+               shutters=[None, rgb(60, 92, 64), rgb(130, 50, 40), None][v])
+        put("engadin", v, img, plaster_mask(0.25, 0.27, 0.75, 0.73) * (1 if v else 0))
 
-    # 5 Pastel plaster (Ticino), tintable, green shutters.
-    img = fill(rgb(240, 236, 226), 0.06, 7)
-    mask = np.ones((CELL, CELL), np.float32)
-    window(img, 0.38, 0.28, 0.62, 0.74, shutters=rgb(70, 110, 70))
-    mask[int(0.25 * CELL):int(0.77 * CELL), int(0.24 * CELL):int(0.76 * CELL)] = 0
-    put("pastel_window", img, mask)
+    # ---- 5 pastel_window (Ticino) ----
+    for v, shut in enumerate([rgb(70, 110, 70), rgb(120, 120, 112), rgb(110, 70, 45), rgb(70, 96, 120)]):
+        img = fill(rgb(240, 236, 226), 0.06, 7)
+        if v == 3:
+            # Arched window with a stone frame.
+            rect(img, 0.36, 0.22, 0.64, 0.3, rgb(200, 196, 186))
+        window(img, 0.38, 0.28, 0.62, 0.74, shutters=shut)
+        put("pastel_window", v, img, plaster_mask(0.24, 0.2, 0.76, 0.77))
 
-    # 6 Urban apartment facade: plaster with a wider window and a sill.
+    # ---- 6 urban: apartments, balconies, modern, office glass ----
     img = fill(rgb(232, 228, 220), 0.04, 6)
-    mask = np.ones((CELL, CELL), np.float32)
     window(img, 0.22, 0.26, 0.78, 0.72)
     rect(img, 0.2, 0.72, 0.8, 0.75, rgb(190, 188, 182))
-    mask[int(0.23 * CELL):int(0.76 * CELL), int(0.19 * CELL):int(0.81 * CELL)] = 0
-    put("urban", img, mask)
+    put("urban", 0, img, plaster_mask(0.19, 0.23, 0.81, 0.76))
+    img = fill(rgb(232, 228, 220), 0.04, 6)
+    window(img, 0.25, 0.12, 0.75, 0.9, cross=False)
+    roller_blind(img, 0.25, 0.12, 0.75, 0.9, 0.35)
+    balcony(img, 0.6)
+    put("urban", 1, img, plaster_mask(0.0, 0.1, 1.0, 1.0))
+    img = fill(rgb(225, 224, 220), 0.03, 5)
+    window(img, 0.12, 0.2, 0.88, 0.78, frame=rgb(70, 72, 76), cross=False)
+    rect(img, 0.5 - 0.006, 0.22, 0.5 + 0.006, 0.76, rgb(70, 72, 76))
+    put("urban", 2, img, plaster_mask(0.1, 0.18, 0.9, 0.8))
+    put("urban", 3, curtain_wall(np.ones(3, np.float32)))
 
-    # 7 Industrial hall: vertical corrugated metal, ribbon window high up.
-    img = fill(rgb(176, 182, 186), 0.03, 4)
-    u = np.arange(CELL) / CELL
-    img *= (0.88 + 0.12 * np.sin(u * np.pi * 2 * 22))[None, :, None]
+    # ---- 7 metal_hall: cladding, tintable ----
+    img = corrugated(rgb(196, 200, 204))
     rect(img, 0.0, 0.12, 1.0, 0.24, rgb(60, 72, 84))
-    put("metal_hall", img)
+    m = np.ones((CELL, CELL), np.float32)
+    m[int(0.12 * CELL):int(0.24 * CELL), :] = 0
+    put("metal_hall", 0, img, m)
+    img = panels(rgb(200, 202, 204), horizontal=True, n=5)
+    put("metal_hall", 1, img, np.ones((CELL, CELL), np.float32))
+    img = panels(rgb(204, 204, 200), horizontal=False, n=3)
+    rect(img, 0.08, 0.15, 0.92, 0.55, rgb(40, 52, 64))
+    for k in range(4):
+        rect(img, 0.08 + k * 0.28, 0.15, 0.1 + k * 0.28, 0.55, rgb(150, 150, 150))
+    m = np.ones((CELL, CELL), np.float32)
+    m[int(0.15 * CELL):int(0.55 * CELL), int(0.08 * CELL):int(0.92 * CELL)] = 0
+    put("metal_hall", 2, img, m)
+    img = panels(rgb(178, 174, 166), horizontal=True, n=3, gap=0.008)  # concrete panels
+    img *= (0.9 + 0.2 * noise(CELL, CELL, 20, 3))[..., None]
+    put("metal_hall", 3, img)
 
-    # 8 Church: white plaster with a tall arched window.
-    img = fill(rgb(242, 240, 234), 0.04, 5)
-    window(img, 0.42, 0.18, 0.58, 0.8, frame=rgb(200, 196, 186), cross=False)
-    put("church", img)
+    # ---- 8 church ----
+    for v in range(4):
+        img = fill(rgb(242, 240, 234) * [1, 0.97, 1, 0.98][v], 0.04, 5)
+        window(img, 0.42, 0.18, 0.58, 0.8, frame=rgb(200, 196, 186), cross=False)
+        put("church", v, img)
 
-    # 9-13 Roofs
-    put("roof_clay", roof_tiles(rgb(150, 72, 48)))
-    put("roof_gneiss", stones(rgb(118, 118, 116), size=0.16, mortar=rgb(80, 80, 78)))
-    put("roof_shingle", roof_tiles(rgb(88, 66, 50), rows=16, var=0.25))
-    put("roof_gravel", fill(rgb(130, 128, 122), 0.12, 30))
-    img = fill(rgb(96, 100, 104), 0.03, 4)
-    img *= (0.85 + 0.15 * (np.sin(u * np.pi * 2 * 8) > 0.9))[None, :, None]
-    put("roof_metal", img)
+    # ---- 9 roof_clay: red, brown, anthracite, old with moss ----
+    put("roof_clay", 0, roof_tiles(rgb(150, 72, 48)))
+    put("roof_clay", 1, roof_tiles(rgb(112, 64, 46)))
+    put("roof_clay", 2, roof_tiles(rgb(62, 62, 64), var=0.1))
+    img = roof_tiles(rgb(138, 76, 54), var=0.25)
+    moss = noise(CELL, CELL, 6, 4)
+    img = img * (1 - 0.4 * (moss > 0.6)[..., None]) + rgb(70, 80, 40) * 0.4 * (moss > 0.6)[..., None]
+    put("roof_clay", 3, img)
 
-    # 14 Farmhouse upper floor: warm vertical wood with a small window band.
+    # ---- 10 roof_gneiss: stone slabs ----
+    for v, (base, mortar) in enumerate([(rgb(118, 118, 116), rgb(80, 80, 78)),
+                                        (rgb(132, 126, 116), rgb(90, 86, 80)),
+                                        (rgb(100, 102, 104), rgb(70, 70, 70)),
+                                        (rgb(140, 138, 132), rgb(96, 94, 90))]):
+        put("roof_gneiss", v, stones(base, size=0.16, mortar=mortar))
+
+    # ---- 11 roof_shingle: wood shingles, grey shingles, Eternit slate, clay ----
+    put("roof_shingle", 0, roof_tiles(rgb(88, 66, 50), rows=16, var=0.25))
+    put("roof_shingle", 1, roof_tiles(rgb(104, 100, 94), rows=16, var=0.2))
+    img = roof_tiles(rgb(84, 88, 92), rows=12, var=0.06)
+    put("roof_shingle", 2, img)
+    put("roof_shingle", 3, roof_tiles(rgb(126, 68, 46), rows=12))
+
+    # ---- 12 roof_gravel: gravel, green roof, solar, bitumen ----
+    put("roof_gravel", 0, fill(rgb(130, 128, 122), 0.12, 30))
+    img = fill(rgb(92, 112, 58), 0.2, 20)
+    img *= (0.8 + 0.4 * noise(CELL, CELL, 9))[..., None]
+    put("roof_gravel", 1, img)
+    img = fill(rgb(130, 128, 122), 0.12, 30)
+    solar(img, 0.05, 0.08, 0.95, 0.9)
+    put("roof_gravel", 2, img)
+    put("roof_gravel", 3, fill(rgb(58, 58, 60), 0.06, 12))
+
+    # ---- 13 roof_metal: grey, green, red-brown standing seam, with solar ----
+    u = np.arange(CELL) / CELL
+    for v, col in enumerate([rgb(96, 100, 104), rgb(62, 96, 72), rgb(122, 58, 44), rgb(96, 100, 104)]):
+        img = fill(col, 0.03, 4)
+        img *= (0.85 + 0.15 * (np.sin(u * np.pi * 2 * 8) > 0.9))[None, :, None]
+        if v == 3:
+            solar(img, 0.06, 0.1, 0.94, 0.88)
+        put("roof_metal", v, img)
+
+    # ---- 14 farm_wood: upper floor of farmhouses ----
     img = planks(rgb(150, 102, 60), horizontal=False, width=0.05)
     window(img, 0.34, 0.36, 0.66, 0.64, frame=rgb(240, 236, 226))
-    put("farm_wood", img)
+    put("farm_wood", 0, img)
+    img = wood_shingles(rgb(118, 112, 104))
+    window(img, 0.34, 0.36, 0.66, 0.64, frame=rgb(240, 236, 226), shutters=rgb(52, 92, 60))
+    put("farm_wood", 1, img)
+    img = planks(rgb(112, 74, 46), horizontal=False, width=0.07)
+    window(img, 0.34, 0.36, 0.66, 0.64, frame=rgb(240, 236, 226), shutters=rgb(150, 40, 35))
+    put("farm_wood", 2, img)
+    img = planks(rgb(176, 140, 96), horizontal=True, width=0.06)
+    window(img, 0.3, 0.34, 0.7, 0.66, frame=rgb(240, 236, 226))
+    put("farm_wood", 3, img)
 
-    # 15 Plain stone (plinths, no window)
-    put("stone_plain", stones(rgb(140, 136, 128), size=0.11))
+    # ---- 15 stone_plain: plinths ----
+    for v, base in enumerate([rgb(140, 136, 128), rgb(160, 148, 128), rgb(120, 118, 114), rgb(176, 172, 162)]):
+        put("stone_plain", v, stones(base, size=0.11))
 
     return np.flipud(atlas).copy()

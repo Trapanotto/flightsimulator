@@ -24,6 +24,7 @@ import {
   houseTypeOf,
   regionOf,
   tintOf,
+  variantOf,
   treeOf,
   wallHeight,
 } from './footprints';
@@ -326,6 +327,7 @@ export class BuildingLayer {
         const region = regionOf(t.data!.canton, f.lon, f.lat, g);
         const type = houseTypeOf(f, region, g, dense);
         const tint = tintOf(region, type, f.lon, f.lat);
+        const variant = variantOf(type, region, f);
         const pos = w.fromGeo(f.lon, f.lat, g - 0.35);
         houses.push({
           type,
@@ -337,6 +339,7 @@ export class BuildingLayer {
           width: f.width,
           height: wallHeight(type, f),
           tint: new Color(...tint),
+          variant,
           q: this.orientation(f.angle, basis, qUp, qUpInv),
           base: pos.clone().add(shift),
         });

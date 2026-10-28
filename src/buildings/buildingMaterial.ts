@@ -8,18 +8,18 @@ const ROOF_TILE = 2.6;
 
 const ATLAS_FN = /* glsl */ `
         vec4 atlasCell(float cell, vec2 uvm) {
-          float cx = mod(cell, 4.0);
-          float cy = floor(cell / 4.0 + 0.001);
+          float cx = mod(cell, 8.0);
+          float cy = floor(cell / 8.0 + 0.001);
           vec2 f = fract(uvm);
-          vec2 p = (vec2(cx, cy) + vec2(f.x, 1.0 - f.y) * 0.98 + 0.01) / 4.0;
+          vec2 p = (vec2(cx, cy) + vec2(f.x, 1.0 - f.y) * 0.98 + 0.01) / 8.0;
           // Gradients from the unwrapped coordinates avoid mip seams at the cell edges; clamping
           // them keeps the lookup inside the cell (no bleeding from neighbours).
           vec2 gx = dFdx(uvm);
           vec2 gy = dFdy(uvm);
           float g = max(length(gx), length(gy));
-          vec4 detail = textureGrad(map, p, gx / 4.0 * min(1.0, 0.25 / max(g, 1e-5)), gy / 4.0 * min(1.0, 0.25 / max(g, 1e-5)));
-          // Far away: the cell's average colour (mip 9 of the 2048 atlas = one texel per cell).
-          vec4 avg = textureLod(map, (vec2(cx, cy) + 0.5) / 4.0, 9.0);
+          vec4 detail = textureGrad(map, p, gx / 8.0 * min(1.0, 0.25 / max(g, 1e-5)), gy / 8.0 * min(1.0, 0.25 / max(g, 1e-5)));
+          // Far away: the cell's average colour (mip 8 of the 2048 atlas = one texel per cell).
+          vec4 avg = textureLod(map, (vec2(cx, cy) + 0.5) / 8.0, 8.0);
           return mix(detail, avg, smoothstep(0.12, 0.45, g));
         }
 `;
@@ -42,7 +42,9 @@ export function createBuildingMaterial(atlas: Texture, atmosphere?: AtmosphereUn
         '#include <common>',
         `#include <common>
         attribute vec3 iTint;
+        attribute vec2 iVar;
         attribute vec2 uv1;
+        varying vec2 vVar;
         varying vec3 vMetric;
         varying vec3 vObjN;
         varying vec2 vCells;
@@ -61,6 +63,7 @@ export function createBuildingMaterial(atlas: Texture, atmosphere?: AtmosphereUn
         vCells = vec2(uv.x, 1.0 - uv.y);
         vSplit = uv1.x;
         vTint = iTint;
+        vVar = iVar;
         vec3 ip = instanceMatrix[3].xyz;
         vVariation = fract(sin(dot(ip.xz, vec2(12.9898, 78.233))) * 43758.5453);
         vWorld = (modelMatrix * instanceMatrix * vec4(position, 1.0)).xyz;`,
@@ -76,6 +79,7 @@ export function createBuildingMaterial(atlas: Texture, atmosphere?: AtmosphereUn
         varying vec3 vTint;
         varying vec3 vWorld;
         varying float vVariation;
+        varying vec2 vVar;
         #if BLD_HAZE
           uniform vec3 uSunDir;
           uniform vec3 uHazeColor;
@@ -98,7 +102,10 @@ ${ATLAS_FN}`,
           vec3 n = normalize(vObjN);
           bool wall = abs(n.y) < 0.5;
           vec2 uvm;
+          // Families of 4 variants (bld_textures.py): the building picks one for its walls and
+          // one for its roof.
           float cell;
+          float variant = wall ? vVar.x : vVar.y;
           if (wall) {
             float along = abs(n.x) > abs(n.z) ? vMetric.z : vMetric.x;
             uvm = vec2(along / ${BAY_W.toFixed(1)}, vMetric.y / ${BAY_H.toFixed(1)});
@@ -107,7 +114,7 @@ ${ATLAS_FN}`,
             uvm = vMetric.xz / ${ROOF_TILE.toFixed(1)};
             cell = vCells.y;
           }
-          vec4 t = atlasCell(floor(cell + 0.5), uvm);
+          vec4 t = atlasCell(floor(cell + 0.5) * 4.0 + floor(variant + 0.5), uvm);
           vec3 c = t.rgb;
           // Alpha 1.0 = tintable plaster, 0.5 = keep colour (see bld_textures.py).
           c = mix(c, c * vTint, clamp(t.a * 2.0 - 1.0, 0.0, 1.0));
