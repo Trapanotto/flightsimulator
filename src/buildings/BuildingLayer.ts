@@ -1,6 +1,7 @@
 import {
   type BufferGeometry,
   Color,
+  SRGBColorSpace,
   Group,
   InstancedMesh,
   Matrix4,
@@ -18,14 +19,15 @@ import { BuildingSet, type ChurchInstance, type HouseInstance } from './Building
 import {
   TREE_TYPES,
   type TileBuildings,
-  type TreeType,
   VECTOR_ZOOM,
   churchTypeOf,
   houseTypeOf,
   regionOf,
   tintOf,
   variantOf,
+  seasonOf,
   treeOf,
+  treeTint,
   wallHeight,
 } from './footprints';
 import type { BuildingJob } from '../workers/buildings.worker';
@@ -51,6 +53,14 @@ const m4 = new Matrix4();
 const tq = new Quaternion();
 const tp = new Vector3();
 const ts = new Vector3();
+const tc = new Color();
+
+/** The date the trees dress for: today, or ?date=2026-07-15 (testing). */
+function seasonDate(): Date {
+  const q = new URLSearchParams(location.search).get('date');
+  const d = q ? new Date(q) : new Date();
+  return Number.isNaN(d.getTime()) ? new Date() : d;
+}
 
 /** Web Mercator tile containing lon/lat. */
 function tileOf(lon: number, lat: number, z: number) {
@@ -79,7 +89,8 @@ export class BuildingLayer {
   /** Trees: radius around the camera and spacing in forests (metres); 0 = off. */
   treeRadius = 700;
   treeSpacing = 11;
-  private treeGeos?: Map<TreeType, BufferGeometry>;
+  /** Tree shapes by `<species>_<variant>`. */
+  private treeGeos?: Map<string, BufferGeometry>;
   private readonly treeMaterial;
   private treeMeshes: InstancedMesh[] = [];
   private readonly treeCentre = new Vector3(Infinity, 0, 0);
@@ -109,7 +120,7 @@ export class BuildingLayer {
       .loadAsync(TREES_URL)
       .then(
         (gltf) => {
-          const geos = new Map<TreeType, BufferGeometry>();
+          const geos = new Map<string, BufferGeometry>();
           gltf.scene.updateMatrixWorld(true);
           gltf.scene.traverse((o) => {
             if (!(o instanceof Mesh)) return;
@@ -119,7 +130,8 @@ export class BuildingLayer {
             );
             const g = (o.geometry as BufferGeometry).clone();
             g.applyMatrix4(o.matrixWorld);
-            if ((TREE_TYPES as readonly string[]).includes(name)) geos.set(name as TreeType, g);
+            const species = name.replace(/_\d+$/, '');
+            if ((TREE_TYPES as readonly string[]).includes(species)) geos.set(name, g);
           });
           this.treeGeos = geos;
           this.treesDirty = true;
@@ -415,7 +427,8 @@ export class BuildingLayer {
     const kx = 111_320 * Math.cos(clat * DEG);
     const ky = 110_540;
     const r2 = this.treeRadius * this.treeRadius;
-    const lists = new Map<TreeType, number[]>();
+    const lists = new Map<string, number[]>();
+    const season = seasonOf(seasonDate());
     for (const t of this.tiles.values()) {
       const d = t.data;
       if (!d || !d.trees.length) continue;
@@ -435,8 +448,10 @@ export class BuildingLayer {
         const tree = treeOf(regionOf(d.canton, lon, lat, g), g, lon, lat);
         if (!tree) continue;
         const pos = w.fromGeo(lon, lat, g - 0.3);
-        const list = lists.get(tree.type) ?? [];
-        // x, y, z, height, yaw, qUp (x, y, z, w)
+        const key = `${tree.type}_${tree.variant}`;
+        const list = lists.get(key) ?? [];
+        const tint = treeTint(tree.type, lon, lat, season);
+        // x, y, z, height, yaw, qUp (x, y, z, w), width, tint (r, g, b)
         list.push(
           pos.x,
           pos.y,
@@ -447,16 +462,23 @@ export class BuildingLayer {
           qUp.y,
           qUp.z,
           qUp.w,
+          tree.width,
+          ...tint,
         );
-        lists.set(tree.type, list);
+        lists.set(key, list);
       }
     }
     // Positions are relative to the current origin (group offset was reset by rebuild()).
-    for (const [type, list] of lists) {
-      const n = list.length / 9;
-      const mesh = new InstancedMesh(this.treeGeos.get(type)!, this.treeMaterial, n);
+    const STRIDE = 13;
+    for (const [key, list] of lists) {
+      const geo = this.treeGeos.get(key) ?? this.treeGeos.get(key.replace(/_\d+$/, '_0'));
+      if (!geo) continue;
+      const n = list.length / STRIDE;
+      const mesh = new InstancedMesh(geo, this.treeMaterial, n);
       for (let i = 0; i < n; i++) {
-        const o = i * 9;
+        const o = i * STRIDE;
+        // Multipliers are meant on screen (sRGB), the shader multiplies linear colours.
+        mesh.setColorAt(i, tc.setRGB(list[o + 10]!, list[o + 11]!, list[o + 12]!, SRGBColorSpace));
         tq.set(list[o + 5]!, list[o + 6]!, list[o + 7]!, list[o + 8]!);
         tq.multiply(new Quaternion().setFromAxisAngle(Y, list[o + 4]!));
         const hgt = list[o + 3]!;
@@ -465,12 +487,12 @@ export class BuildingLayer {
           m4.compose(
             tp.set(list[o]!, list[o + 1]!, list[o + 2]!),
             tq,
-            ts.set(hgt * 0.95, hgt, hgt * 0.95),
+            ts.set(hgt * 0.95 * list[o + 9]!, hgt, hgt * 0.95 * list[o + 9]!),
           ),
         );
       }
       mesh.frustumCulled = false;
-      mesh.name = `trees_${type}`;
+      mesh.name = `trees_${key}`;
       this.treeMeshes.push(mesh);
       this.group.add(mesh);
     }

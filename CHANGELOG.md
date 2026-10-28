@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.9.2 – Flugplätze, Gebäude, Bäume (2026-10-28)
+
+- **Alle Schweizer Flugplätze**: 44 befestigte Pisten an 39 Flugplätzen (inkl. Basel-Mulhouse)
+  mit Markierungen; im Flugmenü «Alle Flugplätze» mit beiden Pistenrichtungen. Daten aus
+  OpenStreetMap (`tools/fetch-aeroways.mjs`).
+- **Rollwege und Vorfelder** an allen Flugplätzen scharf: Asphaltkörnung, Betonplatten mit
+  Fugen, durchgehende gelbe Rollweg-Mittellinie (vorzeichenbehaftetes Distanzfeld) – das
+  Luftbild mit Standplatz-Markierungen bleibt darunter erhalten.
+- **Gebäudevielfalt**: 64 Fassaden- und Dachtexturen (16 Materialien × 4 Varianten) –
+  Fensterläden, Blumenkästen, Holzarten, Balkone, Glasfassaden, Hallenverkleidungen, Ziegel
+  rot/braun/anthrazit/bemoost, Eternit, begrünte und Solardächer; Varianten pro Gebäude,
+  grosse Blöcke mit Glasfassade, farbige Hallen, mehr Putzfarben.
+- **Bäume**: neu Waldföhre, Bergahorn und Birke; drei Formen pro Art (27 Modelle); eigene
+  Kronenbreite und Farbe pro Baum; Herbstfarben und kahle Winterbäume nach dem echten Datum
+  (`?date=2026-07-15` zum Testen). Föhren im Wallis, Kastanien und Birken im Tessin.
+
 ## v0.9.1 – Scharfe Pisten (2026-10-28)
 
 - **Pisten mit Asphalt und ICAO-Markierungen** an allen sechs Flugplätzen: Schwellenbalken nach

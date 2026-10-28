@@ -350,50 +350,179 @@ export function tintOf(
 // Trees
 // ---------------------------------------------------------------------------
 
-export const TREE_TYPES = ['spruce', 'fir', 'larch', 'arve', 'beech', 'chestnut'] as const;
+export const TREE_TYPES = [
+  'spruce',
+  'fir',
+  'larch',
+  'arve',
+  'pine',
+  'beech',
+  'chestnut',
+  'maple',
+  'birch',
+] as const;
 export type TreeType = (typeof TREE_TYPES)[number];
+/** Shapes per species in trees.glb (Tree_<species>_<0..2>). */
+export const TREE_VARIANTS = 3;
 
 const TREE_HEIGHT: Record<TreeType, [number, number]> = {
   spruce: [18, 32],
   fir: [18, 30],
   larch: [15, 28],
   arve: [8, 15],
+  pine: [12, 24],
   beech: [14, 26],
   chestnut: [10, 18],
+  maple: [12, 24],
+  birch: [10, 18],
 };
 
-/** Species by elevation and region; deterministic per position. Null = no tree (too high). */
+export interface TreeSpec {
+  type: TreeType;
+  height: number;
+  /** Shape 0..2 (slim, standard, broad/old). */
+  variant: number;
+  /** Crown width relative to the height (around 1). */
+  width: number;
+}
+
+/**
+ * Species by elevation and region, deterministic per position. Null = no tree (too high).
+ * Mittelland: beech/spruce mixed forest with maple, pine, birch; dry Valais: Scots pine;
+ * Ticino: chestnut, birch; higher up spruce and fir, then larch and arolla pine.
+ */
 export function treeOf(
   region: Region,
   elevation: number,
   lon: number,
   lat: number,
-): { type: TreeType; height: number } | null {
+): TreeSpec | null {
   const h = Math.abs(Math.sin(lon * 91_234.7 + lat * 47_123.9) * 43_758.5453) % 1;
   const h2 = Math.abs(Math.sin(lon * 17_771.3 + lat * 61_337.1) * 24_634.6345) % 1;
+  const h3 = Math.abs(Math.sin(lon * 33_412.9 + lat * 15_877.3) * 31_871.2177) % 1;
   if (elevation > 2350) return null;
-  let type: TreeType;
+  const types: TreeType[] = [];
+  const weights: number[] = [];
+  const add = (t: TreeType, w: number) => {
+    types.push(t);
+    weights.push(w);
+  };
   const alpine = region === 'engadin' || region === 'valais';
-  if (region === 'ticino' && elevation < 1000)
-    type = h < 0.55 ? 'chestnut' : h < 0.85 ? 'beech' : 'spruce';
-  else if (elevation < 650) type = h < 0.45 ? 'beech' : h < 0.85 ? 'spruce' : 'fir';
-  else if (elevation < 1350)
-    type = h < 0.65 ? 'spruce' : h < 0.85 ? 'fir' : alpine ? 'larch' : 'beech';
-  else if (elevation < 1900)
-    type = alpine
-      ? h < 0.5
-        ? 'larch'
-        : h < 0.75
-          ? 'arve'
-          : 'spruce'
-      : h < 0.6
-        ? 'spruce'
-        : h < 0.85
-          ? 'larch'
-          : 'arve';
-  else type = h < 0.55 ? 'larch' : 'arve';
+  if (region === 'ticino' && elevation < 1000) {
+    add('chestnut', 45);
+    add('beech', 20);
+    add('birch', 15);
+    add('spruce', 10);
+    add('maple', 6);
+    add('pine', 4);
+  } else if (region === 'valais' && elevation < 1300) {
+    add('pine', 40);
+    add('spruce', 20);
+    add('larch', 15);
+    add('birch', 10);
+    add('beech', 8);
+    add('maple', 7);
+  } else if (elevation < 650) {
+    add('beech', 34);
+    add('spruce', 30);
+    add('fir', 10);
+    add('maple', 10);
+    add('pine', 8);
+    add('birch', 8);
+  } else if (elevation < 1350) {
+    add('spruce', 55);
+    add('fir', 18);
+    add(alpine ? 'larch' : 'beech', 14);
+    add('maple', 9);
+    add('pine', 4);
+  } else if (elevation < 1900) {
+    if (alpine) {
+      add('larch', 50);
+      add('arve', 25);
+      add('spruce', 25);
+    } else {
+      add('spruce', 58);
+      add('larch', 24);
+      add('arve', 12);
+      add('maple', 6);
+    }
+  } else {
+    add('larch', 55);
+    add('arve', 45);
+  }
+  const type = types[pick(h, weights)]!;
   const [lo, hi] = TREE_HEIGHT[type];
   // Smaller towards the tree line.
   const shrink = elevation > 1800 ? Math.max(0.45, 1 - (elevation - 1800) / 1000) : 1;
-  return { type, height: (lo + (hi - lo) * h2) * shrink };
+  return {
+    type,
+    height: (lo + (hi - lo) * h2) * shrink,
+    variant: Math.floor(h3 * TREE_VARIANTS) % TREE_VARIANTS,
+    width: 0.82 + 0.36 * ((h2 * 7.31 + h3) % 1),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Seasons
+// ---------------------------------------------------------------------------
+
+/** 0..1 how far autumn colours and winter bareness have come on a date. */
+export function seasonOf(date: Date): { autumn: number; winter: number } {
+  const start = Date.UTC(date.getUTCFullYear(), 0, 1);
+  const day = (date.getTime() - start) / 86_400_000;
+  const ramp = (x: number, a: number, b: number) => Math.min(1, Math.max(0, (x - a) / (b - a)));
+  // Colours from late September, full mid-October to early November; then the leaves fall.
+  const autumn = ramp(day, 268, 288) * (1 - ramp(day, 314, 330));
+  const winter = Math.max(ramp(day, 314, 334), 1 - ramp(day, 85, 115));
+  return { autumn, winter };
+}
+
+/** Colour multipliers (on the green vertex colours) per species: autumn / winter. */
+const AUTUMN: Partial<Record<TreeType, Array<[number, number, number]>>> = {
+  larch: [[1.65, 1.05, 0.5]],
+  beech: [
+    [2.1, 0.95, 0.7],
+    [1.9, 1.1, 0.6],
+  ],
+  maple: [
+    [2.2, 0.85, 0.55],
+    [1.9, 1.35, 0.45],
+  ],
+  birch: [[1.75, 1.3, 0.45]],
+  chestnut: [[1.75, 1.1, 0.55]],
+};
+const WINTER: Partial<Record<TreeType, [number, number, number]>> = {
+  larch: [1.05, 0.72, 0.66],
+  beech: [1.35, 0.78, 0.9],
+  maple: [1.3, 0.8, 0.9],
+  birch: [1.3, 0.9, 1.0],
+  chestnut: [1.3, 0.8, 0.88],
+};
+
+/**
+ * Per-tree colour multiplier: a little individual variation, plus autumn colours and winter
+ * bareness for larch and the broadleaf trees.
+ */
+export function treeTint(
+  type: TreeType,
+  lon: number,
+  lat: number,
+  season: { autumn: number; winter: number },
+): [number, number, number] {
+  const h = Math.abs(Math.sin(lon * 52_711.3 + lat * 38_219.7) * 17_321.531) % 1;
+  const v = 0.92 + 0.16 * h;
+  let c: [number, number, number] = [v * (0.97 + 0.06 * ((h * 13.7) % 1)), v, v];
+  const au = AUTUMN[type];
+  if (au && season.autumn > 0) {
+    const a = au[Math.floor(h * au.length) % au.length]!;
+    // Not every tree turns at once.
+    const k = season.autumn * Math.min(1, 0.55 + h);
+    c = [c[0] * (1 + (a[0] - 1) * k), c[1] * (1 + (a[1] - 1) * k), c[2] * (1 + (a[2] - 1) * k)];
+  }
+  const wi = WINTER[type];
+  if (wi && season.winter > 0) {
+    const k = season.winter;
+    c = [c[0] * (1 + (wi[0] - 1) * k), c[1] * (1 + (wi[1] - 1) * k), c[2] * (1 + (wi[2] - 1) * k)];
+  }
+  return c;
 }
