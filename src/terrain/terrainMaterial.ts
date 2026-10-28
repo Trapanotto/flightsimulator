@@ -47,6 +47,9 @@ const DECLARATIONS = /* glsl */ `
   varying vec3 vWorldPos;
   varying float vElevation;
   ${CLOUD_GLSL}
+  #if TERRAIN_AERO
+    uniform sampler2D uAero;
+  #endif
 `;
 
 /** Updates our feature switches on a terrain material without dropping three's own defines. */
@@ -67,16 +70,22 @@ export function createTerrainMaterial(
   map: Texture,
   atmosphere: AtmosphereUniforms,
   look: TerrainLook,
+  /** Airport pavement mask (aeroMask.ts) for tiles with taxiways or aprons. */
+  aero?: Texture,
 ) {
   const mat = new MeshLambertMaterial({ map });
   mat.color.setScalar(TERRAIN_GAIN);
   mat.fog = false;
+  mat.userData.aero = aero;
   // Keep three's own defines (Lambert needs them, e.g. for shadows) and add ours.
   setTerrainDefines(mat, look);
+  mat.defines = { ...mat.defines, TERRAIN_AERO: aero ? 1 : 0 };
   mat.customProgramCacheKey = () =>
-    `terrain-${look.detail ? 1 : 0}${look.cloudShadows ? 1 : 0}${look.water ? 1 : 0}`;
+    `terrain-${look.detail ? 1 : 0}${look.cloudShadows ? 1 : 0}${look.water ? 1 : 0}${aero ? 1 : 0}`;
   mat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, atmosphere, runwayUniforms);
+    Object.assign(shader.uniforms, atmosphere, runwayUniforms, {
+      uAero: { value: aero ?? null },
+    });
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -112,6 +121,29 @@ export function createTerrainMaterial(
             vec2 p = basePos(vWorldPos);
             float n = texture2D(uNoise, p / 190.0).r * 0.6 + texture2D(uNoise, p / 41.0).r * 0.4;
             c *= mix(1.0, 0.86 + 0.28 * n, (1.0 - smoothstep(500.0, 2600.0, dist)) * (1.0 - waterMask));
+          #endif
+          #if TERRAIN_AERO
+          {
+            // Taxiways and aprons: the orthophoto stays (stand markings, stains), with sharp
+            // grain on top, slab joints on concrete aprons and a crisp yellow centre line.
+            vec4 aero = texture2D(uAero, vMapUv);
+            if (aero.r > 0.01) {
+              vec2 q = basePos(vWorldPos);
+              float grain = texture2D(uNoise, q / 0.45).r * 0.5 + texture2D(uNoise, q / 2.3).r * 0.5;
+              vec3 pave = c * (0.82 + 0.34 * grain);
+              // Concrete slabs, 5 m: 2 cm dark joints (distance to the cell edge, antialiased).
+              vec2 cell = abs(fract(q / 5.0) - 0.5) * 5.0;
+              vec2 jw = max(fwidth(q), vec2(0.004));
+              float joint = max(smoothstep(2.48 - jw.x, 2.48, cell.x), smoothstep(2.48 - jw.y, 2.48, cell.y));
+              pave *= 1.0 - 0.3 * joint * aero.b;
+              // Taxiway centre line: 16 cm wide, from the distance field.
+              float dist = abs(aero.g * 2.0 - 1.0) * 3.0;
+              float lw = max(fwidth(aero.g * 6.0), 0.01);
+              float line = 1.0 - smoothstep(0.08 - lw, 0.08 + lw, dist);
+              pave = mix(pave, vec3(0.82, 0.6, 0.1), line * 0.9);
+              c = mix(c, pave, aero.r);
+            }
+          }
           #endif
           // Runways: asphalt and markings, sharp at any distance.
           ${RUNWAY_FRAGMENT}

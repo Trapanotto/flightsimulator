@@ -19,6 +19,9 @@ import { SWISSIMAGE_TEMPLATE, type TerrainSource, WATER_TILE_URL } from './sourc
 import { type TerrainLook, createTerrainMaterial, setTerrainDefines } from './terrainMaterial';
 import type { ImageryJob, ImageryResult, TerrainJob, TerrainResult } from './workerTypes';
 
+/** Taxiways and aprons of all Swiss airports (tools/fetch-aeroways.mjs). */
+const AERO_URL = `${import.meta.env.BASE_URL}assets/airports/aeroways.json`;
+
 export interface TerrainSettings {
   /** Screen-space error threshold in pixels. Lower = more detail. */
   tau: number;
@@ -220,6 +223,8 @@ export class TerrainEngine implements TileProvider {
         zoom: Math.min(20, z + (big ? 2 : 1)),
         size: big ? 512 : 256,
         water: this.look.water ? WATER_TILE_URL : null,
+        // Airport pavement only where it can be seen up close.
+        aero: z >= 13 ? AERO_URL : null,
       },
       node.priority,
     );
@@ -278,7 +283,16 @@ export class TerrainEngine implements TileProvider {
     // The GPU has its own copy after upload; free the CPU-side bitmap.
     texture.onUpdate = () => img.bitmap.close();
 
-    const m = new Mesh(geometry, createTerrainMaterial(texture, this.atmosphere, this.look));
+    let aero: Texture | undefined;
+    if (img.aero) {
+      aero = new Texture(img.aero);
+      aero.flipY = false;
+      aero.anisotropy = this.anisotropy;
+      aero.needsUpdate = true;
+      const bmp = img.aero;
+      aero.onUpdate = () => bmp.close();
+    }
+    const m = new Mesh(geometry, createTerrainMaterial(texture, this.atmosphere, this.look, aero));
     m.receiveShadow = this.receiveShadow;
     m.name = tileId(node.key);
     m.matrixAutoUpdate = false;
@@ -302,6 +316,7 @@ export class TerrainEngine implements TileProvider {
       t.mesh.geometry.dispose();
       const mat = t.mesh.material as MeshLambertMaterial;
       mat.map?.dispose();
+      (mat.userData.aero as Texture | undefined)?.dispose();
       mat.dispose();
       this.gpu.delete(node);
     }

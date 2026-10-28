@@ -3,6 +3,13 @@ import { VectorTile } from '@mapbox/vector-tile';
 import { PbfReader } from 'pbf';
 import { MERCATOR_TILE_PX, mercatorPx, mercatorPy, mercatorTileRange } from '../geo/tiles';
 import { fetchRetry } from '../net/fetchRetry';
+import {
+  type AeroData,
+  type AeroIndex,
+  aeroInTile,
+  drawAeroMask,
+  indexAero,
+} from '../terrain/aeroMask';
 import type {
   ImageryJob,
   ImageryResult,
@@ -175,7 +182,22 @@ async function compose(job: ImageryJob): Promise<ImageryResult> {
     ctx.drawImage(mosaic, sx, sy0, sw, sy1 - sy0, 0, dy0, size, dy1 - dy0);
   }
   if (job.water) await drawWater(ctx, job);
-  return { bitmap: out.transferToImageBitmap(), missing };
+  let aero: ImageBitmap | undefined;
+  if (job.aero) {
+    const index = await loadAero(job.aero);
+    const features = index && aeroInTile(index, b);
+    if (features) aero = drawAeroMask(features, b, size);
+  }
+  return { bitmap: out.transferToImageBitmap(), missing, aero };
+}
+
+let aeroIndex: Promise<AeroIndex | null> | undefined;
+/** Taxiways and aprons of all Swiss airports, loaded once per worker. */
+function loadAero(url: string) {
+  aeroIndex ??= fetchRetry(url)
+    .then(async (res) => (res.ok ? indexAero((await res.json()) as AeroData) : null))
+    .catch(() => null);
+  return aeroIndex;
 }
 
 self.onmessage = async (e: MessageEvent<WorkerRequest<ImageryJob>>) => {
@@ -183,7 +205,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest<ImageryJob>>) => {
   try {
     const result = await compose(job);
     const msg: WorkerResponse<ImageryResult> = { id, ok: true, result };
-    self.postMessage(msg, [result.bitmap]);
+    self.postMessage(msg, result.aero ? [result.bitmap, result.aero] : [result.bitmap]);
   } catch (err) {
     const msg: WorkerResponse<ImageryResult> = { id, ok: false, error: String(err) };
     self.postMessage(msg);

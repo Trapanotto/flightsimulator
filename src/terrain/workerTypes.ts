@@ -17,11 +17,15 @@ export interface ImageryJob {
   size: number;
   /** Vector tile template for the water mask (stored in the alpha channel), or null. */
   water: string | null;
+  /** Taxiways/aprons (aeroways.json URL) for the airport pavement mask, or null. */
+  aero: string | null;
 }
 export interface ImageryResult {
   bitmap: ImageBitmap;
   /** Number of source tiles that failed (e.g. outside coverage). */
   missing: number;
+  /** Airport pavement mask (aeroMask.ts) if the tile has taxiways or aprons. */
+  aero?: ImageBitmap;
 }
 
 export type WorkerRequest<T> = { id: number; job: T };
