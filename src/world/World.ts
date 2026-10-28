@@ -402,6 +402,17 @@ export class World {
     this.raf = requestAnimationFrame(loop);
   }
 
+  /**
+   * Video capture (tools/capture-showcase.mjs): one frame with a fixed time step while the
+   * loop is stopped, so the recording is smooth however slow each frame is to grab.
+   */
+  captureFrame(dt: number) {
+    this.running = false;
+    cancelAnimationFrame(this.raf);
+    this.tick(dt, dt * 1000);
+    this.post.render(dt);
+  }
+
   private tick(dt: number, dtMs: number) {
     this.updateBasis();
     // ?timescale=3 runs the flight faster (automated test flights only).

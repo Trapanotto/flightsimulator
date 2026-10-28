@@ -18,9 +18,14 @@ const EARTH_R = 6_371_000;
 
 const vertexShader = /* glsl */ `
   uniform float uLayer;
+  uniform float uLayers;
   varying vec3 vWorldPos;
   void main() {
     vec3 p = position;
+    // Far away the stacked layers merge into one: seen at a grazing angle they would show as
+    // offset copies (stripes). Near the camera they keep their spacing (thickness).
+    float merge = smoothstep(1500.0, 9000.0, length(p.xy));
+    p.z += ((uLayers - 1.0) * 0.5 - uLayer) * ${LAYER_SPACING.toFixed(1)} * merge;
     // Curve with the earth so the layer meets the horizon instead of running flat into space.
     p.z -= dot(p.xy, p.xy) / ${(2 * EARTH_R).toFixed(1)};
     vec4 world = modelMatrix * vec4(p, 1.0);

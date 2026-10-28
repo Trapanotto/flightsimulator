@@ -73,7 +73,7 @@ async function ensureWorld() {
   const { World } = await import('./world/World');
   const first = !world;
   world ??= new World(worldCanvas);
-  if (import.meta.env.DEV || location.search.includes('debug'))
+  if (import.meta.env.DEV || /debug|capture/.test(location.search))
     (window as unknown as { __world: World }).__world = world;
   if (first) {
     world.init().catch((err) => {
@@ -103,7 +103,11 @@ async function startShowcase() {
   const s = new Showcase(w);
   showcase = s;
   // State on #ui (not .start): the start screen re-renders on a language switch.
-  s.onReady = () => ui.classList.add('live');
+  s.onReady = () => {
+    ui.classList.add('live');
+    // The recorded flight has faded out under the live one: stop decoding it.
+    setTimeout(() => ui.querySelector<HTMLVideoElement>('.start-video')?.pause(), 2600);
+  };
   s.onCut = () => {
     ui.classList.remove('cut');
     void ui.offsetWidth;
@@ -112,6 +116,9 @@ async function startShowcase() {
   w.game = s;
   worldCanvas.hidden = false;
   w.start();
+  // ?capture: the recording script steps the showcase frame by frame.
+  if (location.search.includes('capture'))
+    (window as unknown as { __showcase: Showcase }).__showcase = s;
 }
 
 /** Ends the menu background before another mode takes over the world. */
@@ -131,6 +138,11 @@ function stopShowcase() {
 /** Back in the menu: let the fleet fly again. */
 function menuShown() {
   ui.hidden = false;
+  // The recorded flight bridges the seconds until the live scene is back.
+  void ui
+    .querySelector<HTMLVideoElement>('.start-video')
+    ?.play()
+    .catch(() => {});
   setTimeout(() => void startShowcase(), 400);
 }
 

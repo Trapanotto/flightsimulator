@@ -19,10 +19,30 @@ export class StartScreen {
     this.render();
   }
 
+  /**
+   * Recorded flight behind the menu: plays until the live 3D showcase is up, and on devices
+   * that do not run it. Not with reduced motion or data saving (the still image stays).
+   */
+  private startVideo() {
+    const video = this.root.querySelector<HTMLVideoElement>('.start-video')!;
+    const conn = (navigator as { connection?: { saveData?: boolean } }).connection;
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches || conn?.saveData) {
+      video.remove();
+      return;
+    }
+    video.src = `${import.meta.env.BASE_URL}assets/ui/showcase.mp4`;
+    video.addEventListener('playing', () => video.classList.add('on'), { once: true });
+    // Re-rendered (language switch) while the live scene runs: nothing to bridge.
+    if (this.root.classList.contains('live')) return;
+    void video.play().catch(() => video.remove());
+  }
+
   private render(): void {
     const tr = (key: MessageKey) => t(this.lang, key);
     this.root.innerHTML = `
       <main class="start" style="--hero: url('${import.meta.env.BASE_URL}assets/ui/hero.jpg')">
+        <video class="start-video" muted loop playsinline disablepictureinpicture
+          aria-hidden="true" tabindex="-1" preload="none"></video>
         <header class="brand">
           <p class="brand-kicker">Trapanotto</p>
           <h1 class="brand-title">Flight Simulator</h1>
@@ -76,6 +96,8 @@ export class StartScreen {
     this.root
       .querySelector('[data-action="hangar"]')!
       .addEventListener('click', () => this.actions.hangar(this.lang));
+
+    this.startVideo();
 
     const dialog = this.root.querySelector<HTMLDialogElement>('dialog.credits')!;
     this.root

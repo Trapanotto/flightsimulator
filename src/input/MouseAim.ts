@@ -1,6 +1,8 @@
 import { Quaternion, Vector3 } from 'three';
 
 const SENS = 0.0022; // rad per pixel
+/** Steepest bank the mouse flight asks for, rad. */
+const MAX_BANK = 0.75;
 const tmpQ = new Quaternion();
 const tmp = new Vector3();
 
@@ -54,22 +56,28 @@ export class MouseAim {
     this.pendingX = this.pendingY = 0;
   }
 
-  /** Stick commands that turn an aircraft with the given body axes towards the aim. */
-  steer(forward: Vector3, up: Vector3, right: Vector3) {
+  /**
+   * Stick commands that turn an aircraft with the given body axes towards the aim, like a
+   * pilot: bank in proportion to the heading error (wings level once the nose points at the
+   * aim), pull the nose onto the aim in the aircraft's own frame. The rudder is left to the
+   * yaw damper, which keeps the turn coordinated.
+   */
+  steer(forward: Vector3, up: Vector3, right: Vector3, worldUp: Vector3) {
     const d = this.direction;
-    const tx = d.dot(right);
+    const clamp = (v: number, m = 1) => Math.max(-m, Math.min(m, v));
+    // Heading error in the horizontal plane (positive = aim to the right).
+    const fx = d.dot(right) - right.dot(worldUp) * d.dot(worldUp);
+    const fz = d.dot(forward) - forward.dot(worldUp) * d.dot(worldUp);
+    const headingErr = Math.atan2(fx, fz);
+    const bank = Math.asin(clamp(-right.dot(worldUp)));
+    const wantBank = clamp(headingErr * 2, MAX_BANK);
+    // Pitch error in the aircraft's frame: in a bank, pulling turns the nose onto the aim.
     const ty = d.dot(up);
-    const tz = d.dot(forward);
-    const yawErr = Math.atan2(tx, tz);
-    const pitchErr = Math.atan2(ty, Math.hypot(tz, tx));
-    const off = Math.acos(Math.max(-1, Math.min(1, tz)));
-    // Bank towards the aim when it is off to the side; near the nose let the wings level out.
-    const w = Math.min(1, Math.max(0, (off - 0.03) / 0.15));
-    const clamp = (v: number) => Math.max(-1, Math.min(1, v));
+    const pitchErr = Math.atan2(ty, Math.hypot(d.dot(forward), d.dot(right)));
     return {
       pitch: clamp(pitchErr * 4),
-      roll: clamp(yawErr * 2.2 * w),
-      yaw: clamp(yawErr * 3),
+      roll: clamp((wantBank - bank) * 2.5),
+      yaw: 0,
     };
   }
 

@@ -56,6 +56,26 @@ body {
 .start::after {
   background: radial-gradient(ellipse at 50% 40%, rgba(10, 14, 24, 0.15), rgba(10, 14, 24, 0.7));
 }
+/* Recorded flight over the still image until the live scene takes over. Framed like the
+   live view: the aircraft sits right of the menu. */
+.start-video {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 64% 50%;
+  opacity: 0;
+  transition: opacity 1.2s ease;
+}
+.start-video.on {
+  opacity: 1;
+}
+#ui.live .start-video {
+  opacity: 0;
+  transition-duration: 2.5s;
+}
 /* Live start screen: the 3D showcase runs behind the menu; the still fades out, camera cuts
    get a short dip to black. */
 #ui.live .start::before {

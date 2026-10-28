@@ -5,95 +5,19 @@ import type { Quality } from '../core/settings';
 import { quaternionFromBasis } from '../physics/FlightModel';
 import { makeSkyEnvironment, softenReflections } from '../render/skyEnvironment';
 import type { World } from '../world/World';
+import { bankAt, LAT0, LON0, MX, MY, pointAt, ROUTE } from './showcasePath';
 
 /**
- * Animated start screen: the fleet flies a loop through the Bernese Oberland (up the
- * Lauterbrunnen valley, over Kleine Scheidegg past the Eiger north face to Grindelwald and back
- * down the Lütschine) while a cinematic camera cuts between shots. The route was checked
- * against the swisstopo elevation model: at least 130 m above the terrain everywhere.
+ * Animated start screen: the fleet flies a smoothed loop through the Bernese Oberland
+ * (showcasePath.ts) while a cinematic camera cuts between shots. The camera follows with a
+ * spring so nothing shakes; attached shots (wing) stay rigid with the aircraft.
  */
 
-/** lon, lat, altitude (m above sea level) */
-const ROUTE: Array<[number, number, number]> = [
-  [7.903, 46.628, 1350],
-  [7.905, 46.6, 1400],
-  [7.93, 46.565, 2300],
-  [7.965, 46.585, 2450],
-  [8.0, 46.598, 2350],
-  [8.04, 46.622, 1650],
-  [7.99, 46.632, 1450],
-  [7.94, 46.64, 1300],
-];
-const LON0 = 7.96;
-const LAT0 = 46.61;
-const MX = Math.cos((LAT0 * Math.PI) / 180) * 111_320;
-const MY = 110_540;
 const SHOT_SECONDS = 7;
 const SHOTS_PER_AIRCRAFT = 3;
-const G = 9.81;
 
 type Shot = 'chase' | 'side' | 'flyby' | 'orbit' | 'wing' | 'wide';
 const SHOTS: Shot[] = ['chase', 'side', 'flyby', 'wide', 'orbit', 'wing'];
-
-interface Sample {
-  /** Local metres east, north, altitude. */
-  p: Vector3;
-  /** Distance from the start, m. */
-  d: number;
-}
-
-/** Closed Catmull-Rom spline through the route, resampled by arc length. */
-function buildPath(): { samples: Sample[]; length: number } {
-  const pts = ROUTE.map(([lon, lat, h]) => new Vector3((lon - LON0) * MX, (lat - LAT0) * MY, h));
-  const n = pts.length;
-  const raw: Vector3[] = [];
-  const per = 200;
-  for (let i = 0; i < n; i++) {
-    const p0 = pts[(i - 1 + n) % n]!;
-    const p1 = pts[i]!;
-    const p2 = pts[(i + 1) % n]!;
-    const p3 = pts[(i + 2) % n]!;
-    for (let k = 0; k < per; k++) {
-      const t = k / per;
-      const t2 = t * t;
-      const t3 = t2 * t;
-      raw.push(
-        new Vector3()
-          .addScaledVector(p0, -0.5 * t3 + t2 - 0.5 * t)
-          .addScaledVector(p1, 1.5 * t3 - 2.5 * t2 + 1)
-          .addScaledVector(p2, -1.5 * t3 + 2 * t2 + 0.5 * t)
-          .addScaledVector(p3, 0.5 * t3 - 0.5 * t2),
-      );
-    }
-  }
-  const samples: Sample[] = [];
-  let d = 0;
-  for (let i = 0; i < raw.length; i++) {
-    if (i > 0) d += raw[i]!.distanceTo(raw[i - 1]!);
-    samples.push({ p: raw[i]!, d });
-  }
-  return { samples, length: d + raw[0]!.distanceTo(raw[raw.length - 1]!) };
-}
-
-const PATH = buildPath();
-
-/** Local position at distance s along the loop (wraps around). */
-function pointAt(s: number, out: Vector3): Vector3 {
-  const L = PATH.length;
-  const d = ((s % L) + L) % L;
-  const S = PATH.samples;
-  let lo = 0;
-  let hi = S.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if (S[mid]!.d <= d) lo = mid;
-    else hi = mid - 1;
-  }
-  const a = S[lo]!;
-  const b = S[(lo + 1) % S.length]!;
-  const seg = (b.d > a.d ? b.d : L) - a.d;
-  return out.copy(a.p).lerp(b.p, seg > 0 ? (d - a.d) / seg : 0);
-}
 
 const tmp = new Vector3();
 const tmp2 = new Vector3();
@@ -124,7 +48,13 @@ export class Showcase {
   private shotsWithAircraft = 0;
   private ready = false;
   private readonly fixedCam = new Vector3();
-  private readonly camSmooth = new Vector3();
+  /** Smoothed camera and look-target offsets from the aircraft; snap after a cut. */
+  private readonly camOff = new Vector3();
+  private readonly lookOff = new Vector3();
+  private snap = true;
+  /** Smoothed lift that keeps the camera above the terrain. */
+  private lift = 0;
+  private bank = 0;
   private orbitAngle = 0;
   private readonly basis = { up: new Vector3(), fwd: new Vector3(), right: new Vector3() };
   private readonly next: { type?: AircraftType; promise?: Promise<Aircraft> } = {};
@@ -137,6 +67,7 @@ export class Showcase {
       AIRCRAFT.findIndex((a) => a.id === 'pc12'),
     );
     this.s = 0;
+    this.bank = bankAt(0, speedOf(this.type));
     this.world.moveCameraTo(ROUTE[0]![0], ROUTE[0]![1], ROUTE[0]![2] + 60);
     void this.show(AIRCRAFT[this.typeIndex]!);
   }
@@ -179,7 +110,6 @@ export class Showcase {
 
   rebase(delta: Vector3) {
     this.fixedCam.sub(delta);
-    this.camSmooth.sub(delta);
   }
 
   dispose() {
@@ -203,29 +133,20 @@ export class Showcase {
     const v = speedOf(type);
     this.s += v * dt;
 
-    // Pose: along the path tangent, banked for the turn (coordinated: tan(bank) = v·ω/g).
+    // Pose: along the path tangent, banked for the turn (coordinated: tan(bank) = v²·κ/g),
+    // the bank eased in so a new aircraft or speed never snaps the wings.
     const pos = this.renderAt(this.s, this.anchor);
     const ahead = this.renderAt(this.s + v * 0.5, tmp2.clone());
     const behind = this.renderAt(this.s - v * 0.5, new Vector3());
     const up = this.world.upAt(pos, this.basis.up);
     const fwd = this.basis.fwd.subVectors(ahead, behind).normalize();
-    const flat1 = pos
-      .clone()
-      .sub(behind)
-      .addScaledVector(up, -pos.clone().sub(behind).dot(up))
-      .normalize();
-    const flat2 = ahead
-      .clone()
-      .sub(pos)
-      .addScaledVector(up, -ahead.clone().sub(pos).dot(up))
-      .normalize();
-    const turn = Math.atan2(flat1.clone().cross(flat2).dot(up), flat1.dot(flat2)) / 0.5; // rad/s
-    const bank = Math.max(-0.9, Math.min(0.9, Math.atan((v * turn) / G)));
+    const target = bankAt(this.s, v);
+    this.bank += (target - this.bank) * (1 - Math.exp(-dt / 0.6));
     const left = new Vector3().crossVectors(up, fwd).normalize();
     const upB = new Vector3().crossVectors(fwd, left).normalize();
     const q = quaternionFromBasis(left, upB, fwd);
-    // Turning left (positive turn) banks the left wing down: roll about the nose by -bank.
-    q.multiply(tmpQ.setFromAxisAngle(new Vector3(0, 0, 1), -bank));
+    // Turning left (positive bank) puts the left wing down: roll about the nose by -bank.
+    q.multiply(tmpQ.setFromAxisAngle(new Vector3(0, 0, 1), -this.bank));
     this.basis.right.copy(left).negate();
 
     const a = this.aircraft;
@@ -268,13 +189,14 @@ export class Showcase {
       const ahead = this.renderAt(this.s + v * 3.8 + 50, new Vector3());
       const up = this.world.upAt(p, new Vector3());
       const side = new Vector3().subVectors(ahead, p).cross(up).normalize();
+      // About a second of flight away: a sweeping pan, not a whip.
       this.fixedCam
         .copy(p)
-        .addScaledVector(side, len * 1.6)
-        .addScaledVector(up, len * 0.35);
+        .addScaledVector(side, Math.max(len * 3, v * 1.1))
+        .addScaledVector(up, len * 0.6);
     }
     if (this.shot === 'orbit') this.orbitAngle = Math.random() * Math.PI * 2;
-    this.camSmooth.set(0, 0, 0);
+    this.snap = true;
   }
 
   private placeCamera(
@@ -338,11 +260,30 @@ export class Showcase {
         fov = 50;
         break;
     }
-    // Never inside the terrain.
+    // Follow with a spring on the offsets from the aircraft (the aircraft itself never lags out
+    // of the frame); attached and fixed cameras stay exact.
+    const rigid = this.shot === 'wing';
+    const off = cam.position.clone().sub(pos);
+    const lookOff = look.clone().sub(pos);
+    if (this.snap || rigid) {
+      this.camOff.copy(off);
+      this.lookOff.copy(lookOff);
+      this.snap = false;
+    } else {
+      const k = 1 - Math.exp(-dt / 0.6);
+      if (this.shot === 'flyby') this.camOff.copy(off);
+      else this.camOff.lerp(off, k);
+      this.lookOff.lerp(lookOff, k);
+    }
+    cam.position.copy(pos).add(this.camOff);
+    const lookAt = look.copy(pos).add(this.lookOff);
+    // Never inside the terrain; the lift eases in and out.
     const h = this.world.heightAboveGround(cam.position);
-    if (h !== undefined && h < 12) cam.position.addScaledVector(up, 12 - h);
+    const need = h === undefined ? this.lift : Math.max(0, 12 - h);
+    this.lift += (need - this.lift) * (1 - Math.exp(-dt / 0.3));
+    if (!rigid) cam.position.addScaledVector(up, this.lift);
     cam.up.copy(up);
-    cam.lookAt(look);
+    cam.lookAt(lookAt);
     // On wide screens the menu sits on the left: frame the aircraft in the right part.
     const el = this.world.renderer.domElement;
     const W = el.clientWidth;

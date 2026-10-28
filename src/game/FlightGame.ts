@@ -291,7 +291,10 @@ export class FlightGame {
     this.aim.update(this.fm.worldUp);
     c.aim.active = this.aim.active;
     if (this.aim.active) {
-      Object.assign(c.aim, this.aim.steer(this.fm.forward, this.fm.up, this.fm.right));
+      Object.assign(
+        c.aim,
+        this.aim.steer(this.fm.forward, this.fm.up, this.fm.right, this.fm.worldUp),
+      );
       // Real aircraft overshoot without damping: pitch and roll rate feedback.
       const w = this.fm.omega;
       c.aim.pitch = Math.max(-1, Math.min(1, c.aim.pitch + w.x * 1.2));

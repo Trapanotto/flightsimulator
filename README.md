@@ -7,21 +7,24 @@ Three.js · Geodaten von [geo.admin.ch](https://docs.geo.admin.ch/) (swisstopo) 
 
 ## Stand
 
-| Phase | Inhalt                                                | Status                  |
-| ----- | ----------------------------------------------------- | ----------------------- |
-| 0     | Fundament: Projekt, CI, GitHub Pages, Startbildschirm | ✅                      |
-| 1     | Geo-Grundlagen & erstes Terrain                       | ✅                      |
-| 2     | Streaming-Terrain (LOD, Floating Origin)              | ✅                      |
-| 3     | Flugzeug aus Blender                                  | ✅                      |
-| 4     | Flugmodell, Steuerung, Kameras                        | ✅                      |
-| 5     | Grafik-Politur                                        | ✅                      |
-| 6     | Gebäude, HUD & UI                                     | ✅                      |
-| 7     | Gameplay & Audio                                      | 🏁 Challenges, Audio ✅ |
-| 8     | Release 1.0                                           | ⏳                      |
+| Phase | Inhalt                                                | Status |
+| ----- | ----------------------------------------------------- | ------ |
+| 0     | Fundament: Projekt, CI, GitHub Pages, Startbildschirm | ✅     |
+| 1     | Geo-Grundlagen & erstes Terrain                       | ✅     |
+| 2     | Streaming-Terrain (LOD, Floating Origin)              | ✅     |
+| 3     | Flugzeug aus Blender                                  | ✅     |
+| 4     | Flugmodell, Steuerung, Kameras                        | ✅     |
+| 5     | Grafik-Politur                                        | ✅     |
+| 6     | Gebäude, HUD & UI                                     | ✅     |
+| 7     | Gameplay & Audio                                      | ✅     |
+| 7½    | Flotte, 6-DOF-Flugmodell, animierter Start (v0.9)     | ✅     |
+| 8     | Release 1.0                                           | ⏳     |
 
 Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
 
-![Startbildschirm](public/assets/ui/hero.jpg)
+![Die Flotte über dem Berner Oberland](docs/showcase.webp)
+
+Änderungen pro Version: [CHANGELOG.md](CHANGELOG.md).
 
 ## Was schon geht
 
@@ -152,15 +155,16 @@ Texturen, Vorschaubilder (`build/`) und `public/assets/aircraft/<typ>.glb` – o
 npm run assets -- c172 -- --preview
 ```
 
-Renderbild für Startbildschirm und Link-Vorschau (Hintergrund ist ein Screenshot der eigenen Engine):
+Video, Standbild und Link-Vorschau des Startbildschirms nimmt die eigene Engine auf: Der Flug
+übers Berner Oberland wird Bild für Bild mit festem Zeitschritt gerechnet (ruckelfrei, egal wie
+langsam die Aufnahme ist), jedes Bild wartet aufs Gelände. Braucht ffmpeg und einen laufenden
+Server (`npm run build && npm run preview`):
 
 ```bash
-AFTER=30000 node tools/screenshot.mjs "http://localhost:5180/flightsimulator/" build/hero_bg.png 2000 "document.querySelector('[data-action=preview]').click(); setTimeout(() => document.querySelectorAll('.world-ui').forEach(e => e.style.display='none'), 1500)"
+node tools/capture-showcase.mjs http://localhost:4173/flightsimulator/ 6
 ```
 
-```bash
-blender -b build/c172.blend -P tools/blender/render_hero.py
-```
+Erzeugt `public/assets/ui/showcase.mp4`, `hero.jpg`, `og.jpg` und `docs/showcase.webp`.
 
 ## Entwickeln
 
