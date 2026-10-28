@@ -1,5 +1,6 @@
 import { MeshLambertMaterial, type Texture } from 'three';
 import type { AtmosphereUniforms } from '../render/Atmosphere';
+import { AERIAL_GLSL } from '../render/aerial';
 
 /** Size of one wall bay (one window) and one roof patch in metres. */
 const BAY_W = 3.5;
@@ -81,12 +82,7 @@ export function createBuildingMaterial(atlas: Texture, atmosphere?: AtmosphereUn
         varying float vVariation;
         varying vec2 vVar;
         #if BLD_HAZE
-          uniform vec3 uSunDir;
-          uniform vec3 uHazeColor;
-          uniform vec3 uHazeSunColor;
-          uniform float uHazeDensity;
-          uniform float uHazeHeight;
-          uniform float uCameraElevation;
+          ${AERIAL_GLSL}
         #endif
 
 `,
@@ -125,14 +121,7 @@ ${ATLAS_FN}`,
       .replace(
         '#include <fog_fragment>',
         `#if BLD_HAZE
-        {
-          vec3 toFrag = vWorld - cameraPosition;
-          float dist = length(toFrag);
-          float density = uHazeDensity * exp(-max(uCameraElevation - 400.0, 0.0) / uHazeHeight);
-          float fogAmt = 1.0 - exp(-dist * density);
-          float sunAmt = pow(max(dot(toFrag / max(dist, 1.0), uSunDir), 0.0), 14.0) * 0.8;
-          gl_FragColor.rgb = mix(gl_FragColor.rgb, mix(uHazeColor, uHazeSunColor, sunAmt), fogAmt);
-        }
+          gl_FragColor.rgb = aerial(gl_FragColor.rgb, vWorld, elevationOf(vWorld));
         #endif`,
       );
   };
@@ -158,23 +147,11 @@ export function createTreeMaterial(atmosphere?: AtmosphereUniforms) {
         '#include <common>',
         `#include <common>
         varying vec3 vWorld;
-        uniform vec3 uSunDir;
-        uniform vec3 uHazeColor;
-        uniform vec3 uHazeSunColor;
-        uniform float uHazeDensity;
-        uniform float uHazeHeight;
-        uniform float uCameraElevation;`,
+        ${AERIAL_GLSL}`,
       )
       .replace(
         '#include <fog_fragment>',
-        `{
-          vec3 toFrag = vWorld - cameraPosition;
-          float dist = length(toFrag);
-          float density = uHazeDensity * exp(-max(uCameraElevation - 400.0, 0.0) / uHazeHeight);
-          float fogAmt = 1.0 - exp(-dist * density);
-          float sunAmt = pow(max(dot(toFrag / max(dist, 1.0), uSunDir), 0.0), 14.0) * 0.8;
-          gl_FragColor.rgb = mix(gl_FragColor.rgb, mix(uHazeColor, uHazeSunColor, sunAmt), fogAmt);
-        }`,
+        `gl_FragColor.rgb = aerial(gl_FragColor.rgb, vWorld, elevationOf(vWorld));`,
       );
   };
   return mat;

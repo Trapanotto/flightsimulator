@@ -36,6 +36,13 @@ export interface AtmosphereUniforms {
   uCloudCoverage: { value: number };
   uCloudAltitude: { value: number };
   uCloudShadow: { value: number };
+  /** Local vertical at the camera (render space). */
+  uUp: { value: Vector3 };
+  /** Stratus layer (Hochnebel / ground fog), metres above sea level; density 0 = none. */
+  uFogTop: { value: number };
+  uFogBase: { value: number };
+  uFogDensity: { value: number };
+  uFogColor: { value: Color };
 }
 
 function smoothstep(a: number, b: number, x: number) {
@@ -151,6 +158,11 @@ export class Atmosphere {
       uCloudCoverage: { value: 0.45 },
       uCloudAltitude: { value: 3600 },
       uCloudShadow: { value: 0.45 },
+      uUp: { value: new Vector3(0, 1, 0) },
+      uFogTop: { value: 1100 },
+      uFogBase: { value: 750 },
+      uFogDensity: { value: 0 },
+      uFogColor: { value: new Color(0.95, 0.96, 0.98) },
     };
     this.update();
   }
@@ -176,19 +188,30 @@ export class Atmosphere {
     lerpColor(this.uniforms.uSunColor.value, SUN_COLOR, elevation);
     lerpColor(this.uniforms.uHazeColor.value, HAZE_AWAY, elevation);
     lerpColor(this.uniforms.uHazeSunColor.value, HAZE_SUN, elevation);
+    // Sunlit stratus: white by day, warm at low sun, dim at dusk.
+    this.uniforms.uFogColor.value
+      .setRGB(0.95, 0.96, 0.98)
+      .lerp(this.uniforms.uSunColor.value, 0.15)
+      .multiplyScalar(0.25 + 0.75 * smoothstep(-3, 12, elevation));
     // Low sun: more haze, golden light a little brighter in the image.
     this.uniforms.uHazeDensity.value =
       (1 / 60_000) * (1 + 0.8 * (1 - smoothstep(5, 30, elevation)));
     this.exposure = 0.85 + 0.25 * (1 - smoothstep(4, 25, elevation));
   }
 
+  /** Light intensities for the time of day (before the fog dims them). */
+  sunIntensity = 1.1;
+  hemiIntensity = 1.3;
+
   /** Applies the current state to the scene lights and the sky dome. */
   apply(sun: DirectionalLight, hemi: HemisphereLight, sky: Sky) {
     const e = this.sunElevation;
     const u = this.uniforms;
     sun.color.copy(u.uSunColor.value);
-    sun.intensity = 1.1 * smoothstep(-1.5, 8, e) * (0.75 + 0.25 * smoothstep(10, 40, e));
-    hemi.intensity = 1.3 * (0.3 + 0.7 * smoothstep(-4, 25, e));
+    this.sunIntensity = 1.1 * smoothstep(-1.5, 8, e) * (0.75 + 0.25 * smoothstep(10, 40, e));
+    this.hemiIntensity = 1.3 * (0.3 + 0.7 * smoothstep(-4, 25, e));
+    sun.intensity = this.sunIntensity;
+    hemi.intensity = this.hemiIntensity;
     hemi.color.setRGB(0.78, 0.86, 1.0).lerp(new Color(1.0, 0.78, 0.62), 1 - smoothstep(2, 20, e));
     const s = sky.material.uniforms;
     s.sunPosition!.value.copy(u.uSunDir.value);
@@ -229,12 +252,27 @@ export class Atmosphere {
     return smoothstep(edge - 0.06, edge + 0.14, n);
   }
 
-  /** Per frame: wind time and render-origin offset for stable world-space patterns. */
-  tick(dt: number, originShift: Vector3, cameraElevation: number) {
+  /** 0 above the fog layer, 1 inside or below it (the sun is hidden). */
+  underFog(elevation: number): number {
+    const u = this.uniforms;
+    if (u.uFogDensity.value <= 0) return 0;
+    return smoothstep(u.uFogTop.value + 15, u.uFogTop.value - 90, elevation);
+  }
+
+  /** Per frame: wind time, render-origin offset, camera height and vertical. */
+  tick(dt: number, originShift: Vector3, cameraElevation: number, up: Vector3) {
     const u = this.uniforms;
     u.uTime.value += dt;
     const mod = (v: number) => ((v % NOISE_PERIOD) + NOISE_PERIOD) % NOISE_PERIOD;
     u.uOriginMod.value.set(mod(originShift.x), mod(originShift.z));
     u.uCameraElevation.value = cameraElevation;
+    u.uUp.value.copy(up);
+  }
+
+  /** Dims the lights under the fog (call every frame after tick). */
+  dimLights(sun: DirectionalLight, hemi: HemisphereLight, cameraElevation: number) {
+    const k = this.underFog(cameraElevation);
+    sun.intensity = this.sunIntensity * (1 - 0.8 * k);
+    hemi.intensity = this.hemiIntensity * (1 - 0.3 * k);
   }
 }

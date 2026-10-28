@@ -52,6 +52,8 @@ export function openSettings(lang: Lang, onChange: (s: Settings) => void) {
       { value: 'clear', label: 'weather.clear' },
       { value: 'fair', label: 'weather.fair' },
       { value: 'cloudy', label: 'weather.cloudy' },
+      { value: 'hochnebel', label: 'weather.hochnebel' },
+      { value: 'nebel', label: 'weather.nebel' },
     ])}
     <fieldset>
       <legend>${tr('settings.controls')}</legend>

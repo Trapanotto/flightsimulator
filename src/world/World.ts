@@ -27,12 +27,14 @@ import {
   type QualityLevel,
   type Settings,
   WEATHER_COVERAGE,
+  WEATHER_FOG,
   loadSettings,
   resolveQuality,
   timeSpec,
 } from '../core/settings';
 import { BuildingLayer } from '../buildings/BuildingLayer';
 import { updateRunways } from './runwayMarkings';
+import { FogDome } from '../render/FogDome';
 import { Atmosphere } from '../render/Atmosphere';
 import { CloudLayer } from '../render/CloudLayer';
 import { PostFX } from '../render/PostFX';
@@ -128,6 +130,7 @@ export class World {
   readonly sky = new Sky();
   readonly atmosphere: Atmosphere;
   readonly clouds: CloudLayer;
+  private readonly fogDome: FogDome;
   readonly sun: DirectionalLight;
   readonly hemi: HemisphereLight;
   readonly post: PostFX;
@@ -213,6 +216,8 @@ export class World {
 
     this.clouds = new CloudLayer(this.atmosphere.uniforms, quality.cloudLayers);
     this.scene.add(this.clouds.group);
+    this.fogDome = new FogDome(this.atmosphere.uniforms);
+    this.scene.add(this.fogDome.mesh);
     this.post = new PostFX(this.renderer, this.scene, this.camera);
     this.flare = new SunFlare(document.body);
     this.applySettings(this.settings);
@@ -288,6 +293,15 @@ export class World {
     this.atmosphere.apply(this.sun, this.hemi, this.sky);
     this.renderer.toneMappingExposure = this.atmosphere.exposure;
     this.atmosphere.uniforms.uCloudCoverage.value = WEATHER_COVERAGE[s.weather];
+    const fog = WEATHER_FOG[s.weather];
+    const fu = this.atmosphere.uniforms;
+    fu.uFogDensity.value = fog ? fog.density : 0;
+    if (fog) {
+      // ?fogtop=1300 moves the top of the fog (testing, sharing a look).
+      const top = Number(new URLSearchParams(location.search).get('fogtop'));
+      fu.uFogTop.value = top > 0 ? top : fog.top;
+      fu.uFogBase.value = Math.min(fog.base, fu.uFogTop.value - 150);
+    }
     this.clouds.setLayers(quality.cloudLayers);
     this.post.configure(quality);
     this.flare.enabled = quality.flare;
@@ -481,7 +495,10 @@ export class World {
   /** Clouds, shadow camera, sun glare: everything that follows the camera or the aircraft. */
   private updateEnvironment(dt: number) {
     const camGeo = this.toGeo(this.camera.position);
-    this.atmosphere.tick(dt, this.shift, camGeo[2]);
+    const camUp = this.upAt(this.camera.position, new Vector3());
+    this.atmosphere.tick(dt, this.shift, camGeo[2], camUp);
+    this.atmosphere.dimLights(this.sun, this.hemi, camGeo[2]);
+    this.fogDome.update(this.camera.position);
     const u = this.atmosphere.uniforms;
     const sunDir = u.uSunDir.value;
 
@@ -516,6 +533,8 @@ export class World {
       if (h !== undefined && h < 0) return 1;
     }
     const u = this.atmosphere.uniforms;
+    // Inside or below the fog the sun is only a bright patch, no glare.
+    if (this.atmosphere.underFog(cameraElevation) > 0.5) return 1;
     const toCloud = (u.uCloudAltitude.value - cameraElevation) / Math.max(sunDir.y, 0.05);
     if (toCloud > 0 && u.uCloudCoverage.value > 0) {
       p.copy(this.camera.position).addScaledVector(sunDir, toCloud);

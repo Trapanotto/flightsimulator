@@ -67,6 +67,8 @@
   "weather.clear": "Clear",
   "weather.fair": "Fair",
   "weather.cloudy": "Cloudy",
+  "weather.hochnebel": "Sea of fog",
+  "weather.nebel": "Ground fog",
   "search.placeholder": "Search a place …",
   "hud.near": "near",
   "sound.on": "Sound on",

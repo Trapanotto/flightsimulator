@@ -1,5 +1,6 @@
 import { MeshLambertMaterial, type Texture } from 'three';
 import { NOISE_PERIOD, type AtmosphereUniforms } from '../render/Atmosphere';
+import { AERIAL_GLSL, NOISE_DECLARATIONS } from '../render/aerial';
 import { RUNWAY_DECLARATIONS, RUNWAY_FRAGMENT, runwayUniforms } from '../world/runwayMarkings';
 
 /** Terrain albedo boost: orthophotos are darker than the PBR lighting expects. */
@@ -15,15 +16,11 @@ export interface TerrainLook {
 
 /** GLSL shared by terrain and clouds: cloud coverage at a base-frame position. */
 export const CLOUD_GLSL = /* glsl */ `
-  uniform sampler2D uNoise;
-  uniform vec2 uOriginMod;
+  ${NOISE_DECLARATIONS}
   uniform float uTime;
   uniform float uCloudCoverage;
   uniform float uCloudAltitude;
   const float NOISE_PERIOD = ${NOISE_PERIOD.toFixed(1)};
-
-  // Base-frame xz (stable across floating-origin moves) for a render-space position.
-  vec2 basePos(vec3 p) { return p.xz + uOriginMod; }
 
   // 0 = clear sky, 1 = solid cloud. Two scales of the noise texture, drifting with the wind.
   float cloudDensity(vec2 p) {
@@ -36,13 +33,7 @@ export const CLOUD_GLSL = /* glsl */ `
 `;
 
 const DECLARATIONS = /* glsl */ `
-  uniform vec3 uSunDir;
-  uniform vec3 uSunColor;
-  uniform vec3 uHazeColor;
-  uniform vec3 uHazeSunColor;
-  uniform float uHazeDensity;
-  uniform float uHazeHeight;
-  uniform float uCameraElevation;
+  ${AERIAL_GLSL}
   uniform float uCloudShadow;
   varying vec3 vWorldPos;
   varying float vElevation;
@@ -208,16 +199,7 @@ export function createTerrainMaterial(
       )
       .replace(
         '#include <fog_fragment>',
-        `{
-          // Aerial perspective: haze thins out with altitude and glows towards the sun.
-          vec3 toFrag = vWorldPos - cameraPosition;
-          float dist = length(toFrag);
-          float hAvg = 0.5 * (uCameraElevation + vElevation);
-          float density = uHazeDensity * exp(-max(hAvg - 400.0, 0.0) / uHazeHeight);
-          float fogAmt = 1.0 - exp(-dist * density);
-          float sunAmt = pow(max(dot(toFrag / max(dist, 1.0), uSunDir), 0.0), 14.0) * 0.8;
-          gl_FragColor.rgb = mix(gl_FragColor.rgb, mix(uHazeColor, uHazeSunColor, sunAmt), fogAmt);
-        }`,
+        `gl_FragColor.rgb = aerial(gl_FragColor.rgb, vWorldPos, vElevation);`,
       );
   };
   return mat;

@@ -67,6 +67,8 @@
   "weather.clear": "Klar",
   "weather.fair": "Heiter",
   "weather.cloudy": "Bewölkt",
+  "weather.hochnebel": "Hochnebel",
+  "weather.nebel": "Bodennebel",
   "search.placeholder": "Ort suchen …",
   "hud.near": "bei",
   "sound.on": "Ton an",

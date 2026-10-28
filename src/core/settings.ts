@@ -104,8 +104,27 @@ export const PRESETS: Record<QualityLevel, Quality> = {
 };
 
 export type TimeOfDay = 'real' | 'morning' | 'noon' | 'golden';
-export type Weather = 'clear' | 'fair' | 'cloudy';
-export const WEATHER_COVERAGE: Record<Weather, number> = { clear: 0, fair: 0.38, cloudy: 0.62 };
+export type Weather = 'clear' | 'fair' | 'cloudy' | 'hochnebel' | 'nebel';
+export const WEATHER_COVERAGE: Record<Weather, number> = {
+  clear: 0,
+  fair: 0.38,
+  cloudy: 0.62,
+  hochnebel: 0.04,
+  nebel: 0.18,
+};
+
+/**
+ * Stratus layer of the weather (metres above sea level, extinction per metre), or null.
+ * Hochnebel: the autumn/winter sea of fog over the Mittelland, the Alps above it in sunshine.
+ * Nebel: ground fog in the lowlands up to ~640 m.
+ */
+export const WEATHER_FOG: Record<Weather, { top: number; base: number; density: number } | null> = {
+  clear: null,
+  fair: null,
+  cloudy: null,
+  hochnebel: { top: 1100, base: 750, density: 1 / 55 },
+  nebel: { top: 640, base: -500, density: 1 / 45 },
+};
 
 export interface Settings {
   /** 'auto' picks a level from the GPU. */
