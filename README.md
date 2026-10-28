@@ -186,5 +186,6 @@ Jeder Push auf `main` wird per GitHub Actions gebaut, getestet und auf GitHub Pa
 ## Credits & Lizenz
 
 - Geodaten: © swisstopo (Bundesamt für Landestopografie), gestreamt über geo.admin.ch. Die Daten sind nicht Teil dieses Repos.
+- Flugplätze, Pisten, Rollwege und Vorfelder: © [OpenStreetMap](https://www.openstreetmap.org/copyright)-Mitwirkende, ODbL 1.0 (`src/game/aerodromes.generated.ts`, `public/assets/airports/aeroways.json`; neu erzeugen mit `node tools/fetch-aeroways.mjs`).
 - Code: MIT, siehe [LICENSE](LICENSE). 3D-Modelle, Texturen und Renderbilder: CC BY 4.0.
 - Schrift im Flugzeug-Schriftzug: Liberation Sans Bold (SIL Open Font License).

@@ -6,7 +6,8 @@ import {
   Vector3,
   Vector4,
 } from 'three';
-import { RUNWAYS, type Runway, distanceM } from '../game/airports';
+import { type Runway, distanceM } from '../game/airports';
+import { ALL_RUNWAYS } from '../game/aerodromes.generated';
 
 /**
  * Runways painted into the terrain shader: asphalt with fine grain and tyre marks, and the
@@ -98,14 +99,32 @@ interface GeoWorld {
 
 const up = new Vector3();
 
+/** The `max` runways nearest to lon/lat (midpoint distance), nearest first. */
+export function nearestRunways(
+  lon: number,
+  lat: number,
+  runways: Runway[] = ALL_RUNWAYS,
+  max = MAX_RUNWAYS,
+): Runway[] {
+  const kx = Math.cos((lat * Math.PI) / 180);
+  const d = (r: Runway) =>
+    Math.hypot(((r.from.lon + r.to.lon) / 2 - lon) * kx, (r.from.lat + r.to.lat) / 2 - lat);
+  return runways
+    .map((r) => ({ r, d: d(r) }))
+    .sort((a, b) => a.d - b.d)
+    .slice(0, max)
+    .map((x) => x.r);
+}
+
 /**
- * Places the runways in render coordinates (call every frame: the floating origin moves).
- * Cheap: two coordinate conversions per runway.
+ * Places the runways nearest to the camera in render coordinates (call every frame: the
+ * floating origin moves). Cheap: two coordinate conversions per runway.
  */
-export function updateRunways(world: GeoWorld, runways: Runway[] = RUNWAYS) {
+export function updateRunways(world: GeoWorld, lon: number, lat: number) {
   const u = runwayUniforms;
   u.uRwyDigitMap.value ??= makeDigitMap();
-  const n = Math.min(runways.length, MAX_RUNWAYS);
+  const runways = nearestRunways(lon, lat);
+  const n = runways.length;
   u.uRwyCount.value = n;
   for (let i = 0; i < n; i++) {
     const r = runways[i]!;

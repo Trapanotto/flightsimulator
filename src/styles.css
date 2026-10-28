@@ -1181,6 +1181,19 @@ body {
 .fmenu-panel[hidden] {
   display: none;
 }
+.fmenu-select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+  font: 500 14px/1.2 var(--font-body);
+}
+.fmenu-select option {
+  background: #14203a;
+  color: var(--ink);
+}
 .fmenu-label {
   margin: 6px 0 0;
   font: 600 12px/1 var(--font-display);

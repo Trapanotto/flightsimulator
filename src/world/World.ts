@@ -421,7 +421,7 @@ export class World {
     else if (this.route) this.flyRoute(dt, dtMs);
     else this.fly.update(dt, this.basis, this.geo[2], this.ground);
     this.rebaseIfNeeded();
-    updateRunways(this);
+    updateRunways(this, this.geo[0], this.geo[1]);
     this.sky.position.copy(this.camera.position);
     this.updateEnvironment(dt);
     this.buildings?.update(performance.now());

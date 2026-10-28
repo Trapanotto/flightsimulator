@@ -2,6 +2,8 @@ import { Vector3 } from 'three';
 import { ATTRIBUTION } from '../core/config';
 import { type Lang, type MessageKey, t } from '../i18n';
 import { RUNWAYS } from '../game/airports';
+import { ALL_RUNWAYS } from '../game/aerodromes.generated';
+import { oppositeIdent } from '../world/runwayMarkings';
 import type { FlightGame, StartPlace } from '../game/FlightGame';
 import { PLACES } from '../world/places';
 import type { ChallengeEvent } from '../game/ChallengeRun';
@@ -33,6 +35,17 @@ export const FLIGHT_PLACES: Array<{ label: string; place: StartPlace }> = [
     };
   }),
 ];
+
+/** Every paved runway in both directions, for the "all airports" list. */
+export const AIRPORT_STARTS: Array<{ label: string; place: StartPlace }> = ALL_RUNWAYS.flatMap(
+  (r) => {
+    const back = { ...r, ident: oppositeIdent(r.ident), from: r.to, to: r.from };
+    return [r, back].map((x) => ({
+      label: `${x.airport} ${x.ident}`,
+      place: { kind: 'runway', runway: x } as StartPlace,
+    }));
+  },
+).sort((a, b) => a.label.localeCompare(b.label, 'de', { numeric: true }));
 
 const tmp = new Vector3();
 
@@ -73,6 +86,11 @@ export class FlightView {
           <div class="places" role="group" aria-label="${tr('view.places')}">
             ${FLIGHT_PLACES.map((p, i) => `<button class="chip" data-place="${i}">${p.label}</button>`).join('')}
           </div>
+          <label class="fmenu-label" for="fmenu-airports">${tr('flight.allAirports')}</label>
+          <select class="fmenu-select" id="fmenu-airports">
+            <option value="">–</option>
+            ${AIRPORT_STARTS.map((p, i) => `<option value="${i}">${p.label}</option>`).join('')}
+          </select>
           <div class="fmenu-search"></div>
           <p class="fmenu-label">${tr('flight.controls')}</p>
           <p class="fmenu-help">${tr('flight.help')}</p>
@@ -141,6 +159,15 @@ export class FlightView {
         this.toggleMenu(false);
       }),
     );
+    const airports = this.q<HTMLSelectElement>('#fmenu-airports');
+    airports.addEventListener('change', () => {
+      const pick = AIRPORT_STARTS[Number(airports.value)];
+      if (!pick || airports.value === '') return;
+      game.start(pick.place);
+      airports.value = '';
+      airports.blur();
+      this.toggleMenu(false);
+    });
     this.el.querySelectorAll<HTMLButtonElement>('[data-aircraft]').forEach((b) =>
       b.addEventListener('click', () => {
         const type = aircraftById(b.dataset.aircraft);

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { RUNWAYS, distanceM } from '../src/game/airports';
+import { AERODROMES, ALL_RUNWAYS } from '../src/game/aerodromes.generated';
 import {
   MAX_RUNWAYS,
   aimingPointDistance,
+  nearestRunways,
   oppositeIdent,
   thresholdStripesPerSide,
 } from '../src/world/runwayMarkings';
@@ -28,8 +30,22 @@ describe('runway markings', () => {
     expect(aimingPointDistance(2500)).toBe(400);
   });
 
-  it('fits every runway into the shader arrays', () => {
-    expect(RUNWAYS.length).toBeLessThanOrEqual(MAX_RUNWAYS);
-    for (const r of RUNWAYS) expect(distanceM(r.from, r.to)).toBeGreaterThan(1000);
+  it('knows the Swiss airports and their runways (OpenStreetMap)', () => {
+    expect(AERODROMES.length).toBeGreaterThan(30);
+    expect(ALL_RUNWAYS.length).toBeGreaterThan(40);
+    const zrh = ALL_RUNWAYS.filter((r) => r.icao === 'LSZH').map((r) => r.ident);
+    expect(zrh.sort()).toEqual(['10', '14', '34']);
+    for (const r of ALL_RUNWAYS) {
+      expect(distanceM(r.from, r.to)).toBeGreaterThan(300);
+      expect(r.widthM).toBeGreaterThanOrEqual(10);
+    }
+    // The curated start runways are among them (same airport).
+    for (const r of RUNWAYS) expect(ALL_RUNWAYS.some((a) => a.icao === r.icao)).toBe(true);
+  });
+
+  it('paints the runways nearest to the camera', () => {
+    const near = nearestRunways(8.55, 47.46);
+    expect(near.length).toBe(MAX_RUNWAYS);
+    expect(near.slice(0, 3).every((r) => r.icao === 'LSZH')).toBe(true);
   });
 });
