@@ -76,6 +76,9 @@ Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
   zu weichen Drehraten statt Vollausschlag: die Nase hebt sich beim Start kontrolliert, nach dem
   Loslassen bleiben Nase und Querlage, wo man sie hingesteuert hat (automatisches Nachtrimmen,
   nie langsamer als 1,2 × Stall).
+- **Pisten** an allen sechs Flugplätzen mit Asphalt und ICAO-Markierungen (Schwellenbalken,
+  Pistennummern, Mittellinie, Zielpunkt, Aufsetzzone), pro Pixel im Gelände-Shader gerechnet –
+  scharf auch aus dem Cockpit.
 - **Fliegen** mit der Flotte von Trapanotto Airlines: Start auf sechs echten Pisten
   (Bern-Belp, Sion, Zürich, Samedan, Lugano, Genf) oder in der Luft über Lauterbrunnen und am Matterhorn.
   Steuerung per Tastatur, Maus («fliege, wohin du schaust»), Gamepad oder Touch; Kameras

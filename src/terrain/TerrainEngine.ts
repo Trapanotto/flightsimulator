@@ -216,7 +216,8 @@ export class TerrainEngine implements TileProvider {
         template: SWISSIMAGE_TEMPLATE,
         bounds: node.bounds,
         // 512 px textures for detail tiles, 256 px for far tiles (a quarter of the memory).
-        zoom: Math.min(19, z + (big ? 2 : 1)),
+        // swissimage goes down to zoom 20 (~10 cm per pixel here).
+        zoom: Math.min(20, z + (big ? 2 : 1)),
         size: big ? 512 : 256,
         water: this.look.water ? WATER_TILE_URL : null,
       },

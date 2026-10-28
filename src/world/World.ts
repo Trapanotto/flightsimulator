@@ -32,6 +32,7 @@ import {
   timeSpec,
 } from '../core/settings';
 import { BuildingLayer } from '../buildings/BuildingLayer';
+import { updateRunways } from './runwayMarkings';
 import { Atmosphere } from '../render/Atmosphere';
 import { CloudLayer } from '../render/CloudLayer';
 import { PostFX } from '../render/PostFX';
@@ -420,6 +421,7 @@ export class World {
     else if (this.route) this.flyRoute(dt, dtMs);
     else this.fly.update(dt, this.basis, this.geo[2], this.ground);
     this.rebaseIfNeeded();
+    updateRunways(this);
     this.sky.position.copy(this.camera.position);
     this.updateEnvironment(dt);
     this.buildings?.update(performance.now());

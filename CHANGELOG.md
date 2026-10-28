@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.9.1 – Scharfe Pisten (2026-10-28)
+
+- **Pisten mit Asphalt und ICAO-Markierungen** an allen sechs Flugplätzen: Schwellenbalken nach
+  Pistenbreite, Pistennummern an beiden Enden (14/32, 07/25, 10/28, 03/21, 01/19, 04/22),
+  Mittellinie, Zielpunkt- und Aufsetzzonenmarken, Randlinien, Gummispuren. Direkt im
+  Gelände-Shader pro Pixel gerechnet – scharf aus jeder Nähe, ohne Flimmern.
+- **Schärferes Luftbild** nahe am Flugzeug: Qualität «hoch» lädt Gelände bis Zoom 17, «ultra»
+  bis 18; swissimage bis zur feinsten Stufe (Zoom 20, ~10 cm pro Pixel).
+- Minikarte zeichnet nicht mehr, wenn sie ausgeblendet ist.
+
 ## v0.9.0 – Flotte & Flugmodell (2026-10-28)
 
 ### Neu

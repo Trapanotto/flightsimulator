@@ -68,7 +68,7 @@ export const PRESETS: Record<QualityLevel, Quality> = {
   high: {
     maxPixelRatio: 2,
     tau: 4.5,
-    maxZoom: 16,
+    maxZoom: 17,
     maxTiles: 560,
     terrainDetail: true,
     cloudLayers: 3,
@@ -86,7 +86,7 @@ export const PRESETS: Record<QualityLevel, Quality> = {
   ultra: {
     maxPixelRatio: 2,
     tau: 3.5,
-    maxZoom: 17,
+    maxZoom: 18,
     maxTiles: 720,
     terrainDetail: true,
     cloudLayers: 4,

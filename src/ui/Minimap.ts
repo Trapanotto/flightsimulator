@@ -76,6 +76,8 @@ export class Minimap {
     markers: MapMarker[] = [],
   ) {
     const size = this.el.clientWidth;
+    // Hidden (display: none): nothing to draw.
+    if (size < 40) return;
     const dpr = Math.min(window.devicePixelRatio, 2);
     if (this.canvas.width !== Math.round(size * dpr)) {
       this.canvas.width = this.canvas.height = Math.round(size * dpr);

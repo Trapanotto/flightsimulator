@@ -1,5 +1,6 @@
 import { MeshLambertMaterial, type Texture } from 'three';
 import { NOISE_PERIOD, type AtmosphereUniforms } from '../render/Atmosphere';
+import { RUNWAY_DECLARATIONS, RUNWAY_FRAGMENT, runwayUniforms } from '../world/runwayMarkings';
 
 /** Terrain albedo boost: orthophotos are darker than the PBR lighting expects. */
 export const TERRAIN_GAIN = 1.6;
@@ -75,7 +76,7 @@ export function createTerrainMaterial(
   mat.customProgramCacheKey = () =>
     `terrain-${look.detail ? 1 : 0}${look.cloudShadows ? 1 : 0}${look.water ? 1 : 0}`;
   mat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, atmosphere);
+    Object.assign(shader.uniforms, atmosphere, runwayUniforms);
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -91,7 +92,7 @@ export function createTerrainMaterial(
         vElevation = elevation;`,
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${DECLARATIONS}`)
+      .replace('#include <common>', `#include <common>\n${DECLARATIONS}\n${RUNWAY_DECLARATIONS}`)
       .replace(
         '#include <map_fragment>',
         `#include <map_fragment>
@@ -112,6 +113,8 @@ export function createTerrainMaterial(
             float n = texture2D(uNoise, p / 190.0).r * 0.6 + texture2D(uNoise, p / 41.0).r * 0.4;
             c *= mix(1.0, 0.86 + 0.28 * n, (1.0 - smoothstep(500.0, 2600.0, dist)) * (1.0 - waterMask));
           #endif
+          // Runways: asphalt and markings, sharp at any distance.
+          ${RUNWAY_FRAGMENT}
           // Snow: bright surfaces high up get brighter and bluish white.
           float snow = smoothstep(2350.0, 2950.0, vElevation) * smoothstep(0.32 * ${TERRAIN_GAIN.toFixed(1)}, 0.62 * ${TERRAIN_GAIN.toFixed(1)}, lum);
           c = mix(c, vec3(0.93, 0.96, 1.0) * max(lum * 1.08, 0.78 * ${TERRAIN_GAIN.toFixed(1)}), snow * 0.65 * (1.0 - waterMask));
