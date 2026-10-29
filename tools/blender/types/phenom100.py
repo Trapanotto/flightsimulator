@@ -9,6 +9,7 @@ Blender frame: nose at -Y, up +Z, origin = 1.30 m above the ground.
 import numpy as np
 from mathutils import Vector
 
+from ac import cockpit as ck
 from ac import geometry as g
 from ac import texturing as tx
 from ac.texturing import DARK, NAVY, RED, WHITE, WINDOW
@@ -18,7 +19,8 @@ SIZE = 12.8
 GROUND_Z = -1.30
 TEXTURE_SIZE = 2048
 REG = "HB-TEP"
-PREVIEW_VIEWS = {"eye": ((0.35, -3.10, 0.72), (0.35, -12.0, 0.2), 18)}
+PREVIEW_VIEWS = {"eye": ((0.35, -3.10, 0.72), (0.35, -12.0, 0.2), 18),
+                 "panel": ((0.33, -2.92, 0.80), (0.05, -3.82, -0.10), 14)}
 
 FUSE = g.Fuselage(
     nose_y=-6.30, tail_y=6.10, seg=48, stations=96,
@@ -63,16 +65,34 @@ def window(c):
     return False
 
 
+# Embraer Prodigy (Garmin G1000): two PFDs and a central MFD, autopilot controller on the
+# glareshield, two thrust levers and the keypad on the pedestal.
+COCKPIT = {
+    "floor": -0.36,
+    "panel": dict(y=-3.82, z=0.14, w=1.25, h=0.36, tilt=12),
+    "displays": [("PFD", 0.40, 0.02, 0.30, 0.22, "g1000"), ("MFD", 0.0, 0.02, 0.30, 0.22, "g1000"),
+                 ("PFD", -0.40, 0.02, 0.30, 0.22, "g1000")],
+    "switches": [(0.55, -0.145, 6, 0.04, "toggle"), (-0.35, -0.145, 6, 0.04, "toggle")],
+    "glare": dict(depth=0.32, h=0.07, fcu=(0.46, 0.035)),
+    "pedestal": dict(y1=-3.20, w=0.28, z_front=0.0, z_rear=-0.10, lever_len=0.10,
+                     levers=[(0.035, "airliner", None), (-0.035, "airliner", None)],
+                     display=(0.15, 0.07)),
+    "controls": ("yoke", [(0.35, -3.50, 0.09, "L"), (-0.35, -3.50, 0.09, "R")]),
+    "seats": [(0.35, -3.25, "ga"), (-0.35, -3.25, "ga")],
+    "seat_mat": "ck_leather",
+    "pedals": [(0.35, -3.66), (-0.35, -3.66)],
+}
+
+
 def build(col, m):
     parts = {}
     skin, glass = FUSE.build(col, m["airframe"], m["glass"], window)
     parts["Fuselage"], parts["Glass"] = skin, glass
     parts["Cabin"] = FUSE.interior(
         col, m["interior"], 0.13, 0.30, -0.36,
-        seats=[(0.35, -3.25, 0.0), (-0.35, -3.25, 0.0)],
-        panel=(-3.82, -0.02, 1.25, 0.36), window=window, screen_mat=m["screen"],
-        yokes=[(0.35, -3.50, -0.05), (-0.35, -3.50, -0.05)], deck=(-4.9, -3.80, 0.19),
+        window=window, deck=(-4.9, -3.80, 0.19),
     )
+    parts.update(ck.build(col, m, FUSE, COCKPIT))
     parts.update(g.build_surface(col, m["airframe"], WING, "Wing",
                                  controls=[("Flap", 0.14, 0.62), ("Aileron", 0.66, 0.95)],
                                  hinge_xc=0.74, breaks=(0.16,)))
@@ -122,8 +142,7 @@ def build_details(col, m, parts):
 
 
 def materials(principled, srgb):
-    return dict(screen=principled("Screen", srgb(0.04, 0.07, 0.14), 0.2,
-                                  emission=(0.10, 0.22, 0.45), strength=0.6))
+    return ck.materials(principled, srgb)
 
 
 ATLAS = ["Fuselage", "Wing_L", "Wing_R", "Flap_L", "Flap_R", "Aileron_L", "Aileron_R", "HStab",

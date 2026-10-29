@@ -10,6 +10,7 @@ Blender frame: nose at -Y, up +Z, origin = main-deck fuselage centre, 5.42 m abo
 import numpy as np
 from mathutils import Vector
 
+from ac import cockpit as ck
 from ac import geometry as g
 from ac import texturing as tx
 from ac.texturing import DARK, NAVY, RED, WHITE, WINDOW
@@ -19,7 +20,8 @@ SIZE = 70.0
 GROUND_Z = -5.42
 TEXTURE_SIZE = 2048
 REG = "HB-JTB"
-PREVIEW_VIEWS = {"eye": ((0.55, -31.9, 4.2), (0.55, -80.0, 2.0), 20)}
+PREVIEW_VIEWS = {"eye": ((0.55, -31.9, 4.2), (0.55, -80.0, 2.0), 20),
+                 "panel": ((0.55, -31.65, 4.30), (0.1, -32.55, 3.25), 14)}
 
 FUSE = g.Fuselage(
     nose_y=-35.30, tail_y=35.30, seg=64, stations=150,
@@ -70,16 +72,38 @@ def engine_front(b):
     return x, le - 4.2
 
 
+# Boeing 747-400: PFD and ND per pilot, upper and lower EICAS in the middle, MCP on the
+# glareshield, control columns from the floor, four thrust levers and the CDU on the pedestal,
+# overhead panel.
+COCKPIT = {
+    "floor": 2.85,
+    "panel": dict(y=-32.55, z=3.62, w=2.0, h=0.46, tilt=10),
+    "displays": [("PFD", 0.78, 0.06, 0.20, 0.20, "plain"), ("ND", 0.54, 0.06, 0.20, 0.20, "plain"),
+                 ("EICAS", 0.0, 0.11, 0.20, 0.20, "plain"), ("SD", 0.0, -0.115, 0.20, 0.20, "plain"),
+                 ("ND", -0.54, 0.06, 0.20, 0.20, "plain"), ("PFD", -0.78, 0.06, 0.20, 0.20, "plain")],
+    "switches": [(0.90, -0.16, 6, 0.045, "knob"), (-0.68, -0.16, 6, 0.045, "knob"),
+                 (0.32, -0.18, 4, 0.05, "annunciator"), (-0.17, -0.18, 4, 0.05, "annunciator")],
+    "glare": dict(depth=0.32, h=0.085, fcu=(1.10, 0.05)),
+    "pedestal": dict(y1=-31.4, w=0.55, z_front=3.48, z_rear=3.40, lever_len=0.16,
+                     levers=[(0.09, "airliner", None), (0.03, "airliner", None),
+                             (-0.03, "airliner", None), (-0.09, "airliner", None)],
+                     display=(0.14, 0.11)),
+    "overhead": dict(y0=-31.85, y1=-30.9, w=1.0, drop=0.06),
+    "controls": ("column", [(0.55, -32.18, 3.76, "L"), (-0.55, -32.18, 3.76, "R")]),
+    "seats": [(0.60, -31.6, "airliner"), (-0.60, -31.6, "airliner")],
+    "pedals": [(0.55, -32.32), (-0.55, -32.32)],
+}
+
+
 def build(col, m):
     parts = {}
     skin, glass = FUSE.build(col, m["airframe"], m["glass"], window)
     parts["Fuselage"], parts["Glass"] = skin, glass
     parts["Cabin"] = FUSE.interior(
         col, m["interior"], 0.030, 0.075, 2.85,
-        seats=[(0.60, -31.6, 0.0), (-0.60, -31.6, 0.0)],
-        panel=(-32.55, 3.30, 2.0, 0.42), window=window, screen_mat=m["screen"],
-        deck=(-33.0, -32.5, 3.53),
+        window=window, deck=(-33.0, -32.5, 3.53),
     )
+    parts.update(ck.build(col, m, FUSE, COCKPIT))
     parts.update(g.build_surface(col, m["airframe"], WING, "Wing",
                                  controls=[("Flap", 0.06, 0.30), ("FlapOut", 0.32, 0.70),
                                            ("Aileron", 0.72, 0.94)],
@@ -145,8 +169,7 @@ def build_details(col, m, parts):
 
 
 def materials(principled, srgb):
-    return dict(screen=principled("Screen", srgb(0.04, 0.07, 0.14), 0.2,
-                                  emission=(0.10, 0.22, 0.45), strength=0.6))
+    return ck.materials(principled, srgb)
 
 
 ENGINE_NAMES = [f"Engine_{s}{k}" for k in (1, 2) for s in ("L", "R")]

@@ -12,6 +12,7 @@ import math
 import numpy as np
 from mathutils import Vector
 
+from ac import cockpit as ck
 from ac import geometry as g
 from ac import texturing as tx
 from ac.texturing import NAVY, RED, WHITE
@@ -21,7 +22,8 @@ SIZE = 15.7
 GROUND_Z = -1.76
 TEXTURE_SIZE = 2048
 REG = "T-35"
-PREVIEW_VIEWS = {"eye": ((0.0, -4.25, 0.86), (0.0, -14.0, 0.4), 18)}
+PREVIEW_VIEWS = {"eye": ((0.0, -4.25, 0.86), (0.0, -14.0, 0.4), 18),
+                 "panel": ((0.0, -4.05, 0.95), (0.0, -4.85, 0.20), 14)}
 
 FUSE = g.Fuselage(
     nose_y=-8.20, tail_y=7.30, seg=48, stations=100,
@@ -84,6 +86,22 @@ def canopy(col, glass, frame_mat):
     return glass_obj, frame
 
 
+# F-35A: one panoramic touch display (20 x 8 in), side stick on the right console, throttle
+# on the left (HOTAS), ejection seat.
+COCKPIT = {
+    "floor": -0.25,
+    "panel": dict(y=-4.85, z=0.34, w=0.56, h=0.30, tilt=14),
+    "displays": [("PCD", 0.0, 0.03, 0.50, 0.20, "plain")],
+    "switches": [(0.20, -0.12, 6, 0.04, "toggle"), (0.08, 0.135, 5, 0.04, "annunciator")],
+    "glare": dict(depth=0.24, h=0.05),
+    "consoles": dict(x=0.27, y0=-4.65, y1=-3.75, w=0.14, z=0.12),
+    "controls": ("stick", [(-0.27, -4.30, 0.125, "R")]),
+    "levers": [("Throttle_1", 0.27, -4.38, 0.125, "hotas", None, 0.09)],
+    "seats": [(0.0, -4.05, "ejection")],
+    "pedals": [(0.0, -4.62)],
+}
+
+
 def build(col, m):
     parts = {}
     skin, _ = FUSE.build(col, m["airframe"], None, window)
@@ -91,9 +109,9 @@ def build(col, m):
     parts["Glass"], parts["CanopyFrame"] = canopy(col, m["glass"], m["frame"])
     parts["Cabin"] = FUSE.interior(
         col, m["interior"], 0.17, 0.35, -0.25,
-        seats=[(0.0, -4.05, 0.0)], panel=(-4.85, 0.34, 0.56, 0.30), window=window,
-        screen_mat=m["screen"],
+        window=window,
     )
+    parts.update(ck.build(col, m, FUSE, COCKPIT))
     parts.update(g.build_surface(col, m["airframe"], WING, "Wing",
                                  controls=[("Flap", 0.12, 0.50), ("Aileron", 0.52, 0.92)],
                                  hinge_xc=0.80, n_chord=24, tip=False))
@@ -146,8 +164,7 @@ def build_details(col, m, parts):
 
 
 def materials(principled, srgb):
-    return dict(screen=principled("Screen", srgb(0.04, 0.07, 0.14), 0.2,
-                                  emission=(0.10, 0.22, 0.45), strength=0.6))
+    return ck.materials(principled, srgb)
 
 
 ATLAS = ["Fuselage", "Wing_L", "Wing_R", "Flap_L", "Flap_R", "Aileron_L", "Aileron_R",

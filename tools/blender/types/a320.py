@@ -10,6 +10,7 @@ Blender frame: nose at -Y, up +Z, origin = fuselage centre, 3.60 m above the gro
 import numpy as np
 from mathutils import Vector
 
+from ac import cockpit as ck
 from ac import geometry as g
 from ac import texturing as tx
 from ac.texturing import DARK, NAVY, RED, WHITE, WINDOW
@@ -19,7 +20,8 @@ SIZE = 37.6
 GROUND_Z = -3.60
 TEXTURE_SIZE = 2048
 REG = "HB-JTA"
-PREVIEW_VIEWS = {"eye": ((0.52, -16.6, 1.10), (0.52, -40.0, 0.2), 20)}
+PREVIEW_VIEWS = {"eye": ((0.52, -16.6, 1.10), (0.52, -40.0, 0.2), 20),
+                 "panel": ((0.50, -16.35, 1.20), (0.1, -17.2, 0.55), 14)}
 
 FUSE = g.Fuselage(
     nose_y=-18.80, tail_y=18.80, seg=56, stations=120,
@@ -63,16 +65,38 @@ def window(c):
     return False
 
 
+# Airbus A320: PFD and ND per pilot, ECAM (engine/warning and system display) in the middle,
+# FCU on the glareshield, side sticks on the outboard consoles, thrust levers and MCDU on the
+# pedestal, overhead panel.
+COCKPIT = {
+    "floor": 0.10,
+    "panel": dict(y=-17.20, z=0.62, w=1.70, h=0.46, tilt=10),
+    "displays": [("PFD", 0.66, 0.06, 0.19, 0.19, "plain"), ("ND", 0.44, 0.06, 0.19, 0.19, "plain"),
+                 ("EWD", 0.0, 0.11, 0.19, 0.19, "plain"), ("SD", 0.0, -0.11, 0.19, 0.19, "plain"),
+                 ("ND", -0.44, 0.06, 0.19, 0.19, "plain"), ("PFD", -0.66, 0.06, 0.19, 0.19, "plain")],
+    "switches": [(0.75, -0.15, 6, 0.045, "knob"), (-0.53, -0.15, 6, 0.045, "knob"),
+                 (0.30, -0.17, 3, 0.05, "annunciator"), (-0.20, -0.17, 3, 0.05, "annunciator")],
+    "glare": dict(depth=0.30, h=0.085, fcu=(0.90, 0.05)),
+    "pedestal": dict(y1=-16.0, w=0.50, z_front=0.58, z_rear=0.52, lever_len=0.13,
+                     levers=[(0.06, "airliner", None), (-0.06, "airliner", None)],
+                     display=(0.14, 0.11)),
+    "overhead": dict(y0=-16.95, y1=-15.9, w=0.90, drop=0.06),
+    "consoles": dict(x=0.95, y0=-17.05, y1=-16.0, w=0.26, z=0.58),
+    "controls": ("stick", [(0.92, -16.62, 0.585, "L"), (-0.92, -16.62, 0.585, "R")]),
+    "seats": [(0.55, -16.30, "airliner"), (-0.55, -16.30, "airliner")],
+    "pedals": [(0.55, -16.95), (-0.55, -16.95)],
+}
+
+
 def build(col, m):
     parts = {}
     skin, glass = FUSE.build(col, m["airframe"], m["glass"], window)
     parts["Fuselage"], parts["Glass"] = skin, glass
     parts["Cabin"] = FUSE.interior(
         col, m["interior"], 0.025, 0.085, 0.10,
-        seats=[(0.55, -16.30, 0.0), (-0.55, -16.30, 0.0)],
-        panel=(-17.20, 0.62, 1.70, 0.42), window=window, screen_mat=m["screen"],
-        deck=(-17.55, -17.15, 0.84),
+        window=window, deck=(-17.55, -17.15, 0.84),
     )
+    parts.update(ck.build(col, m, FUSE, COCKPIT))
     parts.update(g.build_surface(col, m["airframe"], WING, "Wing",
                                  controls=[("Flap", 0.07, 0.31), ("FlapOut", 0.33, 0.70),
                                            ("Aileron", 0.72, 0.95)],
@@ -135,8 +159,7 @@ def build_details(col, m, parts):
 
 
 def materials(principled, srgb):
-    return dict(screen=principled("Screen", srgb(0.04, 0.07, 0.14), 0.2,
-                                  emission=(0.10, 0.22, 0.45), strength=0.6))
+    return ck.materials(principled, srgb)
 
 
 ATLAS = ["Fuselage", "Wing_L", "Wing_R", "Flap_L", "Flap_R", "Flap_Out_L", "Flap_Out_R",

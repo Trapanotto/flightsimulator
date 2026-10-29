@@ -9,6 +9,7 @@ Blender frame: nose at -Y, up +Z, origin = 1.19 m above the ground.
 import numpy as np
 from mathutils import Vector
 
+from ac import cockpit as ck
 from ac import geometry as g
 from ac import texturing as tx
 from ac.texturing import BELLY, DARK, NAVY, RED, WHITE
@@ -17,6 +18,7 @@ ID = "c172"
 PREVIEW_VIEWS = {
     "roof": ((-2.6, -4.2, 2.4), (0, -1.2, 0.8), 45),
     "eye": ((0.27, -0.78, 0.62), (0.27, -6.0, 0.45), 18),
+    "panel": ((0.24, -0.72, 0.66), (0.05, -1.66, 0.10), 14),
 }
 SIZE = 11.0
 GROUND_Z = -1.19
@@ -82,8 +84,30 @@ def window(c):
 
 
 def materials(principled, srgb):
-    return dict(screen=principled("Screen", srgb(0.04, 0.07, 0.14), 0.2,
-                                  emission=(0.10, 0.22, 0.45), strength=0.6))
+    return ck.materials(principled, srgb)
+
+
+# Classic steam-gauge panel: six-pack in front of the pilot, engine strip below, radio stack
+# in the middle, push-pull throttle, trim wheel between the seats.
+COCKPIT = {
+    "floor": -0.30,
+    "panel": dict(y=-1.66, z=0.22, w=0.94, h=0.40, tilt=8),
+    "displays": [
+        ("SIX", 0.27, 0.05, 0.36, 0.24, "none"),
+        ("ENG", 0.27, -0.115, 0.32, 0.07, "plain"),
+        ("RADIO", -0.04, 0.02, 0.19, 0.27, "plain"),
+    ],
+    "gauges": [(0.27 + dx, 0.05 + db, 0.052) for db in (0.06, -0.06) for dx in (0.12, 0.0, -0.12)],
+    "switches": [(0.44, -0.18, 7, 0.042, "toggle"), (-0.20, -0.17, 4, 0.05, "knob"),
+                 (-0.20, 0.15, 5, 0.04, "annunciator")],
+    "throttle_knob": (0.03, -0.16),
+    "glare": dict(depth=0.28, h=0.06),
+    "pedestal": dict(y1=-1.25, w=0.16, z_front=-0.02, z_rear=-0.18, trim_wheel=True),
+    "controls": ("yoke", [(0.27, -1.36, 0.10, "L"), (-0.27, -1.36, 0.10, "R")]),
+    "seats": [(0.27, -0.85, "ga"), (-0.27, -0.85, "ga")],
+    "seat_mat": "ck_leather",
+    "pedals": [(0.27, -1.55), (-0.27, -1.55)],
+}
 
 
 def build(col, m):
@@ -92,10 +116,10 @@ def build(col, m):
     parts["Fuselage"], parts["Glass"] = skin, glass
     parts["Cabin"] = FUSE.interior(
         col, m["interior"], 0.20, 0.60, -0.30,
-        seats=[(0.27, -0.85, 0.0), (-0.27, -0.85, 0.0), (0.27, -0.02, 0.0), (-0.27, -0.02, 0.0)],
-        panel=(-1.66, 0.22, 0.94, 0.36), window=window, screen_mat=m["screen"],
-        yokes=[(0.27, -1.36, 0.10), (-0.27, -1.36, 0.10)], deck=(-2.60, -1.60, 0.42),
+        seats=[(0.27, -0.02, 0.0), (-0.27, -0.02, 0.0)], window=window,
+        deck=(-2.60, -1.60, 0.42),
     )
+    parts.update(ck.build(col, m, FUSE, COCKPIT))
     parts.update(g.build_surface(col, m["airframe"], WING, "Wing",
                                  controls=[("Flap", 0.08, 0.55), ("Aileron", 0.58, 0.93)],
                                  hinge_xc=0.73, breaks=(0.42,)))

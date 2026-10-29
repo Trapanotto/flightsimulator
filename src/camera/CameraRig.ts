@@ -1,6 +1,8 @@
 import { type PerspectiveCamera, Quaternion, Vector3 } from 'three';
 
 export type CameraMode = 'chase' | 'cockpit' | 'wing' | 'orbit';
+/** Cockpit view: pitch of the line of sight below the nose (rad), the displays stay in view. */
+export const COCKPIT_LOOK_DOWN = 0.2;
 export const CAMERA_MODES: CameraMode[] = ['chase', 'cockpit', 'wing', 'orbit'];
 
 /** What the rig needs to know about the aircraft each frame (render coordinates). */
@@ -130,8 +132,8 @@ export class CameraRig {
         cam.position.copy(local).applyQuaternion(a.quaternion).add(a.position);
         cam.quaternion.copy(a.quaternion).multiply(FLIP);
         if (this.mode === 'cockpit') {
-          // Look slightly down at the panel horizon.
-          cam.quaternion.multiply(tmpQ.setFromAxisAngle(new Vector3(1, 0, 0), -0.06));
+          // Look down enough to see the instruments below the windshield.
+          cam.quaternion.multiply(tmpQ.setFromAxisAngle(new Vector3(1, 0, 0), -COCKPIT_LOOK_DOWN));
           fov = 72;
           near = 0.08;
         }

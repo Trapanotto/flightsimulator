@@ -2,6 +2,7 @@ import { Quaternion, type Texture, Vector3 } from 'three';
 import { makeSkyEnvironment, softenReflections } from '../render/skyEnvironment';
 import { FlightAudio } from '../audio/FlightAudio';
 import { Aircraft } from '../aircraft/Aircraft';
+import type { CockpitData } from '../aircraft/CockpitDisplays';
 import { WingTrails } from '../aircraft/WingTrails';
 import { CameraRig } from '../camera/CameraRig';
 import type { Quality } from '../core/settings';
@@ -387,6 +388,76 @@ export class FlightGame {
     });
   }
 
+  private readonly cockpit: CockpitData = {
+    ias: 0,
+    alt: 0,
+    vs: 0,
+    heading: 0,
+    pitch: 0,
+    bank: 0,
+    turnRate: 0,
+    throttle: 0,
+    engine: 0,
+    engineDisplay: 'rpm',
+    engineIdle: 0,
+    engineMax: 1,
+    flaps: 0,
+    maxFlapDeg: 0,
+    gearDown: true,
+    fixedGear: true,
+    gLoad: 1,
+    aoa: 0,
+    stalled: false,
+    onGround: true,
+    vne: 1,
+    vstall: 1,
+    trim: 0,
+    lon: 0,
+    lat: 0,
+    time: 0,
+    boosting: false,
+    crashed: false,
+  };
+
+  /** What the cockpit instruments show. */
+  private cockpitData(): CockpitData {
+    const f = this.fm;
+    const d = this.cockpit;
+    const b = this.world.basisAt(f.position);
+    const [lon, lat, alt] = this.world.toGeo(f.position);
+    const e = this.type.engine;
+    d.ias = f.speed;
+    d.alt = alt;
+    d.vs = f.verticalSpeed;
+    d.heading =
+      ((Math.atan2(f.forward.dot(b.east), f.forward.dot(b.north)) * 180) / Math.PI + 360) % 360;
+    d.pitch = f.pitch;
+    d.bank = f.bank;
+    d.turnRate = -f.omega.dot(f.worldUp);
+    d.throttle = f.throttle;
+    d.engine = f.crashed ? 0 : e.idle + (e.max - e.idle) * f.throttle;
+    d.engineDisplay = e.display;
+    d.engineIdle = e.idle;
+    d.engineMax = e.max;
+    d.flaps = f.flaps;
+    d.maxFlapDeg = f.p.maxFlapDeg;
+    d.gearDown = f.gearDown;
+    d.fixedGear = f.p.fixedGear;
+    d.gLoad = f.gLoad;
+    d.aoa = f.angleOfAttack;
+    d.stalled = f.stalled;
+    d.onGround = f.onGround;
+    d.vne = f.p.vne;
+    d.vstall = f.stallSpeed;
+    d.trim = f.trim;
+    d.lon = lon;
+    d.lat = lat;
+    d.time = this.time;
+    d.boosting = f.boosting;
+    d.crashed = f.crashed;
+    return d;
+  }
+
   /** Interpolated pose for drawing (see prevPos); snaps after jumps (reset, teleport). */
   private updateRenderPose() {
     const f = this.fm;
@@ -417,7 +488,9 @@ export class FlightGame {
     a.controls.flaps = this.fm.flaps;
     a.controls.gear = this.fm.gearDown ? 1 : 0;
     a.controls.rpm = this.fm.crashed ? 0 : 0.3 + 0.7 * this.fm.throttle;
+    a.controls.throttle = this.fm.throttle;
     a.update(dt);
+    if (this.rig.mode === 'cockpit' && a.displays) a.updateDisplays(dt, this.cockpitData());
     // Vortex trails at high load or high angle of attack while fast enough.
     const f = this.fm;
     const load = Math.max(0, (Math.abs(f.gLoad) - 2.2) / 2);

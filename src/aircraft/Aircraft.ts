@@ -13,6 +13,7 @@ import {
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { type CockpitData, CockpitDisplays } from './CockpitDisplays';
 import type { AircraftType } from './types';
 
 /** Control inputs, all normalised. */
@@ -29,6 +30,8 @@ export interface AircraftControls {
   gear: number;
   /** propeller speed 0 .. 1 */
   rpm: number;
+  /** thrust lever 0 .. 1 */
+  throttle: number;
 }
 
 const DEG = Math.PI / 180;
@@ -40,6 +43,29 @@ const LOD_DISTANCES = [0, 25, 180];
 const AXIS_X = new Vector3(1, 0, 0);
 const AXIS_Z = new Vector3(0, 0, 1);
 const tmpQ = new Quaternion();
+const tmpQ2 = new Quaternion();
+const tmpV = new Vector3();
+
+/** Cockpit controls: how far they move at full input. */
+const COCKPIT = {
+  yokeRoll: 75 * DEG,
+  yokeTravel: 0.07,
+  columnPitch: 11 * DEG,
+  stick: 15 * DEG,
+  throttleIdle: -18 * DEG,
+  throttleRange: 42 * DEG,
+  knobTravel: 0.06,
+};
+
+/** A cockpit part moved by position and rotation from its rest pose (pivots are axis-aligned). */
+class Rest {
+  readonly pos: Vector3;
+  readonly quat: Quaternion;
+  constructor(readonly node: Object3D) {
+    this.pos = node.position.clone();
+    this.quat = node.quaternion.clone();
+  }
+}
 
 /** A moving part: its rest orientation from the file plus a rotation about one local axis. */
 class Joint {
@@ -85,6 +111,13 @@ interface Parts {
   gearNose: Joint[];
   props: Joint[];
   discs: Mesh[];
+  yokes: Rest[];
+  sticks: Rest[];
+  throttles: Rest[];
+  knobs: Rest[];
+  /** 747: column and wheel per side, matched by side letter. */
+  columns: Map<string, Rest>;
+  wheels: Map<string, Rest>;
 }
 
 /**
@@ -101,7 +134,10 @@ export class Aircraft {
     flaps: 0,
     gear: 1,
     rpm: 0,
+    throttle: 0,
   };
+  /** Live instruments; created when the model has display surfaces. */
+  displays?: CockpitDisplays;
   private readonly parts: Parts = {
     aileronL: [],
     aileronR: [],
@@ -112,6 +148,12 @@ export class Aircraft {
     gearNose: [],
     props: [],
     discs: [],
+    yokes: [],
+    sticks: [],
+    throttles: [],
+    knobs: [],
+    columns: new Map(),
+    wheels: new Map(),
   };
   private propAngle = 0;
   private gearPos = 1;
@@ -148,6 +190,13 @@ export class Aircraft {
       this.triangles.push(Math.round(tris));
       this.lod.addLevel(node, LOD_DISTANCES[level]! * k);
     }
+    const displays = new CockpitDisplays(this.lod, this.type.id);
+    if (displays.count > 0) this.displays = displays;
+  }
+
+  /** Redraws the cockpit displays (only worth it while the pilot can see them). */
+  updateDisplays(dt: number, data: CockpitData) {
+    this.displays?.update(dt, data);
   }
 
   private readonly glass: MeshPhysicalMaterial[] = [];
@@ -211,6 +260,8 @@ export class Aircraft {
 
   private register(o: Object3D) {
     // Pivot nodes are named <Part>_LOD<n>; their geometry sits in a <Part>_LOD<n>_mesh child.
+    // Only the pivot moves: the children would otherwise turn a second time on top of it.
+    if (!/_LOD\d$/.test(o.name)) return;
     const name = o.name.replace(/_LOD\d$/, '');
     const p = this.parts;
     if (name === 'Aileron_L') p.aileronL.push(new Joint(o));
@@ -223,6 +274,13 @@ export class Aircraft {
     else if (name.startsWith('Propeller') || name.startsWith('Fan'))
       p.props.push(new Joint(o, AXIS_Z));
     else if (name.startsWith('PropDisc')) o.traverse((m) => m instanceof Mesh && p.discs.push(m));
+    else if (name.startsWith('Yoke_')) p.yokes.push(new Rest(o));
+    else if (name.startsWith('Stick_')) p.sticks.push(new Rest(o));
+    else if (name.startsWith('Throttle_')) p.throttles.push(new Rest(o));
+    else if (name === 'Knob_Throttle') p.knobs.push(new Rest(o));
+    // Columns and wheels exist per LOD level: key by side and level.
+    else if (/^Column_[LR]_LOD\d$/.test(o.name)) p.columns.set(o.name.slice(7), new Rest(o));
+    else if (/^Wheel_[LR]_LOD\d$/.test(o.name)) p.wheels.set(o.name.slice(6), new Rest(o));
   }
 
   update(dt: number) {
@@ -265,6 +323,45 @@ export class Aircraft {
     for (const d of p.discs) {
       d.visible = blur > 0;
       (d.material as MeshStandardMaterial).opacity = 0.35 * blur;
+    }
+    this.updateCockpit();
+  }
+
+  /**
+   * Yokes, side sticks, columns and thrust levers follow the inputs. Model axes: x = left,
+   * y = up, z = forward; pulling (nose up) moves the controls aft (-z), rolling right moves the
+   * top of a stick / wheel to the right (-x), i.e. a positive turn about +z.
+   */
+  private updateCockpit() {
+    const c = this.controls;
+    const p = this.parts;
+    const K = COCKPIT;
+    for (const r of p.yokes) {
+      r.node.position.copy(r.pos).add(tmpV.set(0, 0, -c.elevator * K.yokeTravel));
+      r.node.quaternion
+        .copy(r.quat)
+        .multiply(tmpQ.setFromAxisAngle(AXIS_Z, c.aileron * K.yokeRoll));
+    }
+    for (const r of p.sticks) {
+      tmpQ.setFromAxisAngle(AXIS_X, -c.elevator * K.stick);
+      tmpQ2.setFromAxisAngle(AXIS_Z, c.aileron * K.stick);
+      r.node.quaternion.copy(r.quat).multiply(tmpQ).multiply(tmpQ2);
+    }
+    const lever = K.throttleIdle + c.throttle * K.throttleRange;
+    for (const r of p.throttles)
+      r.node.quaternion.copy(r.quat).multiply(tmpQ.setFromAxisAngle(AXIS_X, lever));
+    for (const r of p.knobs)
+      r.node.position.copy(r.pos).add(tmpV.set(0, 0, c.throttle * K.knobTravel));
+    for (const [key, col] of p.columns) {
+      tmpQ.setFromAxisAngle(AXIS_X, -c.elevator * K.columnPitch);
+      col.node.quaternion.copy(col.quat).multiply(tmpQ);
+      const wheel = p.wheels.get(key);
+      if (!wheel) continue;
+      // The wheel rides on top of the column: swing its rest offset with the column.
+      tmpV.copy(wheel.pos).sub(col.pos).applyQuaternion(tmpQ);
+      wheel.node.position.copy(col.pos).add(tmpV);
+      tmpQ2.setFromAxisAngle(AXIS_Z, c.aileron * K.yokeRoll);
+      wheel.node.quaternion.copy(wheel.quat).premultiply(tmpQ).multiply(tmpQ2);
     }
   }
 

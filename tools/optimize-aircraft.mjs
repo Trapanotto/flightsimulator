@@ -27,7 +27,8 @@ for (const node of doc.getRoot().listNodes()) {
   node.setMesh(null);
   node.addChild(child);
 }
-await doc.transform(dedup(), prune(), meshopt({ encoder: MeshoptEncoder, level: 'medium' }));
+// keepAttributes: cockpit displays carry UVs without a texture (the game draws on them).
+await doc.transform(dedup(), prune({ keepAttributes: true }), meshopt({ encoder: MeshoptEncoder, level: 'medium' }));
 await io.write(output, doc);
 
 const mb = (p) => statSync(p).size / 1024 / 1024;
