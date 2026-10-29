@@ -1,4 +1,4 @@
-import { type Texture, Vector3 } from 'three';
+import { Quaternion, type Texture, Vector3 } from 'three';
 import { makeSkyEnvironment, softenReflections } from '../render/skyEnvironment';
 import { FlightAudio } from '../audio/FlightAudio';
 import { Aircraft } from '../aircraft/Aircraft';
@@ -67,6 +67,18 @@ export class FlightGame {
   private waitStarted = 0;
   private readonly events: FlightEvent[] = [];
   private readonly tmp = new Vector3();
+  /**
+   * Physics runs at a fixed 120 Hz, the screen at its own rate: the aircraft is drawn between
+   * the last two physics states (otherwise it judders back and forth as 0, 1 or 2 steps fall
+   * into a frame).
+   */
+  private readonly prevPos = new Vector3();
+  private readonly prevQuat = new Quaternion();
+  readonly renderPos = new Vector3();
+  readonly renderQuat = new Quaternion();
+  private readonly renderForward = new Vector3();
+  private readonly renderUp = new Vector3();
+  private renderValid = false;
   private servoUntil = 0;
   private lastCamDist = -1;
   private approach = 0;
@@ -253,6 +265,8 @@ export class FlightGame {
     this.fm.gearDown = this.gearFor(pose.onGround);
     this.fm.flaps = 0;
     this.fm.reset(pos, fwd, pose.onGround ? 0 : this.airStartSpeed, pose.onGround);
+
+    this.renderValid = false;
     this.fm.gearDown = this.gearFor(pose.onGround);
     this.controls.input.throttle = pose.onGround ? 0 : this.fm.throttle;
     this.aim.reset(fwd);
@@ -267,6 +281,8 @@ export class FlightGame {
   /** Floating origin moved. */
   rebase(delta: Vector3) {
     this.fm.position.sub(delta);
+    this.prevPos.sub(delta);
+    this.renderPos.sub(delta);
     this.lastPos.sub(delta);
     this.challenge?.rebase(delta);
     this.rig.rebase(delta);
@@ -305,6 +321,8 @@ export class FlightGame {
     if (!this.paused && !this.waitingForTerrain) {
       this.acc = Math.min(this.acc + dt, 0.25);
       while (this.acc >= STEP) {
+        this.prevPos.copy(this.fm.position);
+        this.prevQuat.copy(this.fm.quaternion);
         this.fm.step(STEP, c.input, this.events);
         this.acc -= STEP;
       }
@@ -320,6 +338,7 @@ export class FlightGame {
         this.respawn();
     }
 
+    this.updateRenderPose();
     this.syncModel(dt);
     this.rings?.update(dt);
     this.updateAudio(dt);
@@ -327,10 +346,10 @@ export class FlightGame {
     // the terrain in); the chase camera takes over once the aircraft is placed.
     if (this.waitingForTerrain) return;
     this.rig.update(dt, {
-      position: this.fm.position,
-      quaternion: this.fm.quaternion,
-      forward: this.fm.forward,
-      up: this.fm.up,
+      position: this.renderPos,
+      quaternion: this.renderQuat,
+      forward: this.renderForward,
+      up: this.renderUp,
       velocity: this.fm.velocity,
       speed: this.fm.speed,
       worldUp: this.fm.worldUp,
@@ -367,11 +386,28 @@ export class FlightGame {
     });
   }
 
+  /** Interpolated pose for drawing (see prevPos); snaps after jumps (reset, teleport). */
+  private updateRenderPose() {
+    const f = this.fm;
+    const jumped = !this.renderValid || this.prevPos.distanceToSquared(f.position) > 60 * 60;
+    if (jumped || this.paused || f.crashed) {
+      this.prevPos.copy(f.position);
+      this.prevQuat.copy(f.quaternion);
+    }
+    this.renderValid = true;
+    const alpha = Math.min(1, this.acc / STEP);
+    this.renderPos.lerpVectors(this.prevPos, f.position, alpha);
+    this.renderQuat.slerpQuaternions(this.prevQuat, f.quaternion, alpha);
+    this.renderForward.set(0, 0, 1).applyQuaternion(this.renderQuat);
+    this.renderUp.set(0, 1, 0).applyQuaternion(this.renderQuat);
+  }
+
   private syncModel(dt = 0) {
     const a = this.aircraft;
     if (!a) return;
-    a.root.position.copy(this.fm.position);
-    a.root.quaternion.copy(this.fm.quaternion);
+    if (!this.renderValid) this.updateRenderPose();
+    a.root.position.copy(this.renderPos);
+    a.root.quaternion.copy(this.renderQuat);
     a.root.visible = !this.waitingForTerrain;
     const i = this.controls.input;
     a.controls.aileron = i.roll;
@@ -388,9 +424,9 @@ export class FlightGame {
     if (dt > 0)
       this.trails.update(
         dt,
-        f.position,
-        f.quaternion,
-        f.up,
+        this.renderPos,
+        this.renderQuat,
+        this.renderUp,
         f.crashed ? 0 : Math.min(1, load + slowHigh),
       );
   }
@@ -479,6 +515,8 @@ export class FlightGame {
       this.fm.gearDown = this.gearFor(landing);
       this.fm.flaps = landing ? 1 : 0;
       this.fm.reset(position, forward, speed, false);
+
+      this.renderValid = false;
       this.fm.gearDown = this.gearFor(landing);
       if (this.aircraft) this.aircraft.controls.gear = this.fm.gearDown ? 1 : 0;
       // reset() set the throttle for level flight in this configuration.
@@ -496,6 +534,8 @@ export class FlightGame {
     const fwd = this.fm.forward.clone();
     this.fm.gearDown = this.gearFor(false);
     this.fm.reset(pos, fwd, this.airStartSpeed, false);
+
+    this.renderValid = false;
     this.fm.gearDown = this.gearFor(false);
     this.controls.input.throttle = this.fm.throttle;
     this.aim.reset(this.fm.forward);
