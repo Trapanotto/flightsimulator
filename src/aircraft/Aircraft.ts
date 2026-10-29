@@ -150,13 +150,31 @@ export class Aircraft {
     }
   }
 
+  private readonly glass: MeshPhysicalMaterial[] = [];
+  private cockpitView = false;
+
+  /**
+   * From inside, the windshield is seen at a grazing angle: with its sky reflection it would
+   * veil the whole view. In the cockpit it is nearly invisible, like real cockpit glass.
+   */
+  setCockpitView(inside: boolean) {
+    if (inside === this.cockpitView) return;
+    this.cockpitView = inside;
+    for (const g of this.glass) {
+      g.opacity = inside ? 0.035 : 0.16;
+      g.envMapIntensity = inside ? 0 : 0.8;
+      g.clearcoat = inside ? 0 : 1;
+      g.needsUpdate = true;
+    }
+  }
+
   /** Material fixes the glTF format cannot express well. */
   private prepareMesh(mesh: Mesh, envMap?: Texture) {
     const mat = mesh.material as MeshStandardMaterial;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     if (mat.name === 'Glass') {
-      mesh.material = new MeshPhysicalMaterial({
+      const glass = new MeshPhysicalMaterial({
         name: 'Glass',
         color: 0x8fa3b8,
         roughness: 0.03,
@@ -170,6 +188,8 @@ export class Aircraft {
         side: DoubleSide,
         depthWrite: false,
       });
+      mesh.material = glass;
+      this.glass.push(glass);
       mesh.castShadow = false;
       mesh.renderOrder = 2;
     } else if (mat.name === 'PropDisc') {

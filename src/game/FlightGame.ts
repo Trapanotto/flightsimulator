@@ -371,6 +371,7 @@ export class FlightGame {
     }
     this.lastCamDist = dist;
     const inside = this.rig.mode === 'cockpit';
+    this.aircraft?.setCockpitView(inside);
     this.audio.update(dt, {
       throttle: f.throttle,
       rpm: this.aircraft?.controls.rpm ?? 0,
