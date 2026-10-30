@@ -22,7 +22,8 @@ const doc = await io.read(input);
 // move hinge pivots. Give every mesh its own child node so the pivot nodes stay untouched.
 for (const node of doc.getRoot().listNodes()) {
   const mesh = node.getMesh();
-  if (!mesh) continue;
+  // Skinned meshes stay on their node (the skin belongs to it; no hinge pivots there).
+  if (!mesh || node.getSkin()) continue;
   const child = doc.createNode(`${node.getName()}_mesh`).setMesh(mesh);
   node.setMesh(null);
   node.addChild(child);

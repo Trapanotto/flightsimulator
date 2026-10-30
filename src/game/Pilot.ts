@@ -14,6 +14,22 @@ import {
   SphereGeometry,
   Vector3,
 } from 'three';
+import { AnimationAction, AnimationMixer, LoopRepeat, type Object3D } from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
+
+const PILOT_URL = `${import.meta.env.BASE_URL}assets/pilot/pilot.glb`;
+let asset: Promise<{ scene: Object3D; animations: import('three').AnimationClip[] }> | undefined;
+
+/** The Blender pilot (tools/blender/build_pilot.py): skinned figure with its animations. */
+function loadPilotAsset() {
+  asset ??= new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(PILOT_URL);
+  return asset;
+}
+
+/** Animation clips in pilot.glb. */
+type Clip = 'Idle' | 'Walk' | 'Run' | 'FreeFall' | 'Canopy';
 
 /** What the pilot needs from the world. */
 export interface PilotEnv {
@@ -211,6 +227,11 @@ export class Pilot {
   ) {
     this.group.name = 'Pilot';
     this.orient.add(this.body.group);
+    // The Blender model replaces the simple figure as soon as it is loaded.
+    loadPilotAsset().then(
+      (gltf) => this.useModel(gltf),
+      (err) => console.warn('pilot model', err),
+    );
     this.group.add(this.orient, this.canopy);
     this.canopy.visible = false;
     this.position.copy(position);
@@ -384,6 +405,59 @@ export class Pilot {
   }
 
   /** Body and canopy follow the state. */
+  private model?: Object3D;
+  private mixer?: AnimationMixer;
+  private readonly clips = new Map<Clip, AnimationAction>();
+  private clip?: Clip;
+  private disposed = false;
+
+  private useModel(gltf: { scene: Object3D; animations: import('three').AnimationClip[] }) {
+    if (this.disposed) return;
+    const model = cloneSkinned(gltf.scene);
+    model.traverse((o) => {
+      if (o instanceof Mesh) {
+        o.castShadow = true;
+        // Skinned: the bounds of the rest pose do not cover the animations.
+        o.frustumCulled = false;
+      }
+    });
+    this.mixer = new AnimationMixer(model);
+    for (const c of gltf.animations) {
+      const a = this.mixer.clipAction(c);
+      a.setLoop(LoopRepeat, Infinity);
+      this.clips.set(c.name as Clip, a);
+    }
+    this.orient.remove(this.body.group);
+    this.orient.add(model);
+    this.model = model;
+  }
+
+  /** Cross-fades to an animation; `speed` scales its playback (walking pace). */
+  private play(name: Clip, speed = 1) {
+    const next = this.clips.get(name);
+    if (!next) return;
+    next.timeScale = speed;
+    if (this.clip === name) return;
+    const prev = this.clip ? this.clips.get(this.clip) : undefined;
+    next.reset().play();
+    if (prev) next.crossFadeFrom(prev, 0.3, false);
+    this.clip = name;
+  }
+
+  private animate(dt: number) {
+    if (this.state === 'walk') {
+      const v = this.velocity
+        .clone()
+        .addScaledVector(this.up, -this.velocity.dot(this.up))
+        .length();
+      if (this.airTime > 0.25) this.play('Run', 0.6);
+      else if (v < 0.3) this.play('Idle');
+      else if (v < 3.4) this.play('Walk', v / WALK);
+      else this.play('Run', v / RUN);
+    } else this.play(this.state === 'freefall' ? 'FreeFall' : 'Canopy');
+    this.mixer!.update(dt);
+  }
+
   private pose(dt: number) {
     const up = this.up;
     right.crossVectors(this.forward, up).normalize();
@@ -395,6 +469,7 @@ export class Pilot {
     const b = this.body;
     const o = this.orient;
     const s = Math.sin(this.phase);
+    if (this.mixer) this.animate(dt);
     if (this.state === 'walk') {
       const moving = Math.min(1, this.velocity.length() / WALK);
       o.rotation.set(0, 0, 0);
@@ -441,6 +516,7 @@ export class Pilot {
     }
     // First person: the own body is not drawn (the canopy is).
     this.body.group.visible = this.view === 'third';
+    if (this.model) this.model.visible = this.view === 'third';
     void dt;
   }
 
@@ -492,6 +568,10 @@ export class Pilot {
   }
 
   dispose() {
+    this.disposed = true;
+    this.mixer?.stopAllAction();
+    // The Blender model's geometry is shared with the cached asset: keep it.
+    if (this.model) this.orient.remove(this.model);
     this.canvas.removeEventListener('pointermove', this.onMove);
     this.group.removeFromParent();
     this.group.traverse((o) => {

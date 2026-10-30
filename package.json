@@ -17,6 +17,7 @@
     "assets": "node tools/build-aircraft.mjs",
     "test:flight": "node tools/flight-test.mjs",
     "benchmark": "node tools/benchmark.mjs",
+    "assets:pilot": "blender -b --factory-startup -P tools/blender/build_pilot.py && node tools/optimize-aircraft.mjs build/pilot_raw.glb public/assets/pilot/pilot.glb",
     "assets:buildings": "blender -b --factory-startup -P tools/blender/build_buildings.py && node tools/optimize-aircraft.mjs build/buildings_raw.glb public/assets/buildings/buildings.glb"
   },
   "dependencies": {
