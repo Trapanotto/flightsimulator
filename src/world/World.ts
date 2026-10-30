@@ -26,13 +26,10 @@ import {
   type Quality,
   type QualityLevel,
   type Settings,
-  WEATHER_CLOUDS,
-  WEATHER_COVERAGE,
-  WEATHER_FOG,
-  WEATHER_HAZE,
   loadSettings,
   resolveQuality,
   timeSpec,
+  weatherPreset,
 } from '../core/settings';
 import { BuildingLayer } from '../buildings/BuildingLayer';
 import { updateRunways } from './runwayMarkings';
@@ -40,6 +37,7 @@ import { FogDome } from '../render/FogDome';
 import { Atmosphere } from '../render/Atmosphere';
 import { CloudLayer } from '../render/CloudLayer';
 import { PostFX } from '../render/PostFX';
+import { LiveWeather, type WeatherLook, windAtHeight } from './liveWeather';
 import { SunFlare } from '../render/SunFlare';
 import { resolveTime } from '../render/sun';
 import { DEFAULT_TERRAIN, TerrainEngine } from '../terrain/TerrainEngine';
@@ -303,6 +301,54 @@ export class World {
     this.halt();
   }
 
+  /** Real weather at the camera (setting `live`). */
+  private readonly liveWeather = new LiveWeather();
+  private weatherCheck = 0;
+
+  /** The weather in effect: live data, or the preset (also while live data is loading). */
+  currentWeather(): WeatherLook {
+    const s = this.settings;
+    if (s.weather === 'live' && this.liveWeather.look) return this.liveWeather.look;
+    return weatherPreset(s.weather);
+  }
+
+  /**
+   * Wind at a point (render space, m/s, the direction the air moves): surface wind of the
+   * weather, stronger with the height above ground.
+   */
+  windAt(p: Vector3, out: Vector3): Vector3 {
+    const w = this.currentWeather();
+    const agl = this.heightAboveGround(p) ?? 500;
+    const speed = windAtHeight(w.windSpeed, agl);
+    const b = this.basisAt(p);
+    const to = ((w.windFrom + 180) * Math.PI) / 180;
+    return out
+      .copy(b.north)
+      .multiplyScalar(Math.cos(to) * speed)
+      .addScaledVector(b.east, Math.sin(to) * speed);
+  }
+
+  /** Sky, haze, cloud layer and fog from a weather look. */
+  private applyWeather(w: WeatherLook) {
+    const fu = this.atmosphere.uniforms;
+    fu.uCloudCoverage.value = w.coverage;
+    fu.uMie.value = w.mie;
+    this.atmosphere.update();
+    this.atmosphere.apply(this.sun, this.hemi, this.sky);
+    fu.uCloudBase.value = w.base;
+    fu.uCloudTop.value = w.top;
+    // Flat layers and the cloud shadows sit in the lower third of the cumulus layer.
+    fu.uCloudAltitude.value = w.base + 0.3 * (w.top - w.base);
+    const fog = w.fog;
+    fu.uFogDensity.value = fog ? fog.density : 0;
+    if (fog) {
+      // ?fogtop=1300 moves the top of the fog (testing, sharing a look).
+      const top = Number(new URLSearchParams(location.search).get('fogtop'));
+      fu.uFogTop.value = top > 0 ? top : fog.top;
+      fu.uFogBase.value = Math.min(fog.base, fu.uFogTop.value - 150);
+    }
+  }
+
   /** Applies settings: quality preset, time of day, weather. Safe to call at any time. */
   applySettings(s: Settings) {
     this.settings = s;
@@ -321,24 +367,10 @@ export class World {
     this.atmosphere.setDate(resolveTime(timeSpec(s)));
     this.atmosphere.apply(this.sun, this.hemi, this.sky);
     this.renderer.toneMappingExposure = this.atmosphere.exposure;
-    this.atmosphere.uniforms.uCloudCoverage.value = WEATHER_COVERAGE[s.weather];
-    const fu = this.atmosphere.uniforms;
-    fu.uMie.value = WEATHER_HAZE[s.weather];
-    this.atmosphere.update();
-    this.atmosphere.apply(this.sun, this.hemi, this.sky);
-    const layer = WEATHER_CLOUDS[s.weather];
-    fu.uCloudBase.value = layer.base;
-    fu.uCloudTop.value = layer.top;
-    // Flat layers and the cloud shadows sit in the lower third of the cumulus layer.
-    fu.uCloudAltitude.value = layer.base + 0.3 * (layer.top - layer.base);
-    const fog = WEATHER_FOG[s.weather];
-    fu.uFogDensity.value = fog ? fog.density : 0;
-    if (fog) {
-      // ?fogtop=1300 moves the top of the fog (testing, sharing a look).
-      const top = Number(new URLSearchParams(location.search).get('fogtop'));
-      fu.uFogTop.value = top > 0 ? top : fog.top;
-      fu.uFogBase.value = Math.min(fog.base, fu.uFogTop.value - 150);
-    }
+    this.liveWeather.onChange = (w) => {
+      if (this.settings.weather === 'live') this.applyWeather(w);
+    };
+    this.applyWeather(this.currentWeather());
     this.post.configure(quality);
     // Volumetric clouds replace the flat layers (they need the post-processing chain).
     this.clouds.setLayers(this.post.volumetric ? 0 : quality.cloudLayers);
@@ -473,6 +505,11 @@ export class World {
     else this.fly.update(dt, this.basis, this.geo[2], this.ground);
     this.rebaseIfNeeded();
     updateRunways(this, this.geo[0], this.geo[1]);
+    // Real weather: check every few seconds whether it needs fetching here.
+    if (this.settings.weather === 'live' && (this.weatherCheck -= dt) <= 0) {
+      this.weatherCheck = 5;
+      this.liveWeather.update(this.geo[0], this.geo[1]);
+    }
     this.sky.position.copy(this.camera.position);
     this.updateEnvironment(dt);
     this.buildings?.update(performance.now());

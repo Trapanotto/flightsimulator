@@ -1,5 +1,7 @@
 /** Graphics presets (concept ch. 16) and user settings, stored in localStorage. */
 
+import type { WeatherLook } from '../world/liveWeather';
+
 export type QualityLevel = 'low' | 'medium' | 'high' | 'ultra';
 export const QUALITY_LEVELS: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
 
@@ -101,9 +103,12 @@ export const PRESETS: Record<QualityLevel, Quality> = {
   },
 };
 
+export type TrafficMode = 'auto' | 'sim' | 'off';
 export type TimeOfDay = 'real' | 'morning' | 'noon' | 'golden';
-export type Weather = 'clear' | 'fair' | 'cloudy' | 'hochnebel' | 'nebel';
+/** `live`: real weather at the aircraft (Open-Meteo); until it arrives it looks like `fair`. */
+export type Weather = 'live' | 'clear' | 'fair' | 'cloudy' | 'hochnebel' | 'nebel';
 export const WEATHER_COVERAGE: Record<Weather, number> = {
+  live: 0.38,
   clear: 0,
   fair: 0.38,
   cloudy: 0.62,
@@ -118,6 +123,7 @@ export const WEATHER_COVERAGE: Record<Weather, number> = {
  */
 /** Haze of the weather: Mie scattering at sea level (1/m). Visibility ~ 3.9 / (1.1 x this). */
 export const WEATHER_HAZE: Record<Weather, number> = {
+  live: 1.6e-5,
   clear: 0.9e-5,
   fair: 1.6e-5,
   cloudy: 2.6e-5,
@@ -127,6 +133,7 @@ export const WEATHER_HAZE: Record<Weather, number> = {
 
 /** Cumulus layer of the weather (base and top, metres above sea level). */
 export const WEATHER_CLOUDS: Record<Weather, { base: number; top: number }> = {
+  live: { base: 2300, top: 3700 },
   clear: { base: 2600, top: 3600 },
   fair: { base: 2300, top: 3700 },
   cloudy: { base: 1700, top: 3500 },
@@ -135,6 +142,7 @@ export const WEATHER_CLOUDS: Record<Weather, { base: number; top: number }> = {
 };
 
 export const WEATHER_FOG: Record<Weather, { top: number; base: number; density: number } | null> = {
+  live: null,
   clear: null,
   fair: null,
   cloudy: null,
@@ -142,11 +150,42 @@ export const WEATHER_FOG: Record<Weather, { top: number; base: number; density: 
   nebel: { top: 640, base: -500, density: 1 / 45 },
 };
 
+/** Surface wind of the fixed weather presets (from WSW, the usual Swiss westerly), m/s. */
+export const WEATHER_WIND: Record<Weather, number> = {
+  live: 4,
+  clear: 3,
+  fair: 4,
+  cloudy: 7,
+  hochnebel: 2,
+  nebel: 1,
+};
+
+/** The look of a fixed weather preset (`live` falls back to `fair` until data arrives). */
+export function weatherPreset(w: Weather): WeatherLook {
+  const fog = WEATHER_FOG[w];
+  return {
+    coverage: WEATHER_COVERAGE[w],
+    base: WEATHER_CLOUDS[w].base,
+    top: WEATHER_CLOUDS[w].top,
+    mie: WEATHER_HAZE[w],
+    fog: fog ? { ...fog } : null,
+    windFrom: 245,
+    windSpeed: WEATHER_WIND[w],
+    gusts: WEATHER_WIND[w] * 1.5,
+    temperature: 12,
+    visibility: 3.9 / (1.1 * WEATHER_HAZE[w]),
+    cloudCover: Math.round(WEATHER_COVERAGE[w] * 120),
+    code: 0,
+  };
+}
+
 export interface Settings {
   /** 'auto' picks a level from the GPU. */
   quality: QualityLevel | 'auto';
   time: TimeOfDay;
   weather: Weather;
+  /** Other aircraft: real (if a relay is configured, else simulated), simulated, none. */
+  traffic: TrafficMode;
   invertPitch: boolean;
   sound: boolean;
   /** 0..1 */
@@ -157,7 +196,8 @@ const KEY = 'tfs.settings';
 const DEFAULTS: Settings = {
   quality: 'auto',
   time: 'real',
-  weather: 'fair',
+  weather: 'live',
+  traffic: 'auto',
   invertPitch: false,
   sound: true,
   volume: 0.7,

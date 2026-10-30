@@ -3,6 +3,7 @@ import {
   QUALITY_LEVELS,
   type Settings,
   type TimeOfDay,
+  type TrafficMode,
   type Weather,
   detectQuality,
   loadSettings,
@@ -30,7 +31,7 @@ export function openSettings(lang: Lang, onChange: (s: Settings) => void) {
         ${options
           .map(
             (o) =>
-              `<button type="button" class="chip" data-key="${key}" data-value="${o.value}" aria-pressed="${settings[key] === o.value}">${tr(o.label)}${o.value === 'auto' ? ` (${tr(`quality.${detected}` as MessageKey)})` : ''}</button>`,
+              `<button type="button" class="chip" data-key="${key}" data-value="${o.value}" aria-pressed="${settings[key] === o.value}">${tr(o.label)}${key === 'quality' && o.value === 'auto' ? ` (${tr(`quality.${detected}` as MessageKey)})` : ''}</button>`,
           )
           .join('')}
       </div>
@@ -49,11 +50,17 @@ export function openSettings(lang: Lang, onChange: (s: Settings) => void) {
       { value: 'golden', label: 'time.golden' },
     ])}
     ${group<Weather>('weather', 'settings.weather', [
+      { value: 'live', label: 'weather.live' },
       { value: 'clear', label: 'weather.clear' },
       { value: 'fair', label: 'weather.fair' },
       { value: 'cloudy', label: 'weather.cloudy' },
       { value: 'hochnebel', label: 'weather.hochnebel' },
       { value: 'nebel', label: 'weather.nebel' },
+    ])}
+    ${group<TrafficMode>('traffic', 'settings.traffic', [
+      { value: 'auto', label: 'traffic.auto' },
+      { value: 'sim', label: 'traffic.sim' },
+      { value: 'off', label: 'traffic.off' },
     ])}
     <fieldset>
       <legend>${tr('settings.controls')}</legend>

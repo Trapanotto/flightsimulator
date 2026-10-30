@@ -145,6 +145,7 @@ const v1 = new Vector3();
 const v2 = new Vector3();
 const v3 = new Vector3();
 const vAirM = new Vector3();
+const vAir = new Vector3();
 const forceM = new Vector3();
 const forceW = new Vector3();
 const torqueM = new Vector3();
@@ -155,6 +156,12 @@ export class FlightModel {
   readonly position = new Vector3();
   readonly quaternion = new Quaternion();
   readonly velocity = new Vector3();
+  /**
+   * Wind (world axes, m/s, where the air moves). The aerodynamics see the velocity relative to
+   * the air; `speed` is the airspeed, `groundSpeed` the speed over the ground.
+   */
+  readonly wind = new Vector3();
+  groundSpeed = 0;
   /** Angular velocity in model axes (rad/s). */
   readonly omega = new Vector3();
   /** Unit direction of flight (or the nose when standing still). */
@@ -247,6 +254,8 @@ export class FlightModel {
     this.groundTime = onGround ? 10 : 0;
     this.updateAxes();
     this.velocity.copy(this.forward).multiplyScalar(speed);
+    // In the air `speed` is the airspeed: the aircraft drifts with the wind from the start.
+    if (!onGround) this.velocity.add(this.wind);
     if (!onGround && speed > 1) {
       // Trimmed flight: nose up by the angle of attack that carries the weight, elevator
       // trim that cancels the pitching moment there.
@@ -275,7 +284,8 @@ export class FlightModel {
       if (onGround) this.settle();
     }
     this.speed = speed;
-    this.direction.copy(speed > 0.5 ? this.velocity : this.forward).normalize();
+    this.groundSpeed = this.velocity.length();
+    this.direction.copy(this.groundSpeed > 0.5 ? this.velocity : this.forward).normalize();
   }
 
   /** Angle of attack and elevator for 1 g flight at `speed` (the elevator also makes lift). */
@@ -390,7 +400,7 @@ export class FlightModel {
 
     // ---- aerodynamics (model axes) ----
     qInv.copy(this.quaternion).invert();
-    vAirM.copy(this.velocity).applyQuaternion(qInv);
+    vAirM.copy(this.velocity).sub(this.wind).applyQuaternion(qInv);
     const V = vAirM.length();
     const sigma = densityRatio(this.altitudeOf(this.cgW));
     const qbar = 0.5 * RHO0 * sigma * V * V;
@@ -471,8 +481,9 @@ export class FlightModel {
     this.updateAxes();
     this.position.copy(this.cg).applyQuaternion(this.quaternion).negate().add(this.cgW);
 
-    this.speed = this.velocity.length();
-    if (this.speed > 0.5) this.direction.copy(this.velocity).divideScalar(this.speed);
+    this.groundSpeed = this.velocity.length();
+    this.speed = vAir.copy(this.velocity).sub(this.wind).length();
+    if (this.groundSpeed > 0.5) this.direction.copy(this.velocity).divideScalar(this.groundSpeed);
     else this.direction.copy(this.forward);
     const g = specific.dot(this.up) / (p.mass * G);
     this.gLoad += (g - this.gLoad) * Math.min(1, dt * 6);
@@ -496,7 +507,9 @@ export class FlightModel {
     const airborne = !this.onGround && V > 15 && qs > 1;
     const bank = this.bank;
     const theta = this.pitch;
-    const gamma = V > 1 ? Math.asin(clamp(this.velocity.dot(this.worldUp) / V, -1, 1)) : 0;
+    // Flight path angle through the air (what the wings feel), not over the ground.
+    const climb = this.velocity.dot(this.worldUp) - this.wind.dot(this.worldUp);
+    const gamma = V > 1 ? Math.asin(clamp(climb / V, -1, 1)) : 0;
     const Vr = Math.max(V, 10);
     const pr = this.omega.z;
     const qr = -this.omega.x;
@@ -750,6 +763,7 @@ export class FlightModel {
     this.crashed = true;
     events.push({ type: 'crash', reason, speed: this.speed });
     this.speed = 0;
+    this.groundSpeed = 0;
     this.velocity.set(0, 0, 0);
     this.omega.set(0, 0, 0);
   }

@@ -1349,3 +1349,34 @@ body {
     bottom: 200px;
   }
 }
+
+/* Traffic labels (callsign, type, flight level, distance), placed by game/Traffic.ts. */
+.traffic-labels {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+  overflow: hidden;
+}
+.traffic-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(8, 14, 26, 0.55);
+  color: #e8f6ff;
+  font: 600 11px/1.25 var(--font-display);
+  letter-spacing: 0.03em;
+  white-space: pre;
+  text-align: center;
+}
+.traffic-label::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -18px;
+  width: 1px;
+  height: 16px;
+  background: rgba(232, 246, 255, 0.6);
+}

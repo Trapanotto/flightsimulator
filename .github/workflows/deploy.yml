@@ -27,6 +27,9 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+        env:
+          # Live traffic relay (tools/traffic-relay); without it the site shows simulated traffic.
+          VITE_TRAFFIC_URL: ${{ vars.TRAFFIC_URL }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

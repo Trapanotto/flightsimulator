@@ -9,7 +9,7 @@
   "status.phase": "Fleet & flight model",
   "status.webglMissing": "Your browser does not support WebGL 2. Please use a current version of Chrome, Edge, Firefox or Safari.",
   "credits.title": "Credits",
-  "credits.data": "Geodata: © swisstopo (Federal Office of Topography), provided via geo.admin.ch. Airports, runways, taxiways and aprons: © OpenStreetMap contributors (ODbL)",
+  "credits.data": "Geodata: © swisstopo (Federal Office of Topography), provided via geo.admin.ch. Airports, runways, taxiways and aprons: © OpenStreetMap contributors (ODbL). Weather: Open-Meteo (CC BY 4.0). Live traffic: adsb.lol (ODbL)",
   "credits.code": "Code: MIT licence · 3D models and textures: CC BY 4.0",
   "credits.libs": "Built with Three.js and Vite",
   "credits.close": "Close",
@@ -40,7 +40,7 @@
   "camera.orbit": "Orbit",
   "flight.waiting": "Loading terrain at the start …",
   "flight.paused": "Paused – press P to continue",
-  "flight.help": "Click: mouse flight (N on/off) · W/S: nose down/up · A/D: roll · Q/E: yaw · Shift/Ctrl: throttle · Space: boost · PgUp/PgDn: trim · G: gear · V: flaps · B: brake · C: camera · M: map · O: sound · P: pause · ⌫: restart · J: get out / jump",
+  "flight.help": "Click: mouse flight (N on/off) · W/S: nose down/up · A/D: roll · Q/E: yaw · Shift/Ctrl: throttle · Space: boost · PgUp/PgDn: trim · G: gear · V: flaps · B: brake · C: camera · M: map · O: sound · P: pause · ⌫: restart · J: get out / jump · T: traffic labels",
   "gearDown": "Gear down",
   "gearUp": "Gear up",
   "landing.butter": "Butter-smooth landing",
@@ -121,5 +121,12 @@
   "pilot.enter": "Back in the aircraft",
   "pilot.tooFar": "Walk closer to the aircraft to get in",
   "pilot.stopFirst": "Stop before getting out",
-  "pilot.aircraftLost": "The aircraft is destroyed – ⌫: new flight"
+  "pilot.aircraftLost": "The aircraft is destroyed – ⌫: new flight",
+  "weather.live": "Real weather (live)",
+  "settings.traffic": "Traffic",
+  "traffic.auto": "Real (else simulated)",
+  "traffic.sim": "Simulated",
+  "traffic.off": "Off",
+  "traffic.labels": "Traffic labels on",
+  "traffic.labelsOff": "Traffic labels off"
 }

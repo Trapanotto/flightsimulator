@@ -43,6 +43,8 @@ const LOD_DISTANCES = [0, 25, 180];
 const AXIS_X = new Vector3(1, 0, 0);
 const AXIS_Z = new Vector3(0, 0, 1);
 const tmpQ = new Quaternion();
+/** Parsed model files of the traffic, by type (see Aircraft.loadShared). */
+const shared = new Map<string, Promise<{ scene: Object3D }>>();
 const tmpQ2 = new Quaternion();
 const tmpV = new Vector3();
 
@@ -170,7 +172,23 @@ export class Aircraft {
     return a;
   }
 
-  private setup(scene: Object3D, envMap?: Texture) {
+  /**
+   * Another aircraft of the traffic: shares geometry and materials with all others of its
+   * type (the file is parsed once), no cockpit displays.
+   */
+  static async loadShared(type: AircraftType, envMap?: Texture): Promise<Aircraft> {
+    let p = shared.get(type.id);
+    if (!p) {
+      p = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(type.url);
+      shared.set(type.id, p);
+    }
+    const gltf = await p;
+    const a = new Aircraft(type);
+    a.setup(gltf.scene.clone(true), envMap, false);
+    return a;
+  }
+
+  private setup(scene: Object3D, envMap?: Texture, displays = true) {
     this.root.name = this.type.id;
     scene.updateMatrixWorld(true);
     this.root.add(this.lod);
@@ -190,8 +208,9 @@ export class Aircraft {
       this.triangles.push(Math.round(tris));
       this.lod.addLevel(node, LOD_DISTANCES[level]! * k);
     }
-    const displays = new CockpitDisplays(this.lod, this.type.id);
-    if (displays.count > 0) this.displays = displays;
+    if (!displays) return;
+    const d = new CockpitDisplays(this.lod, this.type.id);
+    if (d.count > 0) this.displays = d;
   }
 
   /** Redraws the cockpit displays (only worth it while the pilot can see them). */

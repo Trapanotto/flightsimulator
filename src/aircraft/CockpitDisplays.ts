@@ -12,6 +12,13 @@ import {
 export interface CockpitData {
   /** Airspeed m/s, altitude m (sea level), vertical speed m/s. */
   ias: number;
+  /** Ground speed m/s; wind direction (from, degrees) and speed (m/s); outside air °C. */
+  gs: number;
+  /** Traffic around (relative bearing deg, distance m, relative altitude m, vertical speed). */
+  traffic?: Array<{ bearing: number; dist: number; relAlt: number; vs: number }>;
+  windFrom: number;
+  windSpeed: number;
+  oat: number;
   alt: number;
   vs: number;
   /** Degrees 0..360 (true north). */
@@ -650,14 +657,7 @@ function garminPfd(c: Ctx, W: number, H: number, d: CockpitData) {
   // Lower bar: OAT, transponder, time.
   c.fillStyle = 'rgba(0, 0, 0, 0.85)';
   c.fillRect(0, H * 0.93, W, H * 0.07);
-  label(
-    c,
-    `OAT ${Math.round(15 - (d.alt / 1000) * 6.5)}°C`,
-    W * 0.02,
-    H * 0.965,
-    H * 0.035,
-    '#fff',
-  );
+  label(c, `OAT ${Math.round(d.oat)}°C`, W * 0.02, H * 0.965, H * 0.035, '#fff');
   label(c, 'XPDR 7000 ALT', W * 0.62, H * 0.965, H * 0.035, '#00ff66', 'center');
   label(c, clock(d.time), W * 0.98, H * 0.965, H * 0.035, '#fff', 'right');
   if (d.stalled) label(c, 'STALL', cx, H * 0.64, H * 0.07, '#ff2020', 'center');
@@ -768,6 +768,46 @@ function nd(c: Ctx, W: number, H: number, d: CockpitData, color: string) {
   c.stroke();
   label(c, 'TRA01', wx + 10, wy, H * 0.04, '#ff40ff');
   c.restore();
+  // Traffic (TCAS symbols): white hollow far, cyan filled near, amber close and level.
+  const range = 40_000;
+  for (const t of d.traffic ?? []) {
+    const k = t.dist / range;
+    const a = (t.bearing * Math.PI) / 180;
+    const tx = cx + Math.sin(a) * r * k;
+    const ty = cy - Math.cos(a) * r * k;
+    if (ty > H || ty < 0 || tx < 0 || tx > W) continue;
+    const close = t.dist < 6000 && Math.abs(t.relAlt) < 300;
+    const near = t.dist < 11_000 && Math.abs(t.relAlt) < 900;
+    const col = close ? '#ffb000' : near ? '#00e5ff' : '#ffffff';
+    const s = H * 0.018;
+    c.beginPath();
+    if (close) c.arc(tx, ty, s, 0, Math.PI * 2);
+    else {
+      c.moveTo(tx, ty - s);
+      c.lineTo(tx + s, ty);
+      c.lineTo(tx, ty + s);
+      c.lineTo(tx - s, ty);
+      c.closePath();
+    }
+    c.fillStyle = col;
+    c.strokeStyle = col;
+    c.lineWidth = 1.5;
+    if (close || near) c.fill();
+    else c.stroke();
+    const rel = Math.round((t.relAlt * 3.28084) / 100);
+    label(
+      c,
+      `${rel >= 0 ? '+' : '-'}${pad(Math.abs(rel), 2)}`,
+      tx,
+      ty + (rel >= 0 ? -s * 1.9 : s * 1.9),
+      H * 0.03,
+      col,
+      'center',
+    );
+    if (Math.abs(t.vs) > 2.5)
+      label(c, t.vs > 0 ? '↑' : '↓', tx + s * 1.6, ty, H * 0.03, col, 'left');
+  }
+
   // Own aircraft.
   c.strokeStyle = '#ffd400';
   c.lineWidth = 3;
@@ -782,16 +822,31 @@ function nd(c: Ctx, W: number, H: number, d: CockpitData, color: string) {
   // Heading box, data in the corners.
   box(c, cx - W * 0.07, H * 0.02, W * 0.14, H * 0.07, color, '#000');
   label(c, pad(wrap360(Math.round(d.heading)), 3), cx, H * 0.055, H * 0.05, color, 'center');
-  const gs = Math.round(d.ias * KT * (1 + d.alt / 60000));
+  const tas = d.ias * KT * (1 + d.alt / 50000);
   label(
     c,
-    `GS ${gs}  TAS ${Math.round(d.ias * KT * (1 + d.alt / 50000))}`,
+    `GS ${Math.round(d.gs * KT)}  TAS ${Math.round(tas)}`,
     W * 0.02,
     H * 0.05,
     H * 0.035,
     '#fff',
   );
-  label(c, '270/12', W * 0.02, H * 0.1, H * 0.035, '#fff');
+  const wdir = pad(wrap360(Math.round(d.windFrom / 10) * 10), 3);
+  label(c, `${wdir}/${Math.round(d.windSpeed * KT)}`, W * 0.02, H * 0.1, H * 0.035, '#fff');
+  // Wind arrow: where the air goes, relative to the heading (heading up).
+  const wa = ((d.windFrom + 180 - d.heading) * Math.PI) / 180;
+  const ax = W * 0.05;
+  const ay = H * 0.18;
+  const ar = H * 0.035;
+  line(
+    c,
+    ax - Math.sin(wa) * ar,
+    ay + Math.cos(wa) * ar,
+    ax + Math.sin(wa) * ar,
+    ay - Math.cos(wa) * ar,
+    '#fff',
+    2,
+  );
   label(c, 'TRA01', W * 0.98, H * 0.05, H * 0.04, '#ff40ff', 'right');
   label(c, `${clock(d.time)}`, W * 0.98, H * 0.1, H * 0.035, '#fff', 'right');
   label(c, '20', cx + r * 0.66 * 0.71, cy - r * 0.66 * 0.71, H * 0.035, '#aaa', 'center');
@@ -1077,7 +1132,7 @@ function systemDisplay(c: Ctx, W: number, H: number, d: CockpitData, style: Styl
   label(c, '°C', W * 0.5, H * 0.67, H * 0.04, '#0ff', 'center');
   // Bottom permanent data: temperatures, G load, weight.
   line(c, 0, H * 0.82, W, H * 0.82, '#fff', 1.5);
-  const sat = Math.round(15 - (d.alt / 1000) * 6.5);
+  const sat = Math.round(d.oat);
   label(
     c,
     `TAT ${sat + Math.round(((d.ias * d.ias) / 2010) * 1)} °C`,
@@ -1454,7 +1509,7 @@ function radioStack(c: Ctx, W: number, H: number, d: CockpitData) {
   c.lineTo(mx + u * 0.15, my + u * 0.15);
   c.fill();
   c.restore();
-  label(c, `GS ${Math.round(d.ias * KT)}KT`, W * 0.52, u * 4.4, u * 0.3, '#fff', 'left', MONO);
+  label(c, `GS ${Math.round(d.gs * KT)}KT`, W * 0.52, u * 4.4, u * 0.3, '#fff', 'left', MONO);
   label(
     c,
     `TRK ${pad(wrap360(Math.round(d.heading)), 3)}°`,

@@ -2,7 +2,17 @@ import type { FlightInput } from '../physics/FlightModel';
 
 /** One-shot actions (toggles), consumed once per frame. */
 export type FlightAction =
-  'gear' | 'flaps' | 'camera' | 'reset' | 'pause' | 'mouseAim' | 'map' | 'mute' | 'exit' | 'jump';
+  | 'gear'
+  | 'flaps'
+  | 'camera'
+  | 'reset'
+  | 'pause'
+  | 'mouseAim'
+  | 'map'
+  | 'mute'
+  | 'exit'
+  | 'jump'
+  | 'labels';
 
 const DEADZONE = 0.08;
 const EXPO = 0.4;
@@ -42,6 +52,7 @@ const ACTION_KEYS: Record<string, FlightAction> = {
   KeyN: 'mouseAim',
   KeyM: 'map',
   KeyO: 'mute',
+  KeyT: 'labels',
   // Get out / in, jump with the parachute, pull.
   KeyJ: 'exit',
   Space: 'jump',

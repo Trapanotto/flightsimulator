@@ -189,9 +189,30 @@ npm run test:flight  # Abnahme Phase 4: Start Bern, Lauterbrunnen, Landung Sion 
 
 Jeder Push auf `main` wird per GitHub Actions gebaut, getestet und auf GitHub Pages veröffentlicht.
 
+## Wetter und Verkehr
+
+**Echtes Wetter** (Einstellung «Echtes Wetter (live)», Standard): Bewölkung, Wolkenbasis (aus
+Temperatur und Taupunkt), Sicht, Nebel und Hochnebel sowie Wind und Böen kommen von
+[Open-Meteo](https://open-meteo.com) für den Ort der Kamera – neu alle 10 Minuten oder nach
+25 km. Der Wind wirkt aufs Flugzeug (Fahrt durch die Luft, Abdrift, Böen, leichte Turbulenz)
+und steht mit Grundgeschwindigkeit im Navigationsdisplay.
+
+**Verkehr** (Einstellung «Verkehr»): echte Flugzeuge aus ADS-B-Daten (adsb.lol) oder
+simulierter Verkehr – Anflüge und Abflüge in Zürich, Genf, Basel, Bern, Lugano, Sion und
+Samedan gegen den Wind, Platzrunden an kleinen Flugplätzen, Linienflugzeuge in Reiseflughöhe.
+Beschriftungen mit Rufzeichen, Typ und Flugfläche (Taste T), im Navigationsdisplay wie TCAS.
+
+Die ADS-B-Dienste erlauben keine Abfragen direkt aus dem Browser (CORS). Beim Entwickeln
+leitet der Vite-Server sie weiter (`/flightsimulator/adsb`). Für die veröffentlichte Seite
+braucht es einen kleinen Relay: [`tools/traffic-relay/worker.js`](tools/traffic-relay/worker.js)
+als Cloudflare Worker anlegen und dessen URL als Repository-Variable `TRAFFIC_URL` setzen.
+Ohne Relay zeigt die Seite simulierten Verkehr.
+
 ## Credits & Lizenz
 
 - Geodaten: © swisstopo (Bundesamt für Landestopografie), gestreamt über geo.admin.ch. Die Daten sind nicht Teil dieses Repos.
 - Flugplätze, Pisten, Rollwege und Vorfelder: © [OpenStreetMap](https://www.openstreetmap.org/copyright)-Mitwirkende, ODbL 1.0 (`src/game/aerodromes.generated.ts`, `public/assets/airports/aeroways.json`; neu erzeugen mit `node tools/fetch-aeroways.mjs`).
+- Wetter: [Open-Meteo](https://open-meteo.com), CC BY 4.0 (Modelle von MeteoSchweiz, DWD, ECMWF u. a.).
+- Live-Verkehr: [adsb.lol](https://adsb.lol), ODbL 1.0.
 - Code: MIT, siehe [LICENSE](LICENSE). 3D-Modelle, Texturen und Renderbilder: CC BY 4.0.
 - Schrift im Flugzeug-Schriftzug: Liberation Sans Bold (SIL Open Font License).

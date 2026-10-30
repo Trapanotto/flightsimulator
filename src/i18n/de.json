@@ -9,7 +9,7 @@
   "status.phase": "Flotte & Flugmodell",
   "status.webglMissing": "Dein Browser unterstützt kein WebGL 2. Bitte nutze eine aktuelle Version von Chrome, Edge, Firefox oder Safari.",
   "credits.title": "Credits",
-  "credits.data": "Geodaten: © swisstopo (Bundesamt für Landestopografie), bereitgestellt über geo.admin.ch. Flugplätze, Pisten, Rollwege und Vorfelder: © OpenStreetMap-Mitwirkende (ODbL)",
+  "credits.data": "Geodaten: © swisstopo (Bundesamt für Landestopografie), bereitgestellt über geo.admin.ch. Flugplätze, Pisten, Rollwege und Vorfelder: © OpenStreetMap-Mitwirkende (ODbL). Wetter: Open-Meteo (CC BY 4.0). Live-Verkehr: adsb.lol (ODbL)",
   "credits.code": "Code: MIT-Lizenz · 3D-Modelle und Texturen: CC BY 4.0",
   "credits.libs": "Mit Three.js und Vite gebaut",
   "credits.close": "Schliessen",
@@ -40,7 +40,7 @@
   "camera.orbit": "Orbit",
   "flight.waiting": "Lade Gelände am Startort …",
   "flight.paused": "Pause – P zum Fortsetzen",
-  "flight.help": "Klick: Maus-Steuerung (N an/aus) · W/S: Nase runter/rauf · A/D: rollen · Q/E: gieren · Shift/Ctrl: Schub · Leertaste: Boost · Bild↑/Bild↓: Trimm · G: Fahrwerk · V: Klappen · B: Bremse · C: Kamera · M: Karte · O: Ton · P: Pause · ⌫: Neustart · J: aussteigen / abspringen",
+  "flight.help": "Klick: Maus-Steuerung (N an/aus) · W/S: Nase runter/rauf · A/D: rollen · Q/E: gieren · Shift/Ctrl: Schub · Leertaste: Boost · Bild↑/Bild↓: Trimm · G: Fahrwerk · V: Klappen · B: Bremse · C: Kamera · M: Karte · O: Ton · P: Pause · ⌫: Neustart · J: aussteigen / abspringen · T: Verkehr beschriften",
   "gearDown": "Fahrwerk ausgefahren",
   "gearUp": "Fahrwerk eingefahren",
   "landing.butter": "Butterweiche Landung",
@@ -121,5 +121,12 @@
   "pilot.enter": "Eingestiegen",
   "pilot.tooFar": "Zum Einsteigen näher ans Flugzeug gehen",
   "pilot.stopFirst": "Zum Aussteigen erst anhalten",
-  "pilot.aircraftLost": "Das Flugzeug ist zerstört – ⌫: neuer Flug"
+  "pilot.aircraftLost": "Das Flugzeug ist zerstört – ⌫: neuer Flug",
+  "weather.live": "Echtes Wetter (live)",
+  "settings.traffic": "Verkehr",
+  "traffic.auto": "Echt (sonst simuliert)",
+  "traffic.sim": "Simuliert",
+  "traffic.off": "Aus",
+  "traffic.labels": "Verkehr: Beschriftung an",
+  "traffic.labelsOff": "Verkehr: Beschriftung aus"
 }

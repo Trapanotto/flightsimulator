@@ -16,6 +16,17 @@ export default defineConfig({
   worker: {
     format: 'es',
   },
+  // Live traffic while developing: the ADS-B service sends no CORS headers, the dev server
+  // relays it. The built site needs a relay (tools/traffic-relay, VITE_TRAFFIC_URL).
+  server: {
+    proxy: {
+      '/flightsimulator/adsb': {
+        target: 'https://api.adsb.lol',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/flightsimulator\/adsb/, ''),
+      },
+    },
+  },
   test: {
     include: ['tests/**/*.test.ts'],
   },

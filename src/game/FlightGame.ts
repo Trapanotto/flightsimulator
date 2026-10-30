@@ -4,6 +4,7 @@ import { FlightAudio } from '../audio/FlightAudio';
 import { Aircraft } from '../aircraft/Aircraft';
 import { Pilot } from './Pilot';
 import { Wreck, WreckFx } from './Wreck';
+import { Traffic } from './Traffic';
 import type { CockpitData } from '../aircraft/CockpitDisplays';
 import { WingTrails } from '../aircraft/WingTrails';
 import { CameraRig } from '../camera/CameraRig';
@@ -98,6 +99,8 @@ export class FlightGame {
   pilot?: Pilot;
   /** The burning wreck of the last crash. */
   wreck?: Wreck;
+  /** Other aircraft (real or simulated). */
+  traffic?: Traffic;
   /** Fire, smoke and light for wrecks: in the scene from the start (no stall at a crash). */
   private readonly wreckFx = new WreckFx();
   /** Inputs of the aircraft while nobody flies it: hands off, throttle where it was. */
@@ -134,6 +137,10 @@ export class FlightGame {
     // Only the aircraft gets the sky reflection. Not via scene.environment: since three r17x
     // that also lights Lambert materials (terrain, houses) and washes the world out.
     this.envMap ??= makeSkyEnvironment(this.world.renderer, this.world.sky);
+    if (!this.traffic) {
+      this.traffic = new Traffic(this.world, this.envMap);
+      this.world.scene.add(this.traffic.group);
+    }
     const type = this.type;
     const a = await Aircraft.load(type, this.envMap);
     if (type !== this.type) return; // another aircraft was chosen meanwhile
@@ -192,6 +199,7 @@ export class FlightGame {
     if (this.aircraft) this.world.scene.remove(this.aircraft.root, this.trails.group);
     this.endChallenge();
     this.clearOutside();
+    this.traffic?.dispose();
     this.wreckFx.dispose();
     this.envMap?.dispose();
   }
@@ -336,6 +344,7 @@ export class FlightGame {
     this.wreck?.rebase(delta);
     this.crashCam?.centre.sub(delta);
     this.crashCam?.from.sub(delta);
+    this.traffic?.rebase(delta);
     this.prevPos.sub(delta);
     this.renderPos.sub(delta);
     this.lastPos.sub(delta);
@@ -375,6 +384,7 @@ export class FlightGame {
 
     if (!this.paused && !this.waitingForTerrain) {
       this.acc = Math.min(this.acc + dt, 0.25);
+      this.updateWind(dt);
       const input = this.pilot ? this.unmannedInput() : c.input;
       while (this.acc >= STEP) {
         this.prevPos.copy(this.fm.position);
@@ -393,6 +403,10 @@ export class FlightGame {
       if (this.fm.crashed && this.crashTime > 0 && this.time - this.crashTime > RESPAWN_DELAY)
         this.respawn();
       this.updatePilot(dt);
+      if (this.traffic && !this.waitingForTerrain) {
+        this.traffic.mode = this.world.settings.traffic ?? 'auto';
+        this.traffic.update(dt, this.pilot ? this.pilot.position : this.fm.position);
+      }
     }
     this.updateWreck(dt);
 
@@ -456,6 +470,10 @@ export class FlightGame {
 
   private readonly cockpit: CockpitData = {
     ias: 0,
+    gs: 0,
+    windFrom: 0,
+    windSpeed: 0,
+    oat: 15,
     alt: 0,
     vs: 0,
     heading: 0,
@@ -493,6 +511,12 @@ export class FlightGame {
     const [lon, lat, alt] = this.world.toGeo(f.position);
     const e = this.type.engine;
     d.ias = f.speed;
+    d.gs = f.groundSpeed;
+    const wx = this.world.currentWeather();
+    d.windFrom = wx.windFrom;
+    d.windSpeed = this.world.windAt(f.position, this.tmp).length();
+    d.oat = wx.temperature - (alt - 500) * 0.0065;
+    d.traffic = this.traffic?.blips(f.position, d.heading) ?? [];
     d.alt = alt;
     d.vs = f.verticalSpeed;
     d.heading =
@@ -602,6 +626,12 @@ export class FlightGame {
         break;
       case 'pause':
         this.paused = !this.paused;
+        break;
+      case 'labels':
+        if (this.traffic) {
+          this.traffic.labels = !this.traffic.labels;
+          this.say(this.traffic.labels ? 'traffic.labels' : 'traffic.labelsOff', 'info', 2);
+        }
         break;
       case 'mute':
         this.muted = !this.muted;
@@ -743,6 +773,35 @@ export class FlightGame {
     }
   }
 
+  private gustTime = 0;
+  private readonly gust = new Vector3();
+
+  /**
+   * Wind on the aircraft: the weather's wind at its height plus gusts and light turbulence
+   * (a few slow sines per axis, stronger with the gust spread and the wind).
+   */
+  private updateWind(dt: number) {
+    const f = this.fm;
+    const w = this.world.currentWeather();
+    this.world.windAt(f.position, f.wind);
+    this.gustTime += dt;
+    const t = this.gustTime;
+    const amp = Math.max(0.2, (w.gusts - w.windSpeed) * 0.45 + w.windSpeed * 0.1);
+    const up = f.worldUp;
+    this.gust
+      .set(
+        Math.sin(t * 0.71) + 0.6 * Math.sin(t * 1.93 + 1),
+        0,
+        Math.sin(t * 0.53 + 3) + 0.6 * Math.sin(t * 1.61 + 4),
+      )
+      .multiplyScalar(amp * 0.5);
+    // Vertical gusts are weaker and die out towards the ground.
+    const agl = this.world.heightAboveGround(f.position) ?? 300;
+    const vert =
+      (Math.sin(t * 1.13 + 2) + 0.5 * Math.sin(t * 2.71)) * amp * 0.25 * Math.min(1, agl / 150);
+    f.wind.add(this.gust).addScaledVector(up, vert - this.gust.dot(up));
+  }
+
   /** Velocity just before the impact (the crash stops the flight model). */
   private readonly lastVelocity = new Vector3();
 
@@ -786,7 +845,7 @@ export class FlightGame {
     }
     if (f.crashed) return;
     const flying = !f.onGround;
-    if (!flying && f.speed > 1.5) {
+    if (!flying && f.groundSpeed > 1.5) {
       this.say('pilot.stopFirst', 'info', 3);
       return;
     }
