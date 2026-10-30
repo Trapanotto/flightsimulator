@@ -75,10 +75,61 @@ const X = new Vector3(1, 0, 0);
 const Y = new Vector3(0, 1, 0);
 const Z = new Vector3(0, 0, 1);
 
-/** ISA density ratio up to 11 km. */
-export function densityRatio(altitude: number): number {
+/**
+ * Density ratio up to 11 km: ISA pressure, temperature ISA + isaDev (K). Warm air is thinner
+ * (density altitude): a hot summer day costs lift and power like a higher airfield.
+ */
+export function densityRatio(altitude: number, isaDev = 0): number {
   const h = Math.max(-500, Math.min(11000, altitude));
-  return Math.pow(1 - 2.25577e-5 * h, 4.2559);
+  const isa = Math.pow(1 - 2.25577e-5 * h, 4.2559);
+  const t = 288.15 - 0.0065 * h;
+  return isa * (t / (t + isaDev));
+}
+
+/**
+ * Lift curve in the JSBSim style (as in FlightGear's c172p): linear, then rounding off to
+ * CLmax over the last 2 degrees (the wing stalls gradually from the root) with the peak
+ * 1 degree past where the straight line would reach CLmax; after it the lift drops by about a
+ * third, and towards flat-plate lift (sin 2a) at very large angles.
+ * `latched`: after a stall the flow stays separated until the angle is ~3 deg lower
+ * (hysteresis), so the lift stays on the lower branch.
+ */
+export function liftCurve(
+  alpha: number,
+  CL0: number,
+  CLa: number,
+  CLmax: number,
+  latched = false,
+): number {
+  const sign = alpha < -0.01 ? -1 : 1;
+  // Negative side: the same shape, a little weaker.
+  const cmax = sign > 0 ? CLmax : CLmax * 0.8 + CL0;
+  const a = sign > 0 ? alpha : -alpha;
+  const cl0 = sign > 0 ? CL0 : -CL0;
+  const a0 = (cmax - cl0) / CLa;
+  // Parabola leaving the straight line tangentially, slope 0 at the peak: it stays under
+  // the line and reaches CLmax 1 degree past where the line would.
+  const d = 2 * DEG;
+  const aLin = a0 - d / 2;
+  const aS = aLin + d;
+  let cl: number;
+  if (a <= aLin) cl = cl0 + CLa * a;
+  else if (a <= aS && !latched) {
+    const x = a - aLin;
+    cl = cl0 + CLa * aLin + CLa * x - (CLa * x * x) / (2 * d);
+  } else {
+    const past = Math.max(0, a - (latched ? aS - 3 * DEG : aS));
+    const post = cmax * (0.66 + 0.34 * Math.exp(-past / (4 * DEG))) * (latched ? 0.9 : 1);
+    const flat = 1.05 * Math.sin(2 * a);
+    const w = Math.min(1, Math.max(0, (a - 20 * DEG) / (20 * DEG)));
+    cl = Math.min(post, cl0 + CLa * a) * (1 - w) + flat * w;
+  }
+  return sign * cl;
+}
+
+/** Angle of attack of the lift peak for the curve above. */
+export function stallAngle(CL0: number, CLa: number, CLmax: number): number {
+  return (CLmax - CL0) / CLa + 1 * DEG;
 }
 
 /** Thrust in newtons at true airspeed v (m/s), density ratio sigma, throttle 0..1. */
@@ -162,6 +213,21 @@ export class FlightModel {
    */
   readonly wind = new Vector3();
   groundSpeed = 0;
+  /** Temperature deviation from the standard atmosphere, K (from the weather). */
+  isaDeviation = 0;
+  /**
+   * Engine output 0..1: follows the throttle with the engine's own lag (piston almost at
+   * once, turboprop about a second, a jet slowly from idle - spool-up).
+   */
+  engine = 0;
+  /** Flow separated (stall hysteresis) and the wing that drops first (+1 right, -1 left). */
+  private stallLatch = false;
+  private dropSide = 1;
+  /** Rate of change of the angle of attack (filtered), rad/s: downwash lag at the tail. */
+  private alphaDot = 0;
+  private prevAlpha = 0;
+  /** Lift gained near the ground (ground effect), factor. */
+  private groundLift = 1;
   /** Angular velocity in model axes (rad/s). */
   readonly omega = new Vector3();
   /** Unit direction of flight (or the nose when standing still). */
@@ -260,7 +326,7 @@ export class FlightModel {
       // Trimmed flight: nose up by the angle of attack that carries the weight, elevator
       // trim that cancels the pitching moment there.
       const a = this.p.aero;
-      const sigma = densityRatio(this.altitudeOf(position));
+      const sigma = densityRatio(this.altitudeOf(position), this.isaDeviation);
       const { alpha, de, qs, cl } = this.trimFor(speed, sigma);
       this.rotateLocal(X, -alpha);
       this.updateAxes();
@@ -283,6 +349,10 @@ export class FlightModel {
       this.trim = onGround && !this.p.fbw ? this.trimFor(1.5 * this.stallSpeed, 1).de : 0;
       if (onGround) this.settle();
     }
+    this.engine = this.throttle;
+    this.stallLatch = false;
+    this.alphaDot = 0;
+    this.prevAlpha = this.alpha;
     this.speed = speed;
     this.groundSpeed = this.velocity.length();
     this.direction.copy(this.groundSpeed > 0.5 ? this.velocity : this.forward).normalize();
@@ -365,10 +435,14 @@ export class FlightModel {
     // Ground effect: the ground blocks the wing-tip vortices, induced drag falls within about
     // one span of the ground (McCormick).
     const h = this.env.heightAboveGround(this.position);
-    if (h === undefined) this.groundEffect = 1;
-    else {
+    if (h === undefined) {
+      this.groundEffect = 1;
+      this.groundLift = 1;
+    } else {
       const k = Math.pow((16 * Math.max(0.3, h)) / this.p.span, 2);
       this.groundEffect = k / (1 + k);
+      // Lift gain near the ground (as JSBSim's kCLge table, a bit milder: +12 % at h = 0).
+      this.groundLift = 1 + 0.12 * Math.exp((-4.5 * Math.max(0, h)) / this.p.span);
     }
     const n = Math.max(1, Math.round(dt / SUB_DT));
     for (let i = 0; i < n && !this.crashed; i++) this.subStep(dt / n, input, events);
@@ -380,11 +454,31 @@ export class FlightModel {
     this.env.up(this.position, this.worldUp);
     this.updateAxes();
     this.throttle = clamp(input.throttle, 0, 1);
+    const e = p.propulsion;
+    {
+      // Engine lag: piston ~0.3 s, turboprop ~1.2 s, jets slow from idle (N1 spool-up),
+      // faster down than up.
+      const up = this.throttle > this.engine;
+      const tau =
+        e.kind === 'prop'
+          ? e.power > 300_000
+            ? up
+              ? 1.2
+              : 0.9
+            : 0.3
+          : e.afterburner > 1
+            ? up
+              ? 0.8 + 2.2 * (1 - this.engine) ** 2
+              : 1
+            : up
+              ? 1.2 + 5 * (1 - this.engine) ** 2
+              : 2;
+      this.engine += (this.throttle - this.engine) * (1 - Math.exp(-dt / tau));
+    }
 
     // Afterburner: limited, recharges slowly.
-    const e = p.propulsion;
     const ab = e.kind === 'jet' ? e.afterburnerSeconds : 0;
-    this.boosting = ab > 0 && input.boost && this.boostLeft > 0 && this.throttle > 0.9;
+    this.boosting = ab > 0 && input.boost && this.boostLeft > 0 && this.engine > 0.9;
     this.boostLeft = this.boosting
       ? Math.max(0, this.boostLeft - dt)
       : Math.min(ab, this.boostLeft + 0.2 * dt);
@@ -402,10 +496,22 @@ export class FlightModel {
     qInv.copy(this.quaternion).invert();
     vAirM.copy(this.velocity).sub(this.wind).applyQuaternion(qInv);
     const V = vAirM.length();
-    const sigma = densityRatio(this.altitudeOf(this.cgW));
+    const sigma = densityRatio(this.altitudeOf(this.cgW), this.isaDeviation);
     const qbar = 0.5 * RHO0 * sigma * V * V;
     this.alpha = V > 1 ? Math.atan2(-vAirM.y, vAirM.z) : 0;
     this.beta = V > 1 ? Math.asin(clamp(-vAirM.x / V, -1, 1)) : 0;
+    // Rate of change of alpha, smoothed (it comes from a difference): the tail feels the
+    // wing's downwash a moment late, which damps pitching.
+    const rawAdot = V > 15 && dt > 0 ? clamp((this.alpha - this.prevAlpha) / dt, -2, 2) : 0;
+    this.alphaDot += (rawAdot - this.alphaDot) * Math.min(1, dt / 0.04);
+    this.prevAlpha = this.alpha;
+    // Stall hysteresis: the flow separates at the peak and reattaches ~3 deg lower.
+    const aS = this.alphaStall();
+    if (!this.stallLatch && this.alpha > aS && V > 10) {
+      this.stallLatch = true;
+      // The wing that drops: the one the aircraft yaws or slips towards.
+      this.dropSide = this.omega.y < 0 || this.beta > 0 ? 1 : -1;
+    } else if (this.stallLatch && this.alpha < aS - 3 * DEG) this.stallLatch = false;
     const Vr = Math.max(V, 10);
     const ph = (this.omega.z * p.span) / (2 * Vr);
     const qh = (-this.omega.x * p.chord) / (2 * Vr);
@@ -420,22 +526,38 @@ export class FlightModel {
     c.r += clamp(this.cmd.r - c.r, -rate, rate);
     const de = clamp(c.e + this.trim, -1, 1);
 
-    const cl = this.liftCoefficient(this.alpha) + a.CLde * de + a.CLq * qh;
+    const adh = (this.alphaDot * p.chord) / (2 * Vr);
+    const CLadot = a.CLadot ?? 1.5;
+    const Cmadot = a.Cmadot ?? 0.42 * a.Cmq;
+    const cl =
+      this.liftCoefficient(this.alpha) * this.groundLift + a.CLde * de + a.CLq * qh + CLadot * adh;
     const ar = (p.span * p.span) / p.wingArea;
     const stall = Math.max(0, this.alpha - this.alphaStall());
+    // Drag past the stall grows towards that of a flat plate (2 sin^2 a).
+    const sa = Math.sin(Math.min(this.alpha, 80 * DEG));
+    const ss = Math.sin(this.alphaStall());
+    const stallDrag = this.alpha > this.alphaStall() ? 1.9 * (sa * sa - ss * ss) : 0;
     const cd =
       a.CD0 +
       (this.gearDown ? a.CDgear : 0) +
       this.flaps * a.CDflaps +
       ((cl * cl) / (Math.PI * a.e * ar)) * this.groundEffect +
-      1.2 * stall +
+      stallDrag +
       0.3 * Math.abs(this.beta) +
       waveDrag(V);
     const cy = a.CYb * this.beta + a.CYdr * c.r;
-    const Cl = a.Clb * this.beta + a.Clp * ph + a.Clr * rh + a.Clda * c.a + a.Cldr * c.r;
+    // Stalled: one wing drops first (asymmetric separation), stronger the deeper the stall.
+    const drop = this.stallLatch ? this.dropSide * 0.06 * Math.min(1, stall / (5 * DEG) + 0.3) : 0;
+    const Cl = a.Clb * this.beta + a.Clp * ph + a.Clr * rh + a.Clda * c.a + a.Cldr * c.r + drop;
     // Past the stall the wing loses its lift ahead of the tail: the nose drops.
     const Cm =
-      a.Cm0 + a.Cma * this.alpha + a.Cmq * qh + a.Cmde * de + this.flaps * a.Cmflaps - 0.6 * stall;
+      a.Cm0 +
+      a.Cma * this.alpha +
+      a.Cmq * qh +
+      Cmadot * adh +
+      a.Cmde * de +
+      this.flaps * a.Cmflaps -
+      0.6 * stall;
     const Cn = a.Cnb * this.beta + a.Cnr * rh + a.Cnp * ph + a.Cndr * c.r + a.Cnda * c.a;
 
     forceM.set(0, 0, 0);
@@ -451,7 +573,27 @@ export class FlightModel {
       // Roll about +z, pitch (nose up) about -x, yaw (nose right) about -y.
       torqueM.set(-qs * p.chord * Cm, -qs * p.span * Cn, qs * p.span * Cl);
     }
-    forceM.z += thrustAt(p, V, sigma, this.throttle, this.boosting);
+    const thrust = thrustAt(p, V, sigma, this.engine, this.boosting);
+    forceM.z += thrust;
+    if (e.kind === 'prop' && !this.crashed) {
+      // Single propeller (clockwise seen from the cockpit), as JSBSim/FlightGear model it:
+      // - torque reaction rolls the aircraft to the left,
+      // - the spiralling slipstream hits the fin on the left and the descending blade bites
+      //   harder at high angle of attack (P-factor): the nose yaws left - right rudder on
+      //   the takeoff roll and in the climb,
+      // - the slipstream blows over the fin: the rudder steers even at walking pace.
+      const shaft = (e.power * this.engine * sigma) / (2 * Math.PI * e.rps);
+      const R = e.radius;
+      // Engine and fin are rigged to cancel all this at cruise: it shows at low speed and
+      // high power (takeoff, climb, slow flight).
+      const low = clamp(1 - V / (0.55 * p.vne), 0, 1) ** 2;
+      const slip = 0.28 / (1 + V / 30);
+      const pFactor = 0.6 * clamp(this.alpha, -0.1, 0.35);
+      torqueM.z -= shaft * 0.35 * low;
+      torqueM.y += thrust * R * (slip + pFactor) * low;
+      const qSlip = (0.5 * thrust) / (Math.PI * R * R);
+      torqueM.y -= qSlip * p.wingArea * 0.35 * p.span * a.Cndr * c.r;
+    }
 
     // ---- forces in world space ----
     forceW.copy(forceM).applyQuaternion(this.quaternion);
@@ -532,7 +674,7 @@ export class FlightModel {
       let qCmd = input.pitch * p.keyPitchRate * DEG;
       if (this.onGround) qCmd = Math.min(qCmd, 1.5 * (p.rotationLimit * DEG - theta));
       // A held key never pulls the wing past the stall.
-      else qCmd = Math.min(qCmd, 2 * (this.alphaStall() - 2 * DEG - this.alpha));
+      else qCmd = Math.min(qCmd, 2 * (this.alphaStall() - 3 * DEG - this.alpha));
       const qDot = 4 * (qCmd - qr);
       const cmRest = a.Cm0 + a.Cma * this.alpha + a.Cmq * qh + this.flaps * a.Cmflaps - 0.6 * stall;
       const de = ((I[0] * qDot + this.gearTorque.x) / (qs * p.chord) - cmRest) / a.Cmde;
@@ -601,7 +743,7 @@ export class FlightModel {
       n += stick > 0 ? stick * (fbw.gMax - 1) : stick * (1 - fbw.gMin);
       let qCmd = (G / Vr) * (n - Math.cos(theta) * Math.cos(bank));
       if (free) qCmd += 0.6 * (this.pathRef - gamma);
-      const aProt = this.alphaStall() - 2 * DEG;
+      const aProt = this.alphaStall() - 3 * DEG;
       qCmd = clamp(qCmd, 2 * (-0.15 - this.alpha), 2 * (aProt - this.alpha));
       const qDot = fbw.pitchGain * (qCmd - qr);
       const cmRest = a.Cm0 + a.Cma * this.alpha + a.Cmq * qh + this.flaps * a.Cmflaps - 0.6 * stall;
@@ -739,18 +881,21 @@ export class FlightModel {
 
   private liftCoefficient(alpha: number): number {
     const a = this.p.aero;
-    const linear = a.CL0 + this.flaps * a.CLflaps + a.CLa * alpha;
-    const as = this.alphaStall();
-    const clmax = a.CLmax + this.flaps * a.CLflaps;
-    if (alpha <= as) return Math.max(-clmax * 0.8, linear);
-    // Past the stall the lift breaks down to ~60 % over about 10 degrees.
-    return clmax * (0.6 + 0.4 * Math.exp(-(alpha - as) / (6 * DEG)));
+    // Flaps shift the curve up (CL0 and CLmax by the same amount) and stall a little earlier.
+    const shift = this.flaps * 1.5 * DEG;
+    return liftCurve(
+      alpha + shift,
+      a.CL0 + this.flaps * a.CLflaps - a.CLa * shift,
+      a.CLa,
+      a.CLmax + this.flaps * a.CLflaps,
+      this.stallLatch,
+    );
   }
 
-  /** Angle where the linear lift reaches CLmax (flaps shift the curve up, same CLmax gain). */
+  /** Angle of attack of the lift peak (flaps lower it a little). */
   private alphaStall(): number {
     const a = this.p.aero;
-    return (a.CLmax - a.CL0) / a.CLa - this.flaps * 1.5 * DEG;
+    return stallAngle(a.CL0, a.CLa, a.CLmax) - this.flaps * 1.5 * DEG;
   }
 
   private altitudeOf(p: Vector3): number {

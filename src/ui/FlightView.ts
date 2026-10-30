@@ -401,7 +401,7 @@ export class FlightView {
       this.set('speed', String(Math.round(fm.speed * 3.6)));
       // Engine: propeller rpm or fan speed N1 %, from idle to max with the throttle.
       const e = g.type.engine;
-      const v = fm.crashed ? 0 : e.idle + (e.max - e.idle) * fm.throttle;
+      const v = fm.crashed ? 0 : e.idle + (e.max - e.idle) * fm.engine;
       this.set('rpm', e.display === 'rpm' ? String(Math.round(v / 10) * 10) : v.toFixed(1));
       this.set('rpmUnit', e.display === 'rpm' ? this.tr('hud.rpm') : '% N1');
       this.q('[data-v="engineCell"]').classList.toggle('boost', fm.boosting);

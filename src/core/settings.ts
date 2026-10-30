@@ -173,6 +173,7 @@ export function weatherPreset(w: Weather): WeatherLook {
     windSpeed: WEATHER_WIND[w],
     gusts: WEATHER_WIND[w] * 1.5,
     temperature: 12,
+    isaDeviation: 0,
     visibility: 3.9 / (1.1 * WEATHER_HAZE[w]),
     cloudCover: Math.round(WEATHER_COVERAGE[w] * 120),
     code: 0,

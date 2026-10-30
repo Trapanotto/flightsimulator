@@ -5,6 +5,9 @@ import {
   type FlightEvent,
   type FlightInput,
   FlightModel,
+  densityRatio,
+  liftCurve,
+  stallAngle,
   stallSpeed,
   topSpeed,
 } from '../src/physics/FlightModel';
@@ -308,3 +311,73 @@ describe('handling (flight controls)', () => {
     expect(m.verticalSpeed).toBeGreaterThan(vs * 0.5);
   });
 });
+
+describe('JSBSim-style details (as in FlightGear)', () => {
+  it('lift rounds off into the stall, drops after it, stays lower until the flow reattaches', () => {
+    const a = C172.physics.aero;
+    const aS = stallAngle(a.CL0, a.CLa, a.CLmax);
+    const peak = liftCurve(aS, a.CL0, a.CLa, a.CLmax);
+    expect(peak).toBeCloseTo(a.CLmax, 2);
+    // Below the peak: already under the straight line (gradual stall).
+    expect(liftCurve(aS - 1 * DEG, a.CL0, a.CLa, a.CLmax)).toBeLessThan(
+      a.CL0 + a.CLa * (aS - 1 * DEG),
+    );
+    // Continuous and smooth up to the peak, then a drop.
+    let prev = liftCurve(0, a.CL0, a.CLa, a.CLmax);
+    for (let x = 0.5 * DEG; x <= aS; x += 0.5 * DEG) {
+      const cl = liftCurve(x, a.CL0, a.CLa, a.CLmax);
+      expect(cl).toBeGreaterThanOrEqual(prev - 1e-9);
+      expect(cl - prev).toBeLessThan(a.CLa * 0.5 * DEG + 1e-6);
+      prev = cl;
+    }
+    expect(liftCurve(aS + 8 * DEG, a.CL0, a.CLa, a.CLmax)).toBeLessThan(0.85 * a.CLmax);
+    // Hysteresis: separated flow gives less lift at the same angle.
+    expect(liftCurve(aS - 1 * DEG, a.CL0, a.CLa, a.CLmax, true)).toBeLessThan(
+      liftCurve(aS - 1 * DEG, a.CL0, a.CLa, a.CLmax, false),
+    );
+  });
+
+  it('warm air is thinner (density altitude)', () => {
+    expect(densityRatio(500, 20)).toBeLessThan(densityRatio(500, 0) * 0.94);
+    expect(densityRatio(500, -15)).toBeGreaterThan(densityRatio(500, 0));
+  });
+
+  it('jet engines spool up slowly from idle, the piston engine at once', () => {
+    const jet = inAir(A320, 80);
+    const piston = inAir(C172, 40);
+    jet.engine = piston.engine = 0;
+    const tJet = timeTo(jet, 0.9);
+    const tPiston = timeTo(piston, 0.9);
+    expect(tPiston).toBeLessThan(1.2);
+    expect(tJet).toBeGreaterThan(4);
+    expect(tJet).toBeLessThan(12);
+  });
+
+  it('a single propeller yaws and rolls the Cessna left at full power and low speed', () => {
+    const m = inAir(C172, 30);
+    const start = m.forward.clone();
+    run(m, 3, { ...idle(), throttle: 1 });
+    // Positive = turned left (the west side when heading north on this flat test world).
+    const turn = new Vector3().crossVectors(start, m.forward).y;
+    expect(turn).toBeGreaterThan(0.005);
+  });
+
+  it('flies through moving air: headwind lowers the ground speed, not the airspeed', () => {
+    const m = inAir(C172, 50);
+    m.wind.copy(NORTH).multiplyScalar(-12);
+    m.reset(m.position.clone(), NORTH, 50, false);
+    run(m, 5, () => holdVs(m, 0, m.throttle));
+    expect(m.speed).toBeGreaterThan(40);
+    expect(m.groundSpeed).toBeLessThan(m.speed - 8);
+  });
+});
+
+/** Seconds until the engine output reaches `level` at full throttle. */
+function timeTo(m: FlightModel, level: number) {
+  let t = 0;
+  while (m.engine < level && t < 30) {
+    m.step(DT, { ...idle(), throttle: 1 }, []);
+    t += DT;
+  }
+  return t;
+}

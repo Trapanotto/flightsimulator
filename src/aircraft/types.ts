@@ -22,6 +22,12 @@ export interface Aero {
   CLflaps: number;
   CLde: number;
   CLq: number;
+  /**
+   * Downwash lag (alpha-dot): lift and pitching moment per unit alpha-dot * c / 2V. Default
+   * 1.5 and 0.42 * Cmq (FlightGear's c172p: 1.7 and -5.2).
+   */
+  CLadot?: number;
+  Cmadot?: number;
   /** Drag: zero-lift, gear, full flaps, Oswald factor. */
   CD0: number;
   CDgear: number;
@@ -49,7 +55,15 @@ export interface Aero {
 }
 
 export type Propulsion =
-  | { kind: 'prop'; power: number; efficiency: number; staticThrust: number }
+  | {
+      kind: 'prop';
+      power: number;
+      efficiency: number;
+      staticThrust: number;
+      /** Propeller radius (m) and revolutions per second at full power: torque, slipstream. */
+      radius: number;
+      rps: number;
+    }
   | { kind: 'jet'; staticThrust: number; afterburner: number; afterburnerSeconds: number };
 
 /**
@@ -195,7 +209,14 @@ export const C172: AircraftType = {
       CDflaps: 0.05,
       e: 0.75,
     },
-    propulsion: { kind: 'prop', power: 134_000, efficiency: 0.78, staticThrust: 2600 },
+    propulsion: {
+      kind: 'prop',
+      power: 134_000,
+      efficiency: 0.78,
+      staticThrust: 2600,
+      radius: 0.95,
+      rps: 45,
+    },
     vne: 163 * KT,
     controlRate: 4,
     keyPitchRate: 12,
@@ -269,7 +290,14 @@ export const PC12: AircraftType = {
       CYb: -0.4,
       CLq: 4,
     },
-    propulsion: { kind: 'prop', power: 895_000, efficiency: 0.82, staticThrust: 11_000 },
+    propulsion: {
+      kind: 'prop',
+      power: 895_000,
+      efficiency: 0.82,
+      staticThrust: 11_000,
+      radius: 1.34,
+      rps: 28,
+    },
     vne: 240 * KT,
     controlRate: 3.5,
     keyPitchRate: 10,

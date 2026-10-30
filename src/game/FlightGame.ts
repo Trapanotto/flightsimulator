@@ -453,7 +453,7 @@ export class FlightGame {
     const inside = this.rig.mode === 'cockpit' && !this.pilot;
     this.aircraft?.setCockpitView(inside);
     this.audio.update(dt, {
-      throttle: f.throttle,
+      throttle: f.engine,
       rpm: this.aircraft?.controls.rpm ?? 0,
       speed: f.speed,
       boost: f.boosting,
@@ -525,7 +525,8 @@ export class FlightGame {
     d.bank = f.bank;
     d.turnRate = -f.omega.dot(f.worldUp);
     d.throttle = f.throttle;
-    d.engine = f.crashed ? 0 : e.idle + (e.max - e.idle) * f.throttle;
+    // Engine instruments show what the engine does (spool-up), not the lever.
+    d.engine = f.crashed ? 0 : e.idle + (e.max - e.idle) * f.engine;
     d.engineDisplay = e.display;
     d.engineIdle = e.idle;
     d.engineMax = e.max;
@@ -578,7 +579,7 @@ export class FlightGame {
     a.controls.rudder = i.yaw;
     a.controls.flaps = this.fm.flaps;
     a.controls.gear = this.fm.gearDown ? 1 : 0;
-    a.controls.rpm = this.fm.crashed ? 0 : 0.3 + 0.7 * this.fm.throttle;
+    a.controls.rpm = this.fm.crashed ? 0 : 0.3 + 0.7 * this.fm.engine;
     a.controls.throttle = this.fm.throttle;
     a.update(dt);
     if (this.rig.mode === 'cockpit' && a.displays) a.updateDisplays(dt, this.cockpitData());
@@ -783,6 +784,7 @@ export class FlightGame {
   private updateWind(dt: number) {
     const f = this.fm;
     const w = this.world.currentWeather();
+    f.isaDeviation = w.isaDeviation;
     this.world.windAt(f.position, f.wind);
     this.gustTime += dt;
     const t = this.gustTime;

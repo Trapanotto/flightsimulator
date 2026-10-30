@@ -18,6 +18,8 @@ export interface WeatherLook {
   windFrom: number;
   windSpeed: number;
   gusts: number;
+  /** Temperature minus the standard atmosphere at the station (K): density altitude. */
+  isaDeviation: number;
   /** For displays: temperature °C, visibility m, cloud cover %, WMO weather code. */
   temperature: number;
   visibility: number;
@@ -119,6 +121,7 @@ export function weatherFromOpenMeteo(r: OpenMeteoCurrent): WeatherLook {
     windSpeed: Math.max(0, c.wind_speed_10m),
     gusts: Math.max(c.wind_gusts_10m ?? 0, c.wind_speed_10m),
     temperature: c.temperature_2m,
+    isaDeviation: c.temperature_2m - (15 - 0.0065 * elev),
     visibility: vis,
     cloudCover: c.cloud_cover,
     code,
