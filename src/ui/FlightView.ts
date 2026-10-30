@@ -194,7 +194,8 @@ export class FlightView {
     const thr = this.q<HTMLInputElement>('.touch-throttle');
     thr.addEventListener('input', () => (game.controls.touch.throttle = Number(thr.value) / 100));
     this.setupStick();
-    this.minimap = new Minimap(this.q('.fmap'), true);
+    // North always up, the aircraft arrow turns; compass ring around the edge.
+    this.minimap = new Minimap(this.q('.fmap'), false, true);
     game.onToggleMap = () => this.minimap.toggle();
     new PlaceSearch(this.q('.fmenu-search'), lang, (hit) => {
       this.toggleMenu(false);

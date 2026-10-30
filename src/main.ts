@@ -12,6 +12,13 @@ import type { Showcase } from './game/Showcase';
 import { type Course, courseById } from './game/challenges';
 import { findAircraft } from './aircraft/types';
 
+// Tile cache for repeat visits (public/sw.js); only in the built site.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  navigator.serviceWorker
+    .register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL })
+    .catch((err) => console.warn('tile cache', err));
+}
+
 const lang = detectLang();
 document.documentElement.lang = lang;
 

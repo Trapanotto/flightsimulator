@@ -255,8 +255,37 @@ export class World {
     this.buildings = new BuildingLayer(this, this.atmosphere.uniforms);
     this.buildings.radius = q2.buildingRadius;
     this.scene.add(this.buildings.group);
+    this.applyStartup();
     this.terrain.rebase(this.shift);
     this.scene.add(this.terrain.group);
+  }
+
+  private startup = false;
+
+  /**
+   * Behind the start screen's loading screen: coarser terrain (fewer, smaller tiles), no
+   * water mask and no houses. Switched off when the menu shows; the detail then streams in.
+   */
+  setStartup(on: boolean) {
+    if (this.startup === on) return;
+    this.startup = on;
+    if (on) this.applyStartup();
+    else {
+      this.terrain?.applyQuality(this.quality);
+      if (this.buildings) this.buildings.radius = this.quality.buildingRadius;
+    }
+  }
+
+  private applyStartup() {
+    if (!this.startup) return;
+    const q = this.quality;
+    this.terrain?.applyQuality({
+      ...q,
+      tau: q.tau * 2.2,
+      maxZoom: Math.min(q.maxZoom, 15),
+      water: false,
+    });
+    if (this.buildings) this.buildings.radius = 0;
   }
 
   /** Shows the world: renders until stop(). Pauses by itself while the tab is hidden. */
@@ -318,6 +347,7 @@ export class World {
     if (this.buildings) {
       this.buildings.radius = quality.buildingRadius;
     }
+    this.applyStartup();
     this.game?.applyQuality(quality);
     this.resize();
   }

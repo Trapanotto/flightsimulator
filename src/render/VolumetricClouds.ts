@@ -18,6 +18,7 @@ import {
 } from 'three';
 import type { AtmosphereUniforms } from './Atmosphere';
 import { NOISE_DECLARATIONS } from './aerial';
+import { detailNoiseData, shapeNoiseData } from './cloudNoise';
 
 /**
  * Volumetric clouds: a ray march through the cloud layer for every pixel (at reduced
@@ -47,81 +48,6 @@ function fromHalf(h: number): number {
   return s * 2 ** (e - 15) * (1 + f / 1024);
 }
 
-function rng(seed: number) {
-  return () => {
-    seed = (seed * 16807) % 2147483647;
-    return seed / 2147483647;
-  };
-}
-
-/**
- * Tileable inverted Worley noise (1 at feature points, 0 far away) for `cells` per side,
- * evaluated at a point given in texture units 0..1.
- */
-function worleyField(cells: number, seed: number) {
-  const rnd = rng(seed);
-  const pts = Float32Array.from({ length: cells * cells * cells * 3 }, rnd);
-  return (x: number, y: number, z: number) => {
-    const px = x * cells;
-    const py = y * cells;
-    const pz = z * cells;
-    const cx = Math.floor(px);
-    const cy = Math.floor(py);
-    const cz = Math.floor(pz);
-    let best = 9;
-    for (let k = -1; k <= 1; k++)
-      for (let j = -1; j <= 1; j++)
-        for (let i = -1; i <= 1; i++) {
-          const ix = (((cx + i) % cells) + cells) % cells;
-          const iy = (((cy + j) % cells) + cells) % cells;
-          const iz = (((cz + k) % cells) + cells) % cells;
-          const o = ((iz * cells + iy) * cells + ix) * 3;
-          const dx = cx + i + pts[o]! - px;
-          const dy = cy + j + pts[o + 1]! - py;
-          const dz = cz + k + pts[o + 2]! - pz;
-          best = Math.min(best, dx * dx + dy * dy + dz * dz);
-        }
-    return 1 - Math.min(1, Math.sqrt(best));
-  };
-}
-
-/** Tileable value-noise fbm (4 octaves from `base` lattice cells per side). */
-function valueFbm(base: number, seed: number) {
-  const rnd = rng(seed);
-  const octaves = [1, 2, 4, 8].map((k) => {
-    const n = base * k;
-    return { n, g: Float32Array.from({ length: n * n * n }, rnd) };
-  });
-  const smooth = (t: number) => t * t * (3 - 2 * t);
-  const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-  return (x: number, y: number, z: number) => {
-    let v = 0;
-    let amp = 0.5;
-    let total = 0;
-    for (const { n, g } of octaves) {
-      const fx = x * n;
-      const fy = y * n;
-      const fz = z * n;
-      const x0 = Math.floor(fx);
-      const y0 = Math.floor(fy);
-      const z0 = Math.floor(fz);
-      const tx = smooth(fx - x0);
-      const ty = smooth(fy - y0);
-      const tz = smooth(fz - z0);
-      const at = (i: number, j: number, k: number) =>
-        g[(((k % n) + n) % n) * n * n + (((j % n) + n) % n) * n + (((i % n) + n) % n)]!;
-      const c00 = lerp(at(x0, y0, z0), at(x0 + 1, y0, z0), tx);
-      const c10 = lerp(at(x0, y0 + 1, z0), at(x0 + 1, y0 + 1, z0), tx);
-      const c01 = lerp(at(x0, y0, z0 + 1), at(x0 + 1, y0, z0 + 1), tx);
-      const c11 = lerp(at(x0, y0 + 1, z0 + 1), at(x0 + 1, y0 + 1, z0 + 1), tx);
-      v += lerp(lerp(c00, c10, ty), lerp(c01, c11, ty), tz) * amp;
-      total += amp;
-      amp *= 0.5;
-    }
-    return v / total;
-  };
-}
-
 function texture3D(data: Uint8Array, size: number): Data3DTexture {
   const tex = new Data3DTexture(data, size, size, size);
   tex.format = RGBAFormat;
@@ -135,53 +61,43 @@ function texture3D(data: Uint8Array, size: number): Data3DTexture {
   return tex;
 }
 
-const byte = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 255);
-
-/**
- * Cloud shape noise (tileable, RGBA), the low-frequency volume of the clouds:
- *   R  Perlin-Worley: billowy value-noise fbm, its low values carved by Worley cells
- *   GBA  Worley fbm at increasing frequencies (erodes the base shape)
- */
+/** Shape noise texture (computed here; the game builds it in a worker, see CloudMarchPass). */
 export function makeShapeNoise(size = N3): Data3DTexture {
-  const fbm = valueFbm(4, 1234567);
-  const w = [4, 8, 16, 32, 64].map((c, i) => worleyField(c, 7001 + i * 31));
-  const data = new Uint8Array(size * size * size * 4);
-  for (let z = 0; z < size; z++)
-    for (let y = 0; y < size; y++)
-      for (let x = 0; x < size; x++) {
-        const u = x / size;
-        const v = y / size;
-        const t = z / size;
-        const f = w.map((fn) => fn(u, v, t));
-        const wf = (a: number) => f[a]! * 0.625 + f[a + 1]! * 0.25 + f[a + 2]! * 0.125;
-        const p = fbm(u, v, t);
-        // Perlin-Worley (Schneider 2015): the fbm remapped onto the Worley fbm floor.
-        const pw = wf(0) + Math.min(1, Math.max(0, (p - 0.25) / 0.6)) * (1 - wf(0));
-        const o = ((z * size + y) * size + x) * 4;
-        data[o] = byte(pw);
-        data[o + 1] = byte(wf(0));
-        data[o + 2] = byte(wf(1));
-        data[o + 3] = byte(wf(2));
-      }
-  return texture3D(data, size);
+  return texture3D(shapeNoiseData(size), size);
 }
 
-/** Detail noise (tileable, RGB = Worley fbm at three frequencies): erodes the cloud edges. */
+/** Detail noise texture. */
 export function makeDetailNoise(size = 32): Data3DTexture {
-  const w = [2, 4, 8, 16, 32].map((c, i) => worleyField(c, 9001 + i * 17));
-  const data = new Uint8Array(size * size * size * 4);
-  for (let z = 0; z < size; z++)
-    for (let y = 0; y < size; y++)
-      for (let x = 0; x < size; x++) {
-        const f = w.map((fn) => fn(x / size, y / size, z / size));
-        const wf = (a: number) => f[a]! * 0.625 + f[a + 1]! * 0.25 + f[a + 2]! * 0.125;
-        const o = ((z * size + y) * size + x) * 4;
-        data[o] = byte(wf(0));
-        data[o + 1] = byte(wf(1));
-        data[o + 2] = byte(wf(2));
-        data[o + 3] = 255;
-      }
-  return texture3D(data, size);
+  return texture3D(detailNoiseData(size), size);
+}
+
+/** Stand-in until the worker is done: no clouds (base noise 0, erosion floor 1). */
+function emptyNoise(): Data3DTexture {
+  return texture3D(
+    new Uint8Array([0, 255, 255, 255].concat(...Array(7).fill([0, 255, 255, 255]))),
+    2,
+  );
+}
+
+let noiseData: Promise<{ shape: Uint8Array; detail: Uint8Array }> | undefined;
+
+/** Builds both noises once, in a web worker (~0.3 s of work off the main thread). */
+function loadNoise() {
+  noiseData ??= new Promise((resolve, reject) => {
+    const w = new Worker(new URL('../workers/cloudNoise.worker.ts', import.meta.url), {
+      type: 'module',
+    });
+    w.onmessage = (e: MessageEvent<{ shape: Uint8Array; detail: Uint8Array }>) => {
+      resolve(e.data);
+      w.terminate();
+    };
+    w.onerror = (e) => {
+      reject(e);
+      w.terminate();
+    };
+    w.postMessage(null);
+  });
+  return noiseData;
 }
 
 const MARCH_FRAG = /* glsl */ `
@@ -527,8 +443,8 @@ export class CloudMarchPass extends Pass {
       uniforms: {
         ...atmosphere,
         depthBuffer: new Uniform(null),
-        uShape: new Uniform(makeShapeNoise()),
-        uDetail: new Uniform(makeDetailNoise()),
+        uShape: new Uniform(emptyNoise()),
+        uDetail: new Uniform(emptyNoise()),
         uProj: new Uniform(mainCam.projectionMatrix),
         uCamWorld: new Uniform(mainCam.matrixWorld),
         uCamPos: new Uniform(mainCam.position),
@@ -565,7 +481,26 @@ export class CloudMarchPass extends Pass {
       depthTest: false,
     });
     this.fullscreenMaterial = this.material;
+    loadNoise().then(
+      ({ shape, detail }) => {
+        if (this.disposed) return;
+        const u = this.material.uniforms;
+        (u.uShape!.value as Texture).dispose();
+        (u.uDetail!.value as Texture).dispose();
+        u.uShape!.value = texture3D(shape, N3);
+        u.uDetail!.value = texture3D(detail, 32);
+        this.hasHistory = false;
+      },
+      // Without workers: build them here.
+      () => {
+        if (this.disposed) return;
+        this.material.uniforms.uShape!.value = makeShapeNoise();
+        this.material.uniforms.uDetail!.value = makeDetailNoise();
+      },
+    );
   }
+
+  private disposed = false;
 
   private readonly pixelHalf = new Uint16Array(4);
   private output?: WebGLRenderTarget;
@@ -582,13 +517,28 @@ export class CloudMarchPass extends Pass {
     v = Math.min(1, Math.max(0, v));
     const x = Math.min(t.width - 1, Math.floor(u * t.width));
     const y = Math.min(t.height - 1, Math.floor(v * t.height));
-    try {
-      renderer.readRenderTargetPixels(t, x, y, 1, 1, this.pixelHalf);
-      return Math.min(1, Math.max(0, fromHalf(this.pixelHalf[3]!)));
-    } catch {
-      return 1;
+    // Asynchronous read-back: a synchronous one waits for the GPU to finish the frame (a
+    // stall of up to a few hundred ms when the GPU is busy, e.g. right at a crash). The
+    // answer comes a few frames later; until then the last one is used.
+    if (!this.reading) {
+      this.reading = true;
+      renderer
+        .readRenderTargetPixelsAsync(t, x, y, 1, 1, this.pixelHalf)
+        .then(
+          () => {
+            this.lastTransmittance = Math.min(1, Math.max(0, fromHalf(this.pixelHalf[3]!)));
+          },
+          () => {},
+        )
+        .finally(() => {
+          this.reading = false;
+        });
     }
+    return this.lastTransmittance;
   }
+
+  private reading = false;
+  private lastTransmittance = 1;
 
   /** Forget the history (after a teleport or a floating-origin jump). */
   resetHistory() {
@@ -639,6 +589,7 @@ export class CloudMarchPass extends Pass {
   }
 
   override dispose() {
+    this.disposed = true;
     super.dispose();
     this.target.dispose();
     for (const t of this.history) t.dispose();

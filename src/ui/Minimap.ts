@@ -30,15 +30,16 @@ export class Minimap {
   private large = false;
 
   /**
-   * `headingUp`: the map turns with the aircraft (flight mode) and gets a compass ring;
-   * otherwise north is up and the arrow turns.
+   * `headingUp`: the map turns with the aircraft; otherwise north is up and the arrow turns.
+   * `compass`: a compass ring around the edge (flight mode).
    */
   constructor(
     parent: HTMLElement,
     private readonly headingUp = false,
+    private readonly compass = headingUp,
   ) {
     this.el = document.createElement('div');
-    this.el.className = headingUp ? 'minimap heading-up' : 'minimap';
+    this.el.className = compass ? 'minimap compass' : 'minimap';
     this.el.innerHTML = `<canvas></canvas><div class="mm-north">N</div><div class="mm-arrow"></div>`;
     parent.appendChild(this.el);
     this.canvas = this.el.querySelector('canvas')!;
@@ -113,9 +114,9 @@ export class Minimap {
       }
     }
     if (markers.length) this.drawMarkers(markers, n, px - half, py - half);
-    if (this.headingUp) {
+    if (this.compass) {
       c.setTransform(dpr, 0, 0, dpr, 0, 0);
-      this.drawCompass(size, headingDeg);
+      this.drawCompass(size, this.headingUp ? headingDeg : 0);
     }
     this.el.style.setProperty('--heading', `${this.headingUp ? 0 : headingDeg}deg`);
   }

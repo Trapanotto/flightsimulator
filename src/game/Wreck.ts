@@ -19,6 +19,35 @@ export interface WreckEnv {
   upAt(p: Vector3, out: Vector3): Vector3;
 }
 
+/**
+ * Fire, smoke and the light of a burning wreck, created once with the flight and kept in the
+ * scene: a light added at the moment of a crash would make every material recompile (a stall
+ * right at the impact), and the particle shaders are compiled ahead too.
+ */
+export class WreckFx {
+  readonly group = new Group();
+  readonly fire = new ParticleSystem(900, true);
+  readonly smoke = new ParticleSystem(700, false);
+  readonly light = new PointLight(0xffa040, 0, 0, 2);
+
+  constructor() {
+    this.group.name = 'WreckFx';
+    this.group.add(this.fire.mesh, this.smoke.mesh, this.light);
+  }
+
+  reset() {
+    this.fire.clear();
+    this.smoke.clear();
+    this.light.intensity = 0;
+  }
+
+  dispose() {
+    this.group.removeFromParent();
+    this.fire.dispose();
+    this.smoke.dispose();
+  }
+}
+
 /** Parts that do not fly off as debris (shatter, burn up or are too small to see). */
 const SKIP =
   /^(Glass|PropDisc|Display_|Cockpit|Cabin|Yoke_|Stick_|Throttle_|Knob_|Column_|Wheel_|NavLight|Strobe|Beacon|Antenna|D_)/;
@@ -80,9 +109,9 @@ function sliceMesh(mesh: Mesh, n: number): Mesh[] {
 export class Wreck {
   readonly group = new Group();
   private readonly pieces: Piece[] = [];
-  private readonly fire = new ParticleSystem(900, true);
-  private readonly smoke = new ParticleSystem(700, false);
-  private readonly light = new PointLight(0xffa040, 0, 0, 2);
+  private readonly fire: ParticleSystem;
+  private readonly smoke: ParticleSystem;
+  private readonly light: PointLight;
   private readonly centre = new Vector3();
   private age = 0;
   private emitAcc = 0;
@@ -93,15 +122,23 @@ export class Wreck {
     aircraft: Aircraft,
     velocity: Vector3,
     private readonly env: WreckEnv,
+    private readonly fx: WreckFx,
   ) {
     this.group.name = 'Wreck';
     this.k = Math.min(4, Math.max(0.8, aircraft.type.length / 10));
-    this.group.add(this.fire.mesh, this.smoke.mesh, this.light);
+    fx.reset();
+    this.fire = fx.fire;
+    this.smoke = fx.smoke;
+    this.light = fx.light;
     aircraft.root.updateMatrixWorld(true);
     this.centre.copy(aircraft.root.position);
     env.upAt(this.centre, up);
-    const lod0 = aircraft.lod.levels[0]?.object;
-    if (lod0) this.breakUp(lod0, velocity);
+    // The level of detail on screen right now: its geometry is already on the GPU (the
+    // detailed level seen from the chase camera would first have to be uploaded: a stall).
+    // The far level is one merged skin, so at most level 1.
+    const level = Math.min(aircraft.lod.getCurrentLevel(), 1);
+    const parts = aircraft.lod.levels[level]?.object;
+    if (parts) this.breakUp(parts, velocity);
     this.light.position.copy(this.centre).addScaledVector(up, 3 * this.k);
     // The fire lights its surroundings, not the whole valley.
     this.light.distance = 160 * this.k;
@@ -358,8 +395,7 @@ export class Wreck {
 
   dispose() {
     this.group.removeFromParent();
-    this.fire.dispose();
-    this.smoke.dispose();
+    this.fx.reset();
     for (const p of this.pieces) {
       for (const { m } of p.mats) m.dispose();
       p.obj.traverse((o) => {

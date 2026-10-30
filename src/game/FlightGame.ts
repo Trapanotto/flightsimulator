@@ -3,7 +3,7 @@ import { makeSkyEnvironment, softenReflections } from '../render/skyEnvironment'
 import { FlightAudio } from '../audio/FlightAudio';
 import { Aircraft } from '../aircraft/Aircraft';
 import { Pilot } from './Pilot';
-import { Wreck } from './Wreck';
+import { Wreck, WreckFx } from './Wreck';
 import type { CockpitData } from '../aircraft/CockpitDisplays';
 import { WingTrails } from '../aircraft/WingTrails';
 import { CameraRig } from '../camera/CameraRig';
@@ -98,6 +98,8 @@ export class FlightGame {
   pilot?: Pilot;
   /** The burning wreck of the last crash. */
   wreck?: Wreck;
+  /** Fire, smoke and light for wrecks: in the scene from the start (no stall at a crash). */
+  private readonly wreckFx = new WreckFx();
   /** Inputs of the aircraft while nobody flies it: hands off, throttle where it was. */
   private readonly unmanned = {
     pitch: 0,
@@ -139,6 +141,13 @@ export class FlightGame {
     if (this.aircraft) this.world.scene.remove(this.aircraft.root);
     this.aircraft = a;
     this.world.scene.add(a.root, this.trails.group);
+    if (!this.wreckFx.group.parent) {
+      this.world.scene.add(this.wreckFx.group);
+      // Compile fire and smoke now, not at the moment of a crash.
+      void this.world.renderer
+        .compileAsync(this.wreckFx.group, this.world.camera, this.world.scene)
+        .catch(() => {});
+    }
     this.applyQuality(this.world.quality);
     this.syncModel();
   }
@@ -183,6 +192,7 @@ export class FlightGame {
     if (this.aircraft) this.world.scene.remove(this.aircraft.root, this.trails.group);
     this.endChallenge();
     this.clearOutside();
+    this.wreckFx.dispose();
     this.envMap?.dispose();
   }
 
@@ -325,6 +335,7 @@ export class FlightGame {
     this.pilot?.rebase(delta);
     this.wreck?.rebase(delta);
     this.crashCam?.centre.sub(delta);
+    this.crashCam?.from.sub(delta);
     this.prevPos.sub(delta);
     this.renderPos.sub(delta);
     this.lastPos.sub(delta);
@@ -655,10 +666,15 @@ export class FlightGame {
     // The model is drawn at the interpolated pose: put it at the impact first.
     a.root.position.copy(this.fm.position);
     a.root.quaternion.copy(this.fm.quaternion);
-    this.wreck = new Wreck(a, this.lastVelocity, {
-      heightAboveGround: (p) => this.world.heightAboveGround(p),
-      upAt: (p, out) => this.world.upAt(p, out),
-    });
+    this.wreck = new Wreck(
+      a,
+      this.lastVelocity,
+      {
+        heightAboveGround: (p) => this.world.heightAboveGround(p),
+        upAt: (p, out) => this.world.upAt(p, out),
+      },
+      this.wreckFx,
+    );
     this.world.scene.add(this.wreck.group);
     a.root.visible = false;
     this.audio.impact('crash', 1.6);
@@ -669,12 +685,25 @@ export class FlightGame {
       if (back.lengthSq() < 1)
         back.copy(this.fm.forward).addScaledVector(up, -this.fm.forward.dot(up));
       back.normalize().negate();
-      this.crashCam = { centre: this.fm.position.clone(), back, angle: 0 };
+      this.crashCam = {
+        centre: this.fm.position.clone(),
+        back,
+        angle: 0,
+        from: this.world.camera.position.clone(),
+        t: 0,
+      };
     }
   }
 
   /** Camera after a crash: circles the burning wreck slowly. */
-  private crashCam?: { centre: Vector3; back: Vector3; angle: number };
+  private crashCam?: {
+    centre: Vector3;
+    back: Vector3;
+    angle: number;
+    /** Camera position at the impact: it pulls back from there. */
+    from: Vector3;
+    t: number;
+  };
 
   private updateCrashCam(dt: number) {
     const c = this.crashCam!;
@@ -684,17 +713,22 @@ export class FlightGame {
     c.angle += dt * 0.12;
     const dir = c.back.clone().applyAxisAngle(up, c.angle);
     const dist = 45 * k;
-    cam.position
-      .copy(c.centre)
+    const goal = c.centre
+      .clone()
       .addScaledVector(dir, dist)
       .addScaledVector(up, dist * 0.42);
+    // Pull back smoothly instead of jumping: a jump shows a lot of new terrain at once, whose
+    // textures would all go to the GPU in one frame (a visible stall right at the crash).
+    c.t += dt;
+    const s = Math.min(1, c.t / 1.6);
+    cam.position.lerpVectors(c.from, goal, s * s * (3 - 2 * s));
     const h = this.world.heightAboveGround(cam.position);
     if (h !== undefined && h < 8) cam.position.addScaledVector(up, 8 - h);
     cam.up.copy(up);
     cam.lookAt(c.centre.clone().addScaledVector(up, 4 * k));
-    if (cam.near !== 0.5) {
-      cam.near = 0.5;
-      cam.fov = 60;
+    // Keep the lens of the camera mode before; only the near plane moves out a little.
+    if (cam.near !== 0.3) {
+      cam.near = 0.3;
       cam.updateProjectionMatrix();
     }
   }

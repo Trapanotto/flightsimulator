@@ -17,7 +17,8 @@ const SHOT_SECONDS = 7;
 const SHOTS_PER_AIRCRAFT = 3;
 
 type Shot = 'chase' | 'side' | 'flyby' | 'orbit' | 'wing' | 'wide';
-const SHOTS: Shot[] = ['chase', 'side', 'flyby', 'wide', 'orbit', 'wing'];
+// Opens with the side view: the whole aircraft against the mountains.
+const SHOTS: Shot[] = ['side', 'chase', 'flyby', 'wide', 'orbit', 'wing'];
 
 const tmp = new Vector3();
 const tmp2 = new Vector3();
@@ -49,7 +50,7 @@ export class Showcase {
   private time = 0;
   private shotTime = 0;
   private shotIndex = 0;
-  private shot: Shot = 'chase';
+  private shot: Shot = SHOTS[0]!;
   private shotsWithAircraft = 0;
   private ready = false;
   private readonly fixedCam = new Vector3();
@@ -74,12 +75,8 @@ export class Showcase {
     this.s = 0;
     this.bank = bankAt(0, speedOf(this.type));
     this.world.moveCameraTo(ROUTE[0]![0], ROUTE[0]![1], ROUTE[0]![2] + 60);
-    // Behind the loading screen only the first view matters: fewer houses until it is up.
-    const b = world.buildings;
-    if (b) {
-      this.buildingRadius = b.radius;
-      b.radius = Math.min(b.radius, 1500);
-    }
+    // Behind the loading screen: coarse terrain only, houses and water afterwards.
+    world.setStartup(true);
     void this.show(AIRCRAFT[this.typeIndex]!);
   }
 
@@ -108,12 +105,9 @@ export class Showcase {
     this.next.promise = this.loadType(n);
   }
 
-  private buildingRadius = -1;
-
+  /** Full detail, houses and water once the menu shows (they sharpen in behind it). */
   private restoreBuildings() {
-    const b = this.world.buildings;
-    if (b && this.buildingRadius >= 0) b.radius = this.buildingRadius;
-    this.buildingRadius = -1;
+    this.world.setStartup(false);
   }
 
   private loadType(type: AircraftType): Promise<Aircraft> {

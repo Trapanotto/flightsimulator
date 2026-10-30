@@ -1179,11 +1179,11 @@ body {
   width: min(460px, 62vmin);
   height: min(460px, 62vmin);
 }
-.minimap.heading-up .mm-north {
+.minimap.compass .mm-north {
   display: none;
 }
-/* Aircraft symbol: fixed, nose up. */
-.minimap.heading-up .mm-arrow {
+/* Aircraft symbol in flight: white on the map, turns with the heading. */
+.minimap.compass .mm-arrow {
   border-bottom-color: #ffffff;
   filter: drop-shadow(0 0 2px #000);
 }
