@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.10.0 – Wetter, Cockpits, Aussteigen (2026-10-30)
+
+### Neu
+
+- **Cockpits für alle sechs Flugzeuge** mit live laufenden Instrumenten: Rundinstrumente,
+  Motoranzeigen und Funkgeräte in der C172; Glascockpits mit PFD, Navigationsdisplay,
+  Motor- und Systemanzeigen in PC-12, Phenom, A320 und 747; Panoramadisplay in der F-35;
+  Autopilot-Panel, MCDU und Overhead-Panel. Steuerhorn, Steuersäule, Sidestick und
+  Schubhebel bewegen sich mit den Eingaben.
+- **Abstürze**: Das Flugzeug zerbricht in seine Teile (Rumpf in drei Stücken, Flügel, Leitwerk,
+  Fahrwerk, Triebwerke), die mit dem Aufprall wegfliegen, über das Gelände springen und
+  verkohlen. Feuerball, Funken, Lichtblitz, brennende Trümmer und Rauchsäule; eine Kamera
+  kreist um die Absturzstelle.
+- **Aussteigen** (J, stehend am Boden): zu Fuss gehen und rennen, Ich- oder Aussenansicht (C),
+  wieder einsteigen mit J.
+- **Fallschirmsprung** (J im Flug): freier Fall, Schirm ziehen mit Leertaste oder J (öffnet
+  automatisch auf 300 m über Grund), steuern, bremsen, abfangen. Die F-35 schiesst den
+  Schleudersitz. Das leere Flugzeug fliegt weiter, bis es abstürzt.
+- **Pilot als Blender-Figur** mit Skelett und Animationen für Stehen, Gehen, Rennen,
+  freien Fall und Schirmflug.
+- **Hochnebel und Bodennebel** als Wetter: das Nebelmeer über dem Mittelland, die Alpen
+  darüber in der Sonne.
+- **Echte 3D-Wolken** auf allen Qualitätsstufen, durch die man fliegen kann: Quell- und
+  Schichtwolken mit Blumenkohl-Rändern, ungleichmässigen Basen und Windscherung; Licht mit
+  Mehrfachstreuung, Silberrand gegen die Sonne und dunklen Bäuchen; Schatten auf dem Gelände.
+- **Physikalische Atmosphäre** (Rayleigh- und Mie-Streuung): blaue Ferne, Dunst nach Wetter,
+  Sonnenfarbe aus der Luftmasse – orange und rot bei tiefer Sonne.
+- **Startbildschirm lädt direkt in die echte 3D-Szene** mit Fortschrittsbalken statt Video.
+
+### Verbessert
+
+- Ruckelfreie Bewegung: Das Flugzeug wird zwischen den Physikschritten (120 Hz) gezeichnet.
+- Klare Sicht aus dem Cockpit: keine Himmelsspiegelung mehr als Schleier auf der Scheibe.
+- Ruder, Fahrwerk und Propeller bewegen sich so weit wie vorgesehen (vorher doppelt).
+
+### Entfernt
+
+- Die generierten 3D-Bäume; echte Bäume bleiben auf den Luftbildern sichtbar.
+- Das Video des Startbildschirms (3,3 MB weniger zu laden).
+
 ## v0.9.2 – Flugplätze, Gebäude, Bäume (2026-10-28)
 
 - **Alle Schweizer Flugplätze**: 44 befestigte Pisten an 39 Flugplätzen (inkl. Basel-Mulhouse)
