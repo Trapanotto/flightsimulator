@@ -74,6 +74,12 @@ export class Showcase {
     this.s = 0;
     this.bank = bankAt(0, speedOf(this.type));
     this.world.moveCameraTo(ROUTE[0]![0], ROUTE[0]![1], ROUTE[0]![2] + 60);
+    // Behind the loading screen only the first view matters: fewer houses until it is up.
+    const b = world.buildings;
+    if (b) {
+      this.buildingRadius = b.radius;
+      b.radius = Math.min(b.radius, 1500);
+    }
     void this.show(AIRCRAFT[this.typeIndex]!);
   }
 
@@ -91,10 +97,23 @@ export class Showcase {
     a.controls.flaps = 0;
     a.controls.rpm = 0.85;
     this.world.scene.add(a.root);
-    // Fetch the next aircraft in the background.
+    if (this.ready) this.prefetchNext();
+  }
+
+  /** Fetch the next aircraft in the background (after the loading screen). */
+  private prefetchNext() {
     const n = AIRCRAFT[(this.typeIndex + 1) % AIRCRAFT.length]!;
+    if (this.next.type === n) return;
     this.next.type = n;
     this.next.promise = this.loadType(n);
+  }
+
+  private buildingRadius = -1;
+
+  private restoreBuildings() {
+    const b = this.world.buildings;
+    if (b && this.buildingRadius >= 0) b.radius = this.buildingRadius;
+    this.buildingRadius = -1;
   }
 
   private loadType(type: AircraftType): Promise<Aircraft> {
@@ -119,6 +138,7 @@ export class Showcase {
 
   dispose() {
     this.disposed = true;
+    this.restoreBuildings();
     if (this.aircraft) this.world.scene.remove(this.aircraft.root);
     this.aircraft = undefined;
     this.envMap?.dispose();
@@ -136,7 +156,8 @@ export class Showcase {
     this.time += dt;
     const type = this.type;
     const v = speedOf(type);
-    this.s += v * dt;
+    // The flight starts once its first view is complete (no streaming along a moving path).
+    if (this.ready) this.s += v * dt;
 
     // Pose: along the path tangent, banked for the turn (coordinated: tan(bank) = v²·κ/g),
     // the bank eased in so a new aircraft or speed never snaps the wings.
@@ -164,7 +185,7 @@ export class Showcase {
 
     if (!this.ready) this.checkReady(pos);
 
-    this.shotTime += dt;
+    if (this.ready) this.shotTime += dt;
     if (this.shotTime > SHOT_SECONDS) this.cut();
     this.placeCamera(dt, pos, q, fwd, up, v);
   }
@@ -172,28 +193,40 @@ export class Showcase {
   private calm = 0;
   private readonly startedAt = performance.now();
 
+  /** Most terrain work seen at once while loading (scales the progress bar). */
+  private peakBusy = 1;
+
+  /**
+   * Ready once the aircraft is there and the terrain of the (still) first view has finished
+   * loading: nothing left in the queues for a moment.
+   */
   private checkReady(pos: Vector3) {
-    const w = this.world;
-    const [lon, lat] = w.toGeo(pos);
-    const need = Math.min(15, w.quality.maxZoom);
-    const detail = Math.min(1, w.terrainDetailAt(lon, lat) / need);
-    const t = w.terrain;
+    void pos;
+    const t = this.world.terrain;
     const loading = t ? t.inFlight + t.queued : 99;
     const uploads = t ? t.pendingUploads : 99;
-    // A few tiles always stream along the flight path: "calm" = little left for a moment.
-    const calm = loading <= 2 && uploads <= 8 && detail >= 1 && !!this.aircraft;
+    const busy = loading + uploads / 4;
+    this.peakBusy = Math.max(this.peakBusy, busy);
+    const calm = loading <= 2 && uploads <= 8 && !!this.aircraft;
     this.calm = calm ? this.calm + 1 : 0;
-    const busy = Math.min(1, (loading + uploads / 4) / 40);
-    const p = (this.aircraft ? 0.15 : 0) + 0.6 * detail + 0.25 * (1 - busy);
-    this.onProgress?.(Math.min(0.99, p));
-    // Safety net (wall clock, also when frames are slow): never wait longer than 45 s.
+    const p =
+      (this.aircraft ? 0.1 : 0) + 0.9 * Math.min(1, this.time / 3) * (1 - busy / this.peakBusy);
+    this.onProgress?.(Math.min(0.99, Math.max(this.progress, p)));
+    this.progress = Math.max(this.progress, p);
+    // Safety net (wall clock, also when frames are slow): never wait longer than 30 s.
     const waited = (performance.now() - this.startedAt) / 1000;
-    if ((this.calm > 20 && this.time > 2) || waited > 45) {
+    if ((this.calm > 20 && this.time > 2) || waited > 30) {
       this.ready = true;
+      // The first shot runs its full length after the loading screen.
+      this.shotTime = 0;
+      this.restoreBuildings();
+      this.prefetchNext();
       this.onProgress?.(1);
       this.onReady?.();
     }
   }
+
+  private progress = 0;
 
   private cut() {
     this.onCut?.();

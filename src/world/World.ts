@@ -682,12 +682,41 @@ export class World {
   }
 
   /** Moves the camera (and with it the streaming focus) to a place. */
-  moveCameraTo(lon: number, lat: number, h: number) {
-    this.camera.position.copy(this.fromGeo(lon, lat, h));
+  /**
+   * Puts the camera at a place (terrain streams in around it). With `view`: behind a point
+   * (`back` metres against the heading, `up` above) looking along the heading, like the chase
+   * camera will once the aircraft is there; otherwise looking north and a little down.
+   */
+  moveCameraTo(
+    lon: number,
+    lat: number,
+    h: number,
+    view?: { heading: number; back: number; up: number },
+  ) {
+    const target = this.fromGeo(lon, lat, h);
+    let b = this.basisAt(target);
+    const fwd = view
+      ? b.north
+          .clone()
+          .multiplyScalar(Math.cos((view.heading * Math.PI) / 180))
+          .addScaledVector(b.east, Math.sin((view.heading * Math.PI) / 180))
+      : b.north.clone();
+    this.camera.position.copy(target);
+    if (view) this.camera.position.addScaledVector(fwd, -view.back).addScaledVector(b.up, view.up);
+    const offset = this.camera.position.clone().sub(target);
     this.rebaseIfNeeded(true);
-    const b = this.basisAt(this.camera.position);
+    // The origin may have moved: recompute the target in the new frame.
+    const t2 = this.fromGeo(lon, lat, h);
+    this.camera.position.copy(t2).add(offset);
+    b = this.basisAt(t2);
     this.camera.up.copy(b.up);
-    this.camera.lookAt(this.camera.position.clone().add(b.north).addScaledVector(b.up, -0.3));
+    if (view) {
+      this.camera.lookAt(
+        t2.addScaledVector(fwd, Math.max(view.back, 10)).addScaledVector(b.up, view.up * 0.38),
+      );
+    } else {
+      this.camera.lookAt(this.camera.position.clone().add(b.north).addScaledVector(b.up, -0.3));
+    }
   }
 
   private readonly resize = () => {

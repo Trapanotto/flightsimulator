@@ -228,8 +228,19 @@ export class FlightGame {
     this.crashTime = -1;
     this.message = null;
     const { lon, lat, h, heading, exact } = this.placePose(place);
-    // Put the camera there first so the terrain under it streams in.
-    this.world.moveCameraTo(lon, lat, h + 40);
+    // Put the camera there first so the terrain under it streams in: already where it will be
+    // once the aircraft stands there, looking the same way (no jump when loading ends).
+    const onGround = place.kind === 'runway';
+    this.world.moveCameraTo(lon, lat, onGround ? h + 40 : h, this.loadingView(heading));
+    // The aircraft (hidden while loading) waits at the place too: map and heading are right.
+    const pos = this.world.fromGeo(lon, lat, h);
+    const b = this.world.basisAt(pos);
+    const fwd = b.north
+      .clone()
+      .multiplyScalar(Math.cos(heading * DEG))
+      .addScaledVector(b.east, Math.sin(heading * DEG));
+    this.fm.reset(pos, fwd, 0, onGround);
+    this.renderValid = false;
     this.waitingForTerrain = true;
     this.waitStarted = this.time;
     this.pendingPose = { lon, lat, h, heading, onGround: place.kind === 'runway', exact };
@@ -259,6 +270,13 @@ export class FlightGame {
     };
   }
 
+  /** Camera while a start place loads: the pose the current camera mode will have there. */
+  private loadingView(heading: number) {
+    const t = this.type;
+    if (this.rig.mode === 'cockpit') return { heading, back: -t.eye[2], up: t.eye[1] };
+    return { heading, back: t.chaseDistance, up: t.chaseHeight };
+  }
+
   /** Tries to finish a pending start once the terrain height is known. */
   private trySpawn() {
     const pose = this.pendingPose;
@@ -270,7 +288,10 @@ export class FlightGame {
     // The time limit only guards against tiles that never arrive (no network).
     const detailed = this.world.terrainDetailAt(pose.lon, pose.lat) >= 14 || waited > 45;
     if (ground === undefined || ((pose.onGround || pose.exact) && !detailed)) {
-      this.world.moveCameraTo(pose.lon, pose.lat, (ground ?? pose.h) + 40);
+      const h = pose.onGround
+        ? (ground ?? pose.h) + (ground === undefined ? 40 : this.type.physics.gearHeight)
+        : Math.max(pose.h, (ground ?? 0) + (pose.exact ? 40 : 300));
+      this.world.moveCameraTo(pose.lon, pose.lat, h, this.loadingView(pose.heading));
       return;
     }
     const h = pose.onGround
