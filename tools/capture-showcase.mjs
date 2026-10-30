@@ -6,7 +6,6 @@
 // Env: BROWSER=path to Edge/Chrome, FPS=30, SIZE=1920x1080, T=16:30 (time of day),
 //      FRAMES=build/showcase-frames (scratch dir)
 // Output (needs ffmpeg on PATH):
-//   public/assets/ui/showcase.mp4   start screen video (1280x720, H.264, loops)
 //   public/assets/ui/hero.jpg       poster frame (start screen still)
 //   public/assets/ui/og.jpg         link preview (1200x630)
 //   docs/showcase.webp              animated preview for the README
@@ -140,12 +139,6 @@ await browser.close();
 const ff = (args) =>
   execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...args], { stdio: 'inherit' });
 const input = ['-framerate', String(FPS), '-i', path.join(frames, 'f%05d.jpg')];
-ff([
-  ...input,
-  ...['-vf', 'scale=1280:720:flags=lanczos', '-c:v', 'libx264', '-preset', 'slow'],
-  ...['-crf', '30', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-an'],
-  'public/assets/ui/showcase.mp4',
-]);
 // Poster and link preview: a frame of the second shot (side view); POSTER=seconds.
 const posterFrame = Math.round(Number(process.env.POSTER ?? SHOT_SECONDS * 1.5) * FPS);
 const poster = path.join(frames, `f${String(posterFrame).padStart(5, '0')}.jpg`);
@@ -163,6 +156,6 @@ ff([
   ...['-c:v', 'libwebp', '-quality', '60', '-loop', '0', '-an'],
   'docs/showcase.webp',
 ]);
-const outputs = ['showcase.mp4', 'hero.jpg', 'og.jpg'].map((f) => `public/assets/ui/${f}`);
+const outputs = ['hero.jpg', 'og.jpg'].map((f) => `public/assets/ui/${f}`);
 for (const f of [...outputs, 'docs/showcase.webp'])
   console.log(f, (fs.statSync(f).size / 1e6).toFixed(2), 'MB');

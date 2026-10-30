@@ -127,32 +127,3 @@ ${ATLAS_FN}`,
   };
   return mat;
 }
-
-/** Vertex-coloured Lambert material for the instanced trees, with the same aerial haze. */
-export function createTreeMaterial(atmosphere?: AtmosphereUniforms) {
-  const mat = new MeshLambertMaterial({ vertexColors: true });
-  mat.fog = false;
-  mat.customProgramCacheKey = () => `trees-${atmosphere ? 1 : 0}`;
-  mat.onBeforeCompile = (shader) => {
-    if (!atmosphere) return;
-    Object.assign(shader.uniforms, atmosphere);
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vWorld;')
-      .replace(
-        '#include <fog_vertex>',
-        '#include <fog_vertex>\nvWorld = (modelMatrix * instanceMatrix * vec4(position, 1.0)).xyz;',
-      );
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        '#include <common>',
-        `#include <common>
-        varying vec3 vWorld;
-        ${AERIAL_GLSL}`,
-      )
-      .replace(
-        '#include <fog_fragment>',
-        `gl_FragColor.rgb = aerial(gl_FragColor.rgb, vWorld, elevationOf(vWorld));`,
-      );
-  };
-  return mat;
-}

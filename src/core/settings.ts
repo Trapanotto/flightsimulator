@@ -23,9 +23,6 @@ export interface Quality {
   trails: boolean;
   /** Regional houses around the camera, metres (0 = off). */
   buildingRadius: number;
-  /** Trees around the camera (metres, 0 = off) and their spacing in forests. */
-  treeRadius: number;
-  treeSpacing: number;
   /** Lakes and rivers as water surfaces (mask from the vector tiles). */
   water: boolean;
 }
@@ -46,8 +43,6 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     flare: false,
     trails: false,
     buildingRadius: 1500,
-    treeRadius: 0,
-    treeSpacing: 12,
     water: true,
   },
   medium: {
@@ -65,8 +60,6 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     flare: true,
     trails: true,
     buildingRadius: 3000,
-    treeRadius: 700,
-    treeSpacing: 11,
     water: true,
   },
   high: {
@@ -84,8 +77,6 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     flare: true,
     trails: true,
     buildingRadius: 4500,
-    treeRadius: 1100,
-    treeSpacing: 9,
     water: true,
   },
   ultra: {
@@ -103,8 +94,6 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     flare: true,
     trails: true,
     buildingRadius: 6000,
-    treeRadius: 1600,
-    treeSpacing: 8,
     water: true,
   },
 };
@@ -228,7 +217,6 @@ export function resolveQuality(s: Settings): { level: QualityLevel; quality: Qua
   if (fx.includes('nodetail')) quality.terrainDetail = false;
   if (fx.includes('nocloudshadow')) quality.cloudShadows = false;
   if (fx.includes('nobuildings')) quality.buildingRadius = 0;
-  if (fx.includes('notrees')) quality.treeRadius = 0;
   if (fx.includes('nowater')) quality.water = false;
   return { level, quality };
 }

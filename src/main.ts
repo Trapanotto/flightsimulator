@@ -86,12 +86,23 @@ async function ensureWorld() {
 
 // ---- animated start screen: the fleet over the Alps behind the menu ----
 
+/** The menu runs over the live 3D scene (else the still image), not with reduced motion. */
+function liveMenu() {
+  return !matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 let showcase: Showcase | undefined;
 let showcaseToken = 0;
 
 /** Live 3D background for the menu (not on reduced motion or weak/mobile GPUs). */
 async function startShowcase() {
-  if (showcase || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if (showcase) return;
+  if (!liveMenu()) {
+    ui.classList.remove('loading');
+    return;
+  }
+  ui.classList.add('loading');
+  ui.style.setProperty('--progress', '0');
   const token = ++showcaseToken;
   const [{ Showcase }, { World }] = await Promise.all([
     import('./game/Showcase'),
@@ -99,14 +110,18 @@ async function startShowcase() {
   ]);
   void World;
   const w = await ensureWorld();
-  if (token !== showcaseToken || ui.hidden || w.qualityLevel === 'low') return;
+  if (token !== showcaseToken || ui.hidden) return;
+  if (w.qualityLevel === 'low') {
+    ui.classList.remove('loading');
+    return;
+  }
   const s = new Showcase(w);
   showcase = s;
   // State on #ui (not .start): the start screen re-renders on a language switch.
+  s.onProgress = (p) => ui.style.setProperty('--progress', p.toFixed(3));
   s.onReady = () => {
+    ui.classList.remove('loading');
     ui.classList.add('live');
-    // The recorded flight has faded out under the live one: stop decoding it.
-    setTimeout(() => ui.querySelector<HTMLVideoElement>('.start-video')?.pause(), 2600);
   };
   s.onCut = () => {
     ui.classList.remove('cut');
@@ -127,7 +142,7 @@ function stopShowcase() {
   if (!showcase) return;
   showcase.dispose();
   showcase = undefined;
-  ui.classList.remove('live', 'cut');
+  ui.classList.remove('live', 'cut', 'loading');
   if (world) {
     world.stop();
     world.game = undefined;
@@ -138,11 +153,8 @@ function stopShowcase() {
 /** Back in the menu: let the fleet fly again. */
 function menuShown() {
   ui.hidden = false;
-  // The recorded flight bridges the seconds until the live scene is back.
-  void ui
-    .querySelector<HTMLVideoElement>('.start-video')
-    ?.play()
-    .catch(() => {});
+  // The loader covers the menu until the live scene is back.
+  if (liveMenu()) ui.classList.add('loading');
   setTimeout(() => void startShowcase(), 400);
 }
 
@@ -236,5 +248,9 @@ if (!document.createElement('canvas').getContext('webgl2')) {
   // #challenge=lauterbrunnen starts a course directly (tests, links).
   const course = courseById(location.hash.match(/^#challenge=([\w-]+)/)?.[1] ?? '');
   if (course && findAircraft(course.aircraft)) void openFlight(lang, course);
-  if (!location.hash) setTimeout(() => void startShowcase(), 300);
+  if (!location.hash) {
+    // Loading screen right away (no flash of the menu over the still image).
+    if (liveMenu()) ui.classList.add('loading');
+    setTimeout(() => void startShowcase(), 300);
+  }
 }

@@ -15,8 +15,6 @@ export interface BuildingJob {
   z: number;
   x: number;
   y: number;
-  /** Spacing of trees scattered in forests, metres (0 = no trees). */
-  treeSpacing: number;
 }
 
 type Pos = [number, number];
@@ -26,13 +24,6 @@ const DEG = Math.PI / 180;
 function outerRings(geom: { type: string; coordinates: unknown }): Pos[][] {
   if (geom.type === 'Polygon') return [(geom.coordinates as Pos[][])[0]!];
   if (geom.type === 'MultiPolygon') return (geom.coordinates as Pos[][][]).map((p) => p[0]!);
-  return [];
-}
-
-/** All rings of a GeoJSON polygon geometry: [outer, ...holes] per polygon. */
-function polygons(geom: { type: string; coordinates: unknown }): Pos[][][] {
-  if (geom.type === 'Polygon') return [geom.coordinates as Pos[][]];
-  if (geom.type === 'MultiPolygon') return geom.coordinates as Pos[][][];
   return [];
 }
 
@@ -106,58 +97,6 @@ async function load(job: BuildingJob): Promise<TileBuildings> {
     if (g.type === 'Point') churches.push({ lon: g.coordinates[0], lat: g.coordinates[1] });
   }
 
-  // Trees: jittered grid inside forest polygons + single trees (orchards, avenues).
-  const trees: number[] = [];
-  const spacing = job.treeSpacing;
-  const landcover = vt.layers.landcover;
-  let seed = (job.x * 73_856_093) ^ (job.y * 19_349_663);
-  const rnd = () => {
-    seed = (seed * 1_103_515_245 + 12_345) & 0x7fffffff;
-    return seed / 0x7fffffff;
-  };
-  for (let i = 0; spacing > 0 && landcover && i < landcover.length; i++) {
-    const f = landcover.feature(i);
-    if (f.properties.class !== 'wood') continue;
-    for (const poly of polygons(f.toGeoJSON(job.x, job.y, job.z).geometry as never)) {
-      const outer = poly[0]!;
-      let minX = Infinity,
-        minY = Infinity,
-        maxX = -Infinity,
-        maxY = -Infinity;
-      for (const [lon, lat] of outer) {
-        minX = Math.min(minX, lon);
-        maxX = Math.max(maxX, lon);
-        minY = Math.min(minY, lat);
-        maxY = Math.max(maxY, lat);
-      }
-      // Only the part inside this tile (polygons are clipped with a buffer).
-      minX = Math.max(minX, b.west);
-      maxX = Math.min(maxX, b.east);
-      minY = Math.max(minY, b.south);
-      maxY = Math.min(maxY, b.north);
-      const dLon = spacing / mx;
-      const dLat = spacing / my;
-      for (let lat = minY; lat < maxY; lat += dLat) {
-        for (let lon = minX; lon < maxX; lon += dLon) {
-          const p: Pos = [lon + (rnd() - 0.5) * dLon * 0.9, lat + (rnd() - 0.5) * dLat * 0.9];
-          if (!pointInRing(p, outer)) continue;
-          if (poly.slice(1).some((hole) => pointInRing(p, hole))) continue;
-          trees.push(p[0], p[1]);
-        }
-      }
-    }
-  }
-  const single = vt.layers.landcover_pt;
-  for (let i = 0; spacing > 0 && single && i < single.length; i++) {
-    const g = single.feature(i).toGeoJSON(job.x, job.y, job.z).geometry as {
-      type: string;
-      coordinates: Pos;
-    };
-    if (g.type !== 'Point') continue;
-    const [lon, lat] = g.coordinates;
-    if (lon >= b.west && lon < b.east && lat >= b.south && lat < b.north) trees.push(lon, lat);
-  }
-
   const places: TileBuildings['places'] = [];
   const placeLayer = vt.layers.place;
   for (let i = 0; placeLayer && i < placeLayer.length; i++) {
@@ -185,7 +124,7 @@ async function load(job: BuildingJob): Promise<TileBuildings> {
       if (pointInRing([lon0, lat0], ring)) canton = name;
     }
   }
-  return { footprints, churches, canton, trees: new Float64Array(trees), places };
+  return { footprints, churches, canton, places };
 }
 
 self.onmessage = async (e: MessageEvent<{ id: number; job: BuildingJob }>) => {

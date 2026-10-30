@@ -1,7 +1,7 @@
 import { SCATTERING_GLSL } from './scattering';
 
 /**
- * Shared GLSL for everything seen through the air: terrain, buildings, trees, the fog dome.
+ * Shared GLSL for everything seen through the air: terrain, buildings, the fog dome.
  *
  *   aerial(colour, worldPos, elevation)  haze, the stratus layer (Hochnebel / ground fog) and
  *                                         the dull light underneath it

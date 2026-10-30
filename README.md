@@ -161,7 +161,7 @@ Texturen, Vorschaubilder (`build/`) und `public/assets/aircraft/<typ>.glb` – o
 npm run assets -- c172 -- --preview
 ```
 
-Video, Standbild und Link-Vorschau des Startbildschirms nimmt die eigene Engine auf: Der Flug
+Standbild und Link-Vorschau des Startbildschirms nimmt die eigene Engine auf: Der Flug
 übers Berner Oberland wird Bild für Bild mit festem Zeitschritt gerechnet (ruckelfrei, egal wie
 langsam die Aufnahme ist), jedes Bild wartet aufs Gelände. Braucht ffmpeg und einen laufenden
 Server (`npm run build && npm run preview`):
@@ -170,7 +170,7 @@ Server (`npm run build && npm run preview`):
 node tools/capture-showcase.mjs http://localhost:4173/flightsimulator/ 6
 ```
 
-Erzeugt `public/assets/ui/showcase.mp4`, `hero.jpg`, `og.jpg` und `docs/showcase.webp`.
+Erzeugt `public/assets/ui/hero.jpg`, `og.jpg` und `docs/showcase.webp`.
 
 ## Entwickeln
 

@@ -113,7 +113,7 @@ export class FlightGame {
 
   async load() {
     // Only the aircraft gets the sky reflection. Not via scene.environment: since three r17x
-    // that also lights Lambert materials (terrain, houses, trees) and washes the world out.
+    // that also lights Lambert materials (terrain, houses) and washes the world out.
     this.envMap ??= makeSkyEnvironment(this.world.renderer, this.world.sky);
     const type = this.type;
     const a = await Aircraft.load(type, this.envMap);

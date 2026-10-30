@@ -32,8 +32,13 @@ export class Showcase {
   /** World driver contract. */
   waitingForTerrain = false;
   readonly anchor = new Vector3();
-  /** Called once the terrain under the start of the flight is detailed enough to show. */
+  /**
+   * Called once the scene is fully there: aircraft loaded, terrain at full detail under the
+   * flight and no tiles left streaming (the start screen waits for this instead of a video).
+   */
   onReady?: () => void;
+  /** Loading progress 0..1 until ready. */
+  onProgress?: (p: number) => void;
   /** Called right before a camera cut (the view fades). */
   onCut?: () => void;
 
@@ -157,17 +162,37 @@ export class Showcase {
       a.update(dt);
     }
 
-    if (!this.ready && this.time > 1.5) {
-      const [lon, lat] = this.world.toGeo(pos);
-      if (this.world.terrainDetailAt(lon, lat) >= 13 || this.time > 12) {
-        this.ready = true;
-        this.onReady?.();
-      }
-    }
+    if (!this.ready) this.checkReady(pos);
 
     this.shotTime += dt;
     if (this.shotTime > SHOT_SECONDS) this.cut();
     this.placeCamera(dt, pos, q, fwd, up, v);
+  }
+
+  private calm = 0;
+  private readonly startedAt = performance.now();
+
+  private checkReady(pos: Vector3) {
+    const w = this.world;
+    const [lon, lat] = w.toGeo(pos);
+    const need = Math.min(15, w.quality.maxZoom);
+    const detail = Math.min(1, w.terrainDetailAt(lon, lat) / need);
+    const t = w.terrain;
+    const loading = t ? t.inFlight + t.queued : 99;
+    const uploads = t ? t.pendingUploads : 99;
+    // A few tiles always stream along the flight path: "calm" = little left for a moment.
+    const calm = loading <= 2 && uploads <= 8 && detail >= 1 && !!this.aircraft;
+    this.calm = calm ? this.calm + 1 : 0;
+    const busy = Math.min(1, (loading + uploads / 4) / 40);
+    const p = (this.aircraft ? 0.15 : 0) + 0.6 * detail + 0.25 * (1 - busy);
+    this.onProgress?.(Math.min(0.99, p));
+    // Safety net (wall clock, also when frames are slow): never wait longer than 45 s.
+    const waited = (performance.now() - this.startedAt) / 1000;
+    if ((this.calm > 20 && this.time > 2) || waited > 45) {
+      this.ready = true;
+      this.onProgress?.(1);
+      this.onReady?.();
+    }
   }
 
   private cut() {

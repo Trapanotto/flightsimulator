@@ -4,10 +4,7 @@ import {
   houseTypeOf,
   orientedBox,
   regionOf,
-  seasonOf,
   tintOf,
-  treeOf,
-  treeTint,
   variantOf,
   wallHeight,
 } from '../src/buildings/footprints';
@@ -104,37 +101,5 @@ describe('regions and house types', () => {
     for (let i = 0; i < 200; i++)
       colours.add(tintOf('mittelland', 'hall', 8 + i * 0.001, 47).join());
     expect(colours.size).toBeGreaterThanOrEqual(5);
-  });
-
-  it('mixes species, shapes and crown widths in a forest', () => {
-    const species = new Set<string>();
-    const shapes = new Set<number>();
-    for (let i = 0; i < 600; i++) {
-      const t = treeOf('mittelland', 500, 7.4 + i * 0.000731, 46.9 + i * 0.000419)!;
-      species.add(t.type);
-      shapes.add(t.variant);
-      expect(t.width).toBeGreaterThan(0.8);
-      expect(t.width).toBeLessThan(1.2);
-    }
-    expect(species.size).toBeGreaterThanOrEqual(6);
-    expect([...shapes].sort()).toEqual([0, 1, 2]);
-    // Dry Valais lowlands: Scots pines; no trees above the tree line.
-    const valais = new Set<string>();
-    for (let i = 0; i < 200; i++) valais.add(treeOf('valais', 600, 7.3 + i * 0.0011, 46.2)!.type);
-    expect(valais.has('pine')).toBe(true);
-    expect(treeOf('valais', 2500, 7.3, 46.2)).toBeNull();
-  });
-
-  it('dresses the trees for the season', () => {
-    expect(seasonOf(new Date('2026-10-28')).autumn).toBeCloseTo(1, 5);
-    expect(seasonOf(new Date('2026-07-15'))).toEqual({ autumn: 0, winter: 0 });
-    expect(seasonOf(new Date('2026-01-20')).winter).toBe(1);
-    const summer = treeTint('beech', 8, 47, { autumn: 0, winter: 0 });
-    const autumn = treeTint('beech', 8, 47, { autumn: 1, winter: 0 });
-    expect(autumn[0] / autumn[1]).toBeGreaterThan(1.5 * (summer[0] / summer[1]));
-    // Evergreens stay green.
-    expect(treeTint('spruce', 8, 47, { autumn: 1, winter: 0 })).toEqual(
-      treeTint('spruce', 8, 47, { autumn: 0, winter: 0 }),
-    );
   });
 });
