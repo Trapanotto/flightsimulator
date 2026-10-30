@@ -53,8 +53,10 @@ export class PostFX {
   configure(q: Quality) {
     this.composer?.dispose();
     this.composer = undefined;
-    this.enabled = q.bloom || q.smaa;
-    this.volumetric = this.enabled && q.volumetricClouds > 0;
+    this.march = undefined;
+    // The volumetric clouds need the chain (scene depth, HDR), also on the lowest level.
+    this.volumetric = q.volumetricClouds > 0;
+    this.enabled = q.bloom || q.smaa || this.volumetric;
     if (!this.enabled) {
       this.renderer.toneMapping = ACESFilmicToneMapping;
       return;

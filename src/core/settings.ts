@@ -12,7 +12,10 @@ export interface Quality {
   maxTiles: number;
   terrainDetail: boolean;
   cloudLayers: number;
-  /** Ray-marched volumetric clouds (replace the flat layers): march steps, 0 = off. */
+  /**
+   * Ray-marched volumetric clouds (replace the flat layers): march steps, 0 = off. The same
+   * clouds on every level; fewer steps only add noise that the frame accumulation smooths.
+   */
   volumetricClouds: number;
   cloudShadows: boolean;
   /** Aircraft shadow map size, 0 = off. */
@@ -35,8 +38,8 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     maxTiles: 260,
     terrainDetail: false,
     cloudLayers: 1,
-    volumetricClouds: 0,
-    cloudShadows: false,
+    volumetricClouds: 32,
+    cloudShadows: true,
     shadowMap: 0,
     bloom: false,
     smaa: false,
@@ -52,7 +55,7 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     maxTiles: 400,
     terrainDetail: true,
     cloudLayers: 2,
-    volumetricClouds: 0,
+    volumetricClouds: 40,
     cloudShadows: true,
     shadowMap: 1024,
     bloom: true,
@@ -69,7 +72,7 @@ export const PRESETS: Record<QualityLevel, Quality> = {
     maxTiles: 560,
     terrainDetail: true,
     cloudLayers: 3,
-    volumetricClouds: 40,
+    volumetricClouds: 48,
     cloudShadows: true,
     shadowMap: 2048,
     bloom: true,
@@ -209,8 +212,9 @@ export function resolveQuality(s: Settings): { level: QualityLevel; quality: Qua
   const quality = { ...PRESETS[level] };
   // Test switches for profiling, e.g. ?fx=noclouds,nopost,noshadow,nodetail,nocloudshadow
   const fx = new URLSearchParams(location.search).get('fx')?.split(',') ?? [];
-  if (fx.includes('noclouds')) quality.cloudLayers = 0;
+  if (fx.includes('noclouds')) quality.cloudLayers = quality.volumetricClouds = 0;
   if (fx.includes('nopost')) quality.bloom = quality.smaa = false;
+  if (fx.includes('nopost') || fx.includes('flatclouds')) quality.volumetricClouds = 0;
   if (fx.includes('nobloom')) quality.bloom = false;
   if (fx.includes('nosmaa')) quality.smaa = false;
   if (fx.includes('noshadow')) quality.shadowMap = 0;

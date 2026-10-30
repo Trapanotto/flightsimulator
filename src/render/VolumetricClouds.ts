@@ -6,7 +6,7 @@ import {
   LinearMipmapLinearFilter,
   Matrix4,
   type PerspectiveCamera,
-  RedFormat,
+  RGBAFormat,
   RepeatWrapping,
   ShaderMaterial,
   type Texture,
@@ -20,11 +20,19 @@ import type { AtmosphereUniforms } from './Atmosphere';
 import { NOISE_DECLARATIONS } from './aerial';
 
 /**
- * Volumetric cumulus: a ray march through the cloud layer for every pixel (at reduced
- * resolution), stopped by the scene depth, lit by the sun (Beer-Powder, forward-scattering
- * phase) and the sky. Coverage comes from the same 2D noise as the cloud shadows on the
- * terrain, the shapes from a tileable 3D noise. The result (in-scattered light + transmittance)
- * is blended over the image by CloudCompositeEffect.
+ * Volumetric clouds: a ray march through the cloud layer for every pixel (at reduced
+ * resolution), stopped by the scene depth. Built like the Horizon Zero Dawn / Nubis clouds:
+ *
+ *  - Weather: coverage from the same 2D noise as the cloud shadows on the terrain, plus a
+ *    cloud type (flat stratocumulus .. towering cumulus) that sets the height profile.
+ *  - Shape: Perlin-Worley base noise remapped by coverage and profile, the edges eroded by a
+ *    detail Worley noise, wispy at the base and billowy at the top; tops lean with the wind.
+ *  - Light: sun light marched towards the sun, multiple scattering approximated by octaves
+ *    (Wrenninge), a two-lobe phase function (silver lining towards the sun), Beer-Powder
+ *    depending on the view, sky light from above and ground bounce from below.
+ *
+ * The result (in-scattered light + transmittance) is blended over the image by
+ * CloudCompositeEffect.
  */
 
 const N3 = 64;
@@ -39,73 +47,84 @@ function fromHalf(h: number): number {
   return s * 2 ** (e - 15) * (1 + f / 1024);
 }
 
-/** Tileable 3D noise: value-noise fbm, carved by inverted Worley cells (billowy). */
-export function makeNoise3D(size = N3): Data3DTexture {
-  let seed = 1234567;
-  const rnd = () => {
+function rng(seed: number) {
+  return () => {
     seed = (seed * 16807) % 2147483647;
     return seed / 2147483647;
   };
-  const lattice = (n: number) => Float32Array.from({ length: n * n * n }, rnd);
-  const octaves = [4, 8, 16, 32].map((n) => ({ n, g: lattice(n) }));
-  const cells = 6;
-  const points = Float32Array.from({ length: cells * cells * cells * 3 }, rnd);
-  const data = new Uint8Array(size * size * size);
-  const smooth = (t: number) => t * t * (3 - 2 * t);
-  for (let z = 0; z < size; z++)
-    for (let y = 0; y < size; y++)
-      for (let x = 0; x < size; x++) {
-        let v = 0;
-        let amp = 0.5;
-        let total = 0;
-        for (const { n, g } of octaves) {
-          const fx = (x / size) * n;
-          const fy = (y / size) * n;
-          const fz = (z / size) * n;
-          const x0 = Math.floor(fx);
-          const y0 = Math.floor(fy);
-          const z0 = Math.floor(fz);
-          const tx = smooth(fx - x0);
-          const ty = smooth(fy - y0);
-          const tz = smooth(fz - z0);
-          const at = (i: number, j: number, k: number) =>
-            g[(((k % n) + n) % n) * n * n + (((j % n) + n) % n) * n + (((i % n) + n) % n)]!;
-          const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-          const c00 = lerp(at(x0, y0, z0), at(x0 + 1, y0, z0), tx);
-          const c10 = lerp(at(x0, y0 + 1, z0), at(x0 + 1, y0 + 1, z0), tx);
-          const c01 = lerp(at(x0, y0, z0 + 1), at(x0 + 1, y0, z0 + 1), tx);
-          const c11 = lerp(at(x0, y0 + 1, z0 + 1), at(x0 + 1, y0 + 1, z0 + 1), tx);
-          v += lerp(lerp(c00, c10, ty), lerp(c01, c11, ty), tz) * amp;
-          total += amp;
-          amp *= 0.5;
+}
+
+/**
+ * Tileable inverted Worley noise (1 at feature points, 0 far away) for `cells` per side,
+ * evaluated at a point given in texture units 0..1.
+ */
+function worleyField(cells: number, seed: number) {
+  const rnd = rng(seed);
+  const pts = Float32Array.from({ length: cells * cells * cells * 3 }, rnd);
+  return (x: number, y: number, z: number) => {
+    const px = x * cells;
+    const py = y * cells;
+    const pz = z * cells;
+    const cx = Math.floor(px);
+    const cy = Math.floor(py);
+    const cz = Math.floor(pz);
+    let best = 9;
+    for (let k = -1; k <= 1; k++)
+      for (let j = -1; j <= 1; j++)
+        for (let i = -1; i <= 1; i++) {
+          const ix = (((cx + i) % cells) + cells) % cells;
+          const iy = (((cy + j) % cells) + cells) % cells;
+          const iz = (((cz + k) % cells) + cells) % cells;
+          const o = ((iz * cells + iy) * cells + ix) * 3;
+          const dx = cx + i + pts[o]! - px;
+          const dy = cy + j + pts[o + 1]! - py;
+          const dz = cz + k + pts[o + 2]! - pz;
+          best = Math.min(best, dx * dx + dy * dy + dz * dz);
         }
-        v /= total;
-        // Worley: distance to the nearest feature point in a tiling grid of cells.
-        const px = (x / size) * cells;
-        const py = (y / size) * cells;
-        const pz = (z / size) * cells;
-        let best = 9;
-        const cx = Math.floor(px);
-        const cy = Math.floor(py);
-        const cz = Math.floor(pz);
-        for (let k = -1; k <= 1; k++)
-          for (let j = -1; j <= 1; j++)
-            for (let i = -1; i <= 1; i++) {
-              const ix = (((cx + i) % cells) + cells) % cells;
-              const iy = (((cy + j) % cells) + cells) % cells;
-              const iz = (((cz + k) % cells) + cells) % cells;
-              const o = ((iz * cells + iy) * cells + ix) * 3;
-              const dx = cx + i + points[o]! - px;
-              const dy = cy + j + points[o + 1]! - py;
-              const dz = cz + k + points[o + 2]! - pz;
-              best = Math.min(best, dx * dx + dy * dy + dz * dz);
-            }
-        const worley = 1 - Math.min(1, Math.sqrt(best));
-        const b = Math.min(1, Math.max(0, v * 0.55 + worley * 0.6 - 0.1));
-        data[(z * size + y) * size + x] = Math.round(b * 255);
-      }
+    return 1 - Math.min(1, Math.sqrt(best));
+  };
+}
+
+/** Tileable value-noise fbm (4 octaves from `base` lattice cells per side). */
+function valueFbm(base: number, seed: number) {
+  const rnd = rng(seed);
+  const octaves = [1, 2, 4, 8].map((k) => {
+    const n = base * k;
+    return { n, g: Float32Array.from({ length: n * n * n }, rnd) };
+  });
+  const smooth = (t: number) => t * t * (3 - 2 * t);
+  const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+  return (x: number, y: number, z: number) => {
+    let v = 0;
+    let amp = 0.5;
+    let total = 0;
+    for (const { n, g } of octaves) {
+      const fx = x * n;
+      const fy = y * n;
+      const fz = z * n;
+      const x0 = Math.floor(fx);
+      const y0 = Math.floor(fy);
+      const z0 = Math.floor(fz);
+      const tx = smooth(fx - x0);
+      const ty = smooth(fy - y0);
+      const tz = smooth(fz - z0);
+      const at = (i: number, j: number, k: number) =>
+        g[(((k % n) + n) % n) * n * n + (((j % n) + n) % n) * n + (((i % n) + n) % n)]!;
+      const c00 = lerp(at(x0, y0, z0), at(x0 + 1, y0, z0), tx);
+      const c10 = lerp(at(x0, y0 + 1, z0), at(x0 + 1, y0 + 1, z0), tx);
+      const c01 = lerp(at(x0, y0, z0 + 1), at(x0 + 1, y0, z0 + 1), tx);
+      const c11 = lerp(at(x0, y0 + 1, z0 + 1), at(x0 + 1, y0 + 1, z0 + 1), tx);
+      v += lerp(lerp(c00, c10, ty), lerp(c01, c11, ty), tz) * amp;
+      total += amp;
+      amp *= 0.5;
+    }
+    return v / total;
+  };
+}
+
+function texture3D(data: Uint8Array, size: number): Data3DTexture {
   const tex = new Data3DTexture(data, size, size, size);
-  tex.format = RedFormat;
+  tex.format = RGBAFormat;
   tex.type = UnsignedByteType;
   tex.wrapS = tex.wrapT = tex.wrapR = RepeatWrapping;
   tex.magFilter = LinearFilter;
@@ -116,12 +135,62 @@ export function makeNoise3D(size = N3): Data3DTexture {
   return tex;
 }
 
+const byte = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 255);
+
+/**
+ * Cloud shape noise (tileable, RGBA), the low-frequency volume of the clouds:
+ *   R  Perlin-Worley: billowy value-noise fbm, its low values carved by Worley cells
+ *   GBA  Worley fbm at increasing frequencies (erodes the base shape)
+ */
+export function makeShapeNoise(size = N3): Data3DTexture {
+  const fbm = valueFbm(4, 1234567);
+  const w = [4, 8, 16, 32, 64].map((c, i) => worleyField(c, 7001 + i * 31));
+  const data = new Uint8Array(size * size * size * 4);
+  for (let z = 0; z < size; z++)
+    for (let y = 0; y < size; y++)
+      for (let x = 0; x < size; x++) {
+        const u = x / size;
+        const v = y / size;
+        const t = z / size;
+        const f = w.map((fn) => fn(u, v, t));
+        const wf = (a: number) => f[a]! * 0.625 + f[a + 1]! * 0.25 + f[a + 2]! * 0.125;
+        const p = fbm(u, v, t);
+        // Perlin-Worley (Schneider 2015): the fbm remapped onto the Worley fbm floor.
+        const pw = wf(0) + Math.min(1, Math.max(0, (p - 0.25) / 0.6)) * (1 - wf(0));
+        const o = ((z * size + y) * size + x) * 4;
+        data[o] = byte(pw);
+        data[o + 1] = byte(wf(0));
+        data[o + 2] = byte(wf(1));
+        data[o + 3] = byte(wf(2));
+      }
+  return texture3D(data, size);
+}
+
+/** Detail noise (tileable, RGB = Worley fbm at three frequencies): erodes the cloud edges. */
+export function makeDetailNoise(size = 32): Data3DTexture {
+  const w = [2, 4, 8, 16, 32].map((c, i) => worleyField(c, 9001 + i * 17));
+  const data = new Uint8Array(size * size * size * 4);
+  for (let z = 0; z < size; z++)
+    for (let y = 0; y < size; y++)
+      for (let x = 0; x < size; x++) {
+        const f = w.map((fn) => fn(x / size, y / size, z / size));
+        const wf = (a: number) => f[a]! * 0.625 + f[a + 1]! * 0.25 + f[a + 2]! * 0.125;
+        const o = ((z * size + y) * size + x) * 4;
+        data[o] = byte(wf(0));
+        data[o + 1] = byte(wf(1));
+        data[o + 2] = byte(wf(2));
+        data[o + 3] = 255;
+      }
+  return texture3D(data, size);
+}
+
 const MARCH_FRAG = /* glsl */ `
   #include <common>
   #include <packing>
   precision highp sampler3D;
   uniform sampler2D depthBuffer;
-  uniform sampler3D uNoise3D;
+  uniform sampler3D uShape;
+  uniform sampler3D uDetail;
   uniform mat4 uProj;
   uniform mat4 uCamWorld;
   uniform vec3 uCamPos;
@@ -177,28 +246,63 @@ const MARCH_FRAG = /* glsl */ `
     return smoothstep(edge - 0.08, edge + 0.22, n);
   }
 
-  // Extinction (1/m) at a point: coverage x height profile, carved by 3D noise.
+  float remap(float x, float a, float b, float c, float d) {
+    return c + (x - a) / max(b - a, 1e-4) * (d - c);
+  }
+
+  // Cloud type at a place: 0 = flat stratocumulus, 1 = towering cumulus. Denser cells and
+  // more cloudy weather build higher.
+  float cloudType(vec2 q, float cov) {
+    vec2 wind = vec2(9.0, 3.5) * uTime;
+    float n = texture2D(uNoise, (q + wind) / (NOISE_PERIOD * 1.9) + vec2(0.37, 0.71)).r;
+    return clamp(smoothstep(0.25, 0.8, n) * 0.75 + cov * 0.35 + uCloudCoverage * 0.2 - 0.15, 0.0, 1.0);
+  }
+
+  // Detail noise at the last full density sample (mottles the light on cloud bases).
+  float gDetail = 0.5;
+
+  // Height profile 0..1 inside the layer for a cloud type: flat base, rounded tops.
+  float heightProfile(float hn, float type, float cov, float lift) {
+    float top = mix(0.32, 1.0, type) * (0.65 + 0.35 * cov);
+    float bottom = smoothstep(lift, lift + mix(0.05, 0.12, type), hn);
+    return bottom * (1.0 - smoothstep(top * mix(0.35, 0.6, type), top, hn));
+  }
+
+  // Extinction (1/m) at a point. cheap = without the detail erosion (light march).
   float density(vec3 p, float h, bool cheap, float camDist) {
     float hn = (h - uCloudBase) / (uCloudTop - uCloudBase);
     if (hn < 0.0 || hn > 1.0) return 0.0;
     vec2 q = basePos(p);
     float cov = coverage(q);
     if (cov < 0.01) return 0.0;
-    // Flat base, tops rounding off; denser cells grow taller.
-    float profile = smoothstep(0.0, 0.08, hn) * (1.0 - smoothstep(0.25 + 0.7 * cov, 1.0, hn));
-    float d = cov * profile;
-    vec3 wind = vec3(9.0, 0.0, 3.5) * uTime;
-    vec3 s = vec3(q.x, h * 1.6, q.y) + wind;
-    float shape = texture(uNoise3D, s / 2600.0).r;
-    d = clamp((d - (1.0 - shape) * 0.62) / 0.38, 0.0, 1.0);
+    float type = cloudType(q, cov);
+    // Wind; the tops lean downwind (shear).
+    vec3 windDir = vec3(9.0, 0.0, 3.5);
+    vec3 s = vec3(q.x, h * 1.3, q.y) + windDir * uTime + windDir * hn * 45.0;
+    vec4 n = texture(uShape, s / 3400.0);
+    // Uneven bases: the cloud bottom rises and falls a little with the noise.
+    float profile = heightProfile(hn, type, cov, 0.07 * (1.0 - n.g));
+    if (profile <= 0.0) return 0.0;
+    float wfbm = n.g * 0.625 + n.b * 0.25 + n.a * 0.125;
+    float base = remap(n.r, wfbm - 1.0, 1.0, 0.0, 1.0);
+    // Coverage: sparse cells keep only their cores; the profile rounds base and top.
+    // Even under full cover the noise keeps carving: no smooth sheets with round edges.
+    float d = clamp(remap(base * profile, 1.0 - cov * 0.68, 1.0, 0.0, 1.0), 0.0, 1.0);
     if (!cheap && d > 0.0) {
-      float detail = texture(uNoise3D, s / 520.0).r;
-      d = clamp(d - (1.0 - detail) * 0.22 * (1.0 - d), 0.0, 1.0);
-      // Close up: crisp, cauliflower edges.
-      float near = 1.0 - smoothstep(1500.0, 4500.0, camDist);
+      vec3 dn = texture(uDetail, s / 480.0).rgb;
+      float dfbm = dn.r * 0.625 + dn.g * 0.25 + dn.b * 0.125;
+      gDetail = dfbm;
+      // Wispy at the base, billowy (cauliflower) towards the top.
+      float m = mix(dfbm, 1.0 - dfbm, clamp(hn * 5.0, 0.0, 1.0));
+      // Very far away the fine erosion only adds noise.
+      float k = 0.46 * (1.0 - 0.5 * smoothstep(12000.0, 30000.0, camDist));
+      d = clamp(remap(d, m * k, 1.0, 0.0, 1.0), 0.0, 1.0);
+      // Close up: a finer layer of curls on the edges.
+      float near = 1.0 - smoothstep(1500.0, 5000.0, camDist);
       if (near > 0.0 && d > 0.0) {
-        float fine = texture(uNoise3D, s / 150.0 + 0.37).r;
-        d = clamp(d - (1.0 - fine) * 0.3 * near * (1.0 - d), 0.0, 1.0);
+        float fine = texture(uDetail, s / 130.0 + 0.37).g;
+        float fm = mix(fine, 1.0 - fine, clamp(hn * 5.0, 0.0, 1.0));
+        d = clamp(remap(d, fm * 0.3 * near, 1.0, 0.0, 1.0), 0.0, 1.0);
       }
     }
     return d * SIGMA;
@@ -207,6 +311,11 @@ const MARCH_FRAG = /* glsl */ `
   float hg(float c, float g) {
     float g2 = g * g;
     return (1.0 - g2) / (4.0 * PI * pow(1.0 + g2 - 2.0 * g * c, 1.5));
+  }
+
+  // Two lobes: a strong forward peak (silver lining) and some back scattering. 1 = isotropic.
+  float phase2(float c, float k) {
+    return mix(hg(c, 0.8 * k), hg(c, -0.2 * k), 0.4) * 4.0 * PI;
   }
 
   void main() {
@@ -247,19 +356,26 @@ const MARCH_FRAG = /* glsl */ `
     float norm = len / (exp(K) - 1.0);
 
     float cosSun = dot(dir, uSunDir);
-    float phase = min(mix(hg(cosSun, 0.5), hg(cosSun, -0.25), 0.3) * 4.0 * PI, 2.2);
     float dayLight = smoothstep(-0.06, 0.12, uSunDir.y);
-    vec3 sun = uSunColor * dayLight * 2.2;
-    // Sky light inside clouds: nearly neutral (a blue tint makes shaded cores lilac).
+    vec3 sun = uSunColor * dayLight * 1.9;
+    // Sky light from above: nearly neutral (a blue tint makes shaded cores lilac).
     vec3 skyAmbient = mix(vec3(dot(uHazeColor, vec3(0.333))), vec3(0.78, 0.82, 0.9), 0.5)
                     * (0.35 + 0.65 * dayLight);
+    // Light bounced off the landscape below: warm and dim.
+    vec3 ground = vec3(0.42, 0.40, 0.34) * uSunColor * dayLight * max(uSunDir.y, 0.0) * 0.35;
+    // Phase per scattering octave (constant along the ray).
+    float ph0 = min(phase2(cosSun, 1.0), 9.0);
+    float ph1 = min(phase2(cosSun, 0.5), 4.0);
+    float ph2 = min(phase2(cosSun, 0.25), 2.0);
+    // Powder (dark edges, bright folds) only when looking away from the sun.
+    float powderMix = clamp(0.5 - 0.5 * cosSun, 0.0, 1.0);
 
     vec3 scatter = vec3(0.0);
     float T = 1.0;
     float weightedT = 0.0;
     float weight = 0.0;
     for (int i = 0; i < STEPS; i++) {
-      if (T < 0.02) break;
+      if (T < 0.015) break;
       float u0 = (float(i) + jitter) / float(STEPS);
       float t = t0 + norm * (exp(K * u0) - 1.0);
       float stepLen = norm * K * exp(K * u0) / float(STEPS);
@@ -267,22 +383,27 @@ const MARCH_FRAG = /* glsl */ `
       float h = hc + mu * t;
       float sigma = density(p, h, false, t);
       if (sigma > 0.0) {
-        // Light towards the sun: a few growing steps.
+        // Optical depth towards the sun: growing steps, ~1.5 km.
         float od = 0.0;
-        float ls = 70.0;
+        float ls = 45.0;
         vec3 lp = p;
         float lh = h;
+        float sunUp = dot(uSunDir, uUp);
         for (int j = 0; j < LIGHT_STEPS; j++) {
           lp += uSunDir * ls;
-          lh += dot(uSunDir, uUp) * ls;
+          lh += sunUp * ls;
           od += density(lp, lh, true, 1e9) * ls;
-          ls *= 1.9;
+          ls *= 1.7;
         }
+        // Multiple scattering (Wrenninge): octaves see less extinction, a softer phase.
+        float ms = exp(-od) * ph0 + 0.4 * exp(-od * 0.5) * ph1 + 0.16 * exp(-od * 0.25) * ph2;
+        float powder = 1.0 - exp(-od * 2.0 - sigma * 80.0);
+        ms *= mix(1.0, powder * 1.6, powderMix);
         float hn = clamp((h - uCloudBase) / (uCloudTop - uCloudBase), 0.0, 1.0);
-        float beer = exp(-od);
-        float powder = 1.0 - exp(-od * 2.0 - sigma * 60.0);
-        vec3 light = sun * beer * mix(1.0, powder * 2.0, 0.5) * phase
-                   + skyAmbient * (0.45 + 0.55 * hn);
+        // Sky light: darker low in the cloud, mottled by the detail noise (cloud bases).
+        vec3 light = sun * ms
+                   + skyAmbient * (0.3 + 0.7 * sqrt(hn)) * (0.7 + 0.6 * gDetail)
+                   + ground * (1.0 - hn);
         float ext = exp(-sigma * stepLen);
         scatter += T * light * (1.0 - ext);
         weightedT += T * (1.0 - ext) * t;
@@ -396,7 +517,7 @@ export class CloudMarchPass extends Pass {
     this.material = new ShaderMaterial({
       defines: {
         STEPS: String(steps),
-        LIGHT_STEPS: '4',
+        LIGHT_STEPS: '6',
         // How the scene depth is stored (three does not tell full-screen passes).
         ...(depthMode === 'reversed' ? { CLOUD_REVERSED_DEPTH: '1' } : {}),
         ...(depthMode === 'log' ? { CLOUD_LOG_DEPTH: '1' } : {}),
@@ -406,7 +527,8 @@ export class CloudMarchPass extends Pass {
       uniforms: {
         ...atmosphere,
         depthBuffer: new Uniform(null),
-        uNoise3D: new Uniform(makeNoise3D()),
+        uShape: new Uniform(makeShapeNoise()),
+        uDetail: new Uniform(makeDetailNoise()),
         uProj: new Uniform(mainCam.projectionMatrix),
         uCamWorld: new Uniform(mainCam.matrixWorld),
         uCamPos: new Uniform(mainCam.position),
@@ -521,7 +643,8 @@ export class CloudMarchPass extends Pass {
     this.target.dispose();
     for (const t of this.history) t.dispose();
     this.accum.dispose();
-    (this.material.uniforms.uNoise3D!.value as Texture).dispose();
+    (this.material.uniforms.uShape!.value as Texture).dispose();
+    (this.material.uniforms.uDetail!.value as Texture).dispose();
   }
 }
 
