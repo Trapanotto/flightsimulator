@@ -122,21 +122,24 @@ Das vollständige Konzept steht in [docs/KONZEPT.md](docs/KONZEPT.md).
 
 ### Steuerung (Fliegen)
 
-| Aktion                   | Tastatur                           | Gamepad                     |
-| ------------------------ | ---------------------------------- | --------------------------- |
-| Nase runter / rauf       | W / S oder ↑ / ↓                   | linker Stick vor / zurück   |
-| Rollen                   | A / D oder ← / →                   | linker Stick links / rechts |
-| Gieren                   | Q / E                              | LB / RB                     |
-| Schub + / −              | Shift / Ctrl (oder R / F)          | RT / LT                     |
-| Boost                    | Leertaste                          | A                           |
-| Fahrwerk / Klappen       | G / V                              | X / Steuerkreuz             |
-| Trimm Nase runter / rauf | Bild↑ / Bild↓ (Ziffernblock 7 / 1) | –                           |
-| Bremse                   | B                                  | B                           |
-| Kamera                   | C                                  | Y                           |
-| Maus-Steuerung an/aus    | N (Klick ins Bild aktiviert sie)   | –                           |
-| Karte gross / klein      | M                                  | –                           |
-| Ton an / aus             | O                                  | –                           |
-| Pause / Neustart         | P / Backspace                      | Start / Back                |
+| Aktion                   | Tastatur                                                                | Gamepad                     |
+| ------------------------ | ----------------------------------------------------------------------- | --------------------------- |
+| Nase runter / rauf       | W / S oder ↑ / ↓                                                        | linker Stick vor / zurück   |
+| Rollen                   | A / D oder ← / →                                                        | linker Stick links / rechts |
+| Gieren                   | Q / E                                                                   | LB / RB                     |
+| Schub + / −              | Shift / Ctrl (oder R / F)                                               | RT / LT                     |
+| Boost                    | Leertaste                                                               | A                           |
+| Fahrwerk / Klappen       | G / V                                                                   | X / Steuerkreuz             |
+| Trimm Nase runter / rauf | Bild↑ / Bild↓ (Ziffernblock 7 / 1)                                      | –                           |
+| Bremse                   | B                                                                       | B                           |
+| Kamera                   | C                                                                       | Y                           |
+| Maus-Steuerung an/aus    | N (Klick ins Bild aktiviert sie)                                        | –                           |
+| Karte gross / klein      | M                                                                       | –                           |
+| Ton an / aus             | O                                                                       | –                           |
+| Pause / Neustart         | P / Backspace                                                           | Start / Back                |
+| Aussteigen / Fallschirm  | J (am Boden stehend / im Flug)                                          | –                           |
+| Zu Fuss                  | W/A/S/D, Shift rennt, Maus schaut, C: Ich-/Aussenansicht, J: einsteigen | –                           |
+| Am Schirm                | Leertaste/J: ziehen, A/D: steuern, S: bremsen, Leertaste: abfangen      | –                           |
 
 ![Tiefflug im Lauterbrunnental](docs/screenshots/lauterbrunnen.png)
 

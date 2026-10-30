@@ -40,7 +40,7 @@
   "camera.orbit": "Orbit",
   "flight.waiting": "Loading terrain at the start …",
   "flight.paused": "Paused – press P to continue",
-  "flight.help": "Click: mouse flight (N on/off) · W/S: nose down/up · A/D: roll · Q/E: yaw · Shift/Ctrl: throttle · Space: boost · PgUp/PgDn: trim · G: gear · V: flaps · B: brake · C: camera · M: map · O: sound · P: pause · ⌫: restart",
+  "flight.help": "Click: mouse flight (N on/off) · W/S: nose down/up · A/D: roll · Q/E: yaw · Shift/Ctrl: throttle · Space: boost · PgUp/PgDn: trim · G: gear · V: flaps · B: brake · C: camera · M: map · O: sound · P: pause · ⌫: restart · J: get out / jump",
   "gearDown": "Gear down",
   "gearUp": "Gear up",
   "landing.butter": "Butter-smooth landing",
@@ -110,5 +110,16 @@
   "hud.vs": "Vertical speed",
   "hangar.fleet": "Fleet",
   "flight.aircraft": "Aircraft",
-  "challenge.planeSoon": "Aircraft coming soon"
+  "challenge.planeSoon": "Aircraft coming soon",
+  "pilot.out": "Out of the aircraft – W/A/S/D: walk · Shift: run · mouse: look · C: first/third person · J: get in",
+  "pilot.jumped": "Jumped! Space or J: pull the parachute (opens by itself at 300 m above ground)",
+  "pilot.eject": "Ejected! The parachute opens by itself",
+  "pilot.opened": "Canopy open – A/D: steer · S: brakes · Space just above the ground: flare",
+  "pilot.landed": "Landed – J next to the aircraft: get in",
+  "pilot.hardLanding": "Hard landing",
+  "pilot.fatal": "Hit the ground in free fall",
+  "pilot.enter": "Back in the aircraft",
+  "pilot.tooFar": "Walk closer to the aircraft to get in",
+  "pilot.stopFirst": "Stop before getting out",
+  "pilot.aircraftLost": "The aircraft is destroyed – ⌫: new flight"
 }

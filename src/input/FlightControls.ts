@@ -2,7 +2,7 @@ import type { FlightInput } from '../physics/FlightModel';
 
 /** One-shot actions (toggles), consumed once per frame. */
 export type FlightAction =
-  'gear' | 'flaps' | 'camera' | 'reset' | 'pause' | 'mouseAim' | 'map' | 'mute';
+  'gear' | 'flaps' | 'camera' | 'reset' | 'pause' | 'mouseAim' | 'map' | 'mute' | 'exit' | 'jump';
 
 const DEADZONE = 0.08;
 const EXPO = 0.4;
@@ -42,6 +42,9 @@ const ACTION_KEYS: Record<string, FlightAction> = {
   KeyN: 'mouseAim',
   KeyM: 'map',
   KeyO: 'mute',
+  // Get out / in, jump with the parachute, pull.
+  KeyJ: 'exit',
+  Space: 'jump',
 };
 
 /** Standard gamepad layout (Xbox naming). */
@@ -187,6 +190,11 @@ export class FlightControls {
       strongMagnitude: strength,
       weakMagnitude: strength,
     });
+  }
+
+  /** A key is held (walking and parachute controls read the keys directly). */
+  held(code: string): boolean {
+    return this.keys.has(code);
   }
 
   private anyKey(codes: readonly string[]) {

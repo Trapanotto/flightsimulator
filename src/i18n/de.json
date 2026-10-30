@@ -40,7 +40,7 @@
   "camera.orbit": "Orbit",
   "flight.waiting": "Lade Gelände am Startort …",
   "flight.paused": "Pause – P zum Fortsetzen",
-  "flight.help": "Klick: Maus-Steuerung (N an/aus) · W/S: Nase runter/rauf · A/D: rollen · Q/E: gieren · Shift/Ctrl: Schub · Leertaste: Boost · Bild↑/Bild↓: Trimm · G: Fahrwerk · V: Klappen · B: Bremse · C: Kamera · M: Karte · O: Ton · P: Pause · ⌫: Neustart",
+  "flight.help": "Klick: Maus-Steuerung (N an/aus) · W/S: Nase runter/rauf · A/D: rollen · Q/E: gieren · Shift/Ctrl: Schub · Leertaste: Boost · Bild↑/Bild↓: Trimm · G: Fahrwerk · V: Klappen · B: Bremse · C: Kamera · M: Karte · O: Ton · P: Pause · ⌫: Neustart · J: aussteigen / abspringen",
   "gearDown": "Fahrwerk ausgefahren",
   "gearUp": "Fahrwerk eingefahren",
   "landing.butter": "Butterweiche Landung",
@@ -110,5 +110,16 @@
   "hud.vs": "Steigrate",
   "hangar.fleet": "Flotte",
   "flight.aircraft": "Flugzeug",
-  "challenge.planeSoon": "Flugzeug folgt bald"
+  "challenge.planeSoon": "Flugzeug folgt bald",
+  "pilot.out": "Ausgestiegen – W/A/S/D: gehen · Shift: rennen · Maus: schauen · C: Ich-/Aussenansicht · J: einsteigen",
+  "pilot.jumped": "Abgesprungen! Leertaste oder J: Schirm ziehen (öffnet automatisch auf 300 m über Grund)",
+  "pilot.eject": "Schleudersitz! Der Schirm öffnet automatisch",
+  "pilot.opened": "Schirm offen – A/D: steuern · S: bremsen · Leertaste kurz vor dem Boden: abfangen",
+  "pilot.landed": "Gelandet – J beim Flugzeug: einsteigen",
+  "pilot.hardLanding": "Harte Landung",
+  "pilot.fatal": "Aufprall im freien Fall",
+  "pilot.enter": "Eingestiegen",
+  "pilot.tooFar": "Zum Einsteigen näher ans Flugzeug gehen",
+  "pilot.stopFirst": "Zum Aussteigen erst anhalten",
+  "pilot.aircraftLost": "Das Flugzeug ist zerstört – ⌫: neuer Flug"
 }

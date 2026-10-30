@@ -2,6 +2,8 @@ import { Quaternion, type Texture, Vector3 } from 'three';
 import { makeSkyEnvironment, softenReflections } from '../render/skyEnvironment';
 import { FlightAudio } from '../audio/FlightAudio';
 import { Aircraft } from '../aircraft/Aircraft';
+import { Pilot } from './Pilot';
+import { Wreck } from './Wreck';
 import type { CockpitData } from '../aircraft/CockpitDisplays';
 import { WingTrails } from '../aircraft/WingTrails';
 import { CameraRig } from '../camera/CameraRig';
@@ -36,7 +38,8 @@ export interface GameMessage {
 }
 
 const STEP = 1 / 120;
-const RESPAWN_DELAY = 3;
+/** Long enough to watch the aircraft break up and burn. */
+const RESPAWN_DELAY = 6;
 const DEG = Math.PI / 180;
 
 /**
@@ -91,6 +94,20 @@ export class FlightGame {
   private readonly lastPos = new Vector3();
   /** Set by the view: ring passed, missed, finished. */
   onChallengeEvent?: (e: ChallengeEvent) => void;
+  /** The pilot outside the aircraft (walking, falling, under the canopy). */
+  pilot?: Pilot;
+  /** The burning wreck of the last crash. */
+  wreck?: Wreck;
+  /** Inputs of the aircraft while nobody flies it: hands off, throttle where it was. */
+  private readonly unmanned = {
+    pitch: 0,
+    roll: 0,
+    yaw: 0,
+    throttle: 0,
+    boost: false,
+    brake: false,
+    trim: 0,
+  };
 
   type: AircraftType;
 
@@ -165,6 +182,7 @@ export class FlightGame {
     this.audio.dispose();
     if (this.aircraft) this.world.scene.remove(this.aircraft.root, this.trails.group);
     this.endChallenge();
+    this.clearOutside();
     this.envMap?.dispose();
   }
 
@@ -205,6 +223,7 @@ export class FlightGame {
   /** Free flight from a start place; ends a running challenge unless `keepChallenge`. */
   start(place: StartPlace, keepChallenge = false) {
     if (!keepChallenge) this.endChallenge();
+    this.clearOutside();
     this.place = place;
     this.crashTime = -1;
     this.message = null;
@@ -282,6 +301,9 @@ export class FlightGame {
   /** Floating origin moved. */
   rebase(delta: Vector3) {
     this.fm.position.sub(delta);
+    this.pilot?.rebase(delta);
+    this.wreck?.rebase(delta);
+    this.crashCam?.centre.sub(delta);
     this.prevPos.sub(delta);
     this.renderPos.sub(delta);
     this.lastPos.sub(delta);
@@ -321,10 +343,11 @@ export class FlightGame {
 
     if (!this.paused && !this.waitingForTerrain) {
       this.acc = Math.min(this.acc + dt, 0.25);
+      const input = this.pilot ? this.unmannedInput() : c.input;
       while (this.acc >= STEP) {
         this.prevPos.copy(this.fm.position);
         this.prevQuat.copy(this.fm.quaternion);
-        this.fm.step(STEP, c.input, this.events);
+        this.fm.step(STEP, input, this.events);
         this.acc -= STEP;
       }
       for (const e of this.events.splice(0)) this.onEvent(e);
@@ -337,7 +360,9 @@ export class FlightGame {
       this.lastPos.copy(this.fm.position);
       if (this.fm.crashed && this.crashTime > 0 && this.time - this.crashTime > RESPAWN_DELAY)
         this.respawn();
+      this.updatePilot(dt);
     }
+    this.updateWreck(dt);
 
     this.updateRenderPose();
     this.syncModel(dt);
@@ -346,6 +371,14 @@ export class FlightGame {
     // While the start place loads, the camera stays where start() put it (that is what streams
     // the terrain in); the chase camera takes over once the aircraft is placed.
     if (this.waitingForTerrain) return;
+    if (this.pilot) {
+      this.pilot.updateCamera(this.world.camera);
+      return;
+    }
+    if (this.crashCam && this.fm.crashed) {
+      this.updateCrashCam(dt);
+      return;
+    }
     this.rig.update(dt, {
       position: this.renderPos,
       quaternion: this.renderQuat,
@@ -371,7 +404,7 @@ export class FlightGame {
       this.approach += (rate - this.approach) * Math.min(1, dt * 6);
     }
     this.lastCamDist = dist;
-    const inside = this.rig.mode === 'cockpit';
+    const inside = this.rig.mode === 'cockpit' && !this.pilot;
     this.aircraft?.setCockpitView(inside);
     this.audio.update(dt, {
       throttle: f.throttle,
@@ -379,12 +412,13 @@ export class FlightGame {
       speed: f.speed,
       boost: f.boosting,
       inside,
-      approach: inside ? 0 : this.approach,
+      approach: inside || this.pilot ? 0 : this.approach,
       pullUp: this.pullUp && !f.crashed,
       stall: f.stalled && !f.onGround && !f.crashed,
       servo: this.time < this.servoUntil,
       onGround: f.onGround,
-      paused: this.paused || this.waitingForTerrain,
+      // Outside the aircraft its engine is far away (or the aircraft is gone).
+      paused: this.paused || this.waitingForTerrain || this.pilotFar,
     });
   }
 
@@ -480,7 +514,8 @@ export class FlightGame {
     if (!this.renderValid) this.updateRenderPose();
     a.root.position.copy(this.renderPos);
     a.root.quaternion.copy(this.renderQuat);
-    a.root.visible = !this.waitingForTerrain;
+    // After a crash the wreck takes the aircraft's place until the respawn.
+    a.root.visible = !this.waitingForTerrain && !(this.fm.crashed && this.wreck);
     const i = this.controls.input;
     a.controls.aileron = i.roll;
     a.controls.elevator = i.pitch;
@@ -519,7 +554,15 @@ export class FlightGame {
         this.servoUntil = this.time + 1.4;
         break;
       case 'camera':
-        this.rig.next();
+        if (this.pilot) this.pilot.toggleView();
+        else this.rig.next();
+        break;
+      case 'exit':
+        this.exitOrEnter();
+        break;
+      case 'jump':
+        // Space pulls the parachute in free fall (in the aircraft it is the boost key).
+        this.pilot?.openCanopy();
         break;
       case 'reset':
         if (this.challenge) this.startChallenge(this.challenge.course);
@@ -552,6 +595,12 @@ export class FlightGame {
         for (const c of this.challenge.touchdown(lon, lat)) this.onChallenge(c);
       }
     } else if (e.type === 'crash') {
+      this.breakUp();
+      if (this.pilot) {
+        // Nobody aboard: no respawn, the pilot carries on outside.
+        this.say('pilot.aircraftLost', 'info', 5);
+        return;
+      }
       this.crashTime = this.time;
       this.say(`crash.${e.reason}`, 'bad', RESPAWN_DELAY);
       this.rig.shake = 1;
@@ -577,8 +626,175 @@ export class FlightGame {
     this.onChallengeEvent?.(e);
   }
 
+  /** The aircraft breaks apart and explodes where it hit. */
+  private breakUp() {
+    const a = this.aircraft;
+    if (!a) return;
+    this.wreck?.dispose();
+    // The model is drawn at the interpolated pose: put it at the impact first.
+    a.root.position.copy(this.fm.position);
+    a.root.quaternion.copy(this.fm.quaternion);
+    this.wreck = new Wreck(a, this.lastVelocity, {
+      heightAboveGround: (p) => this.world.heightAboveGround(p),
+      upAt: (p, out) => this.world.upAt(p, out),
+    });
+    this.world.scene.add(this.wreck.group);
+    a.root.visible = false;
+    this.audio.impact('crash', 1.6);
+    if (!this.pilot) {
+      // Watch from a distance: back along the approach, above the crash site.
+      const up = this.fm.worldUp.clone();
+      const back = this.lastVelocity.clone().addScaledVector(up, -this.lastVelocity.dot(up));
+      if (back.lengthSq() < 1)
+        back.copy(this.fm.forward).addScaledVector(up, -this.fm.forward.dot(up));
+      back.normalize().negate();
+      this.crashCam = { centre: this.fm.position.clone(), back, angle: 0 };
+    }
+  }
+
+  /** Camera after a crash: circles the burning wreck slowly. */
+  private crashCam?: { centre: Vector3; back: Vector3; angle: number };
+
+  private updateCrashCam(dt: number) {
+    const c = this.crashCam!;
+    const cam = this.world.camera;
+    const up = this.world.upAt(c.centre, new Vector3());
+    const k = Math.min(5, Math.max(1, this.type.length / 10));
+    c.angle += dt * 0.12;
+    const dir = c.back.clone().applyAxisAngle(up, c.angle);
+    const dist = 45 * k;
+    cam.position
+      .copy(c.centre)
+      .addScaledVector(dir, dist)
+      .addScaledVector(up, dist * 0.42);
+    const h = this.world.heightAboveGround(cam.position);
+    if (h !== undefined && h < 8) cam.position.addScaledVector(up, 8 - h);
+    cam.up.copy(up);
+    cam.lookAt(c.centre.clone().addScaledVector(up, 4 * k));
+    if (cam.near !== 0.5) {
+      cam.near = 0.5;
+      cam.fov = 60;
+      cam.updateProjectionMatrix();
+    }
+  }
+
+  private updateWreck(dt: number) {
+    const w = this.wreck;
+    if (!w) return;
+    if (!this.paused) w.update(dt, this.world.camera.position);
+    if (w.done) {
+      w.dispose();
+      this.wreck = undefined;
+    }
+  }
+
+  /** Velocity just before the impact (the crash stops the flight model). */
+  private readonly lastVelocity = new Vector3();
+
+  private unmannedInput() {
+    const u = this.unmanned;
+    u.throttle = this.fm.throttle;
+    u.brake = this.fm.onGround;
+    return u;
+  }
+
+  /** The pilot is out and away from the engine noise. */
+  private get pilotFar(): boolean {
+    const p = this.pilot;
+    return !!p && (this.fm.crashed || p.position.distanceTo(this.fm.position) > 40);
+  }
+
+  /** J: get out (standing on the ground), jump (in flight) or get back in (next to it). */
+  private exitOrEnter() {
+    const a = this.aircraft;
+    if (!a || this.waitingForTerrain) return;
+    const f = this.fm;
+    if (this.pilot) {
+      const p = this.pilot;
+      if (p.state === 'freefall') {
+        p.openCanopy();
+        return;
+      }
+      if (p.state === 'canopy') return;
+      const reach = Math.max(6, this.type.length * 0.4);
+      if (p.state !== 'walk' || f.crashed || p.position.distanceTo(f.position) > reach) {
+        this.say(f.crashed ? 'pilot.aircraftLost' : 'pilot.tooFar', 'info', 3);
+        return;
+      }
+      p.dispose();
+      this.pilot = undefined;
+      // Running with Shift moved the throttle keys' value: back to the engine's setting.
+      this.controls.input.throttle = this.fm.throttle;
+      this.rig.snap();
+      this.say('pilot.enter', 'info', 2);
+      return;
+    }
+    if (f.crashed) return;
+    const flying = !f.onGround;
+    if (!flying && f.speed > 1.5) {
+      this.say('pilot.stopFirst', 'info', 3);
+      return;
+    }
+    // Out through the door on the left (+X), or the ejection seat straight up (F-35).
+    const eject = flying && this.type.id === 'f35';
+    const eye = this.type.eye;
+    const side = eject ? 0 : eye[0] + 0.9 + 0.45 * Math.sqrt(this.type.length / 8);
+    const local = new Vector3(side, eject ? eye[1] + 1 : flying ? eye[1] - 0.8 : 0, eye[2]);
+    const pos = local.applyQuaternion(f.quaternion).add(f.position);
+    const vel = f.velocity.clone();
+    if (eject) vel.addScaledVector(f.up, 22);
+    else if (flying) vel.addScaledVector(f.right, -2);
+    const p = new Pilot(
+      {
+        heightAboveGround: (q) => this.world.heightAboveGround(q),
+        upAt: (q, out) => this.world.upAt(q, out),
+      },
+      this.world.canvas,
+      pos,
+      f.forward,
+      vel,
+      flying,
+    );
+    if (eject) p.autoOpen(1.6);
+    this.pilot = p;
+    this.world.scene.add(p.group);
+    if (document.pointerLockElement) document.exitPointerLock();
+    this.say(eject ? 'pilot.eject' : flying ? 'pilot.jumped' : 'pilot.out', 'info', 6);
+  }
+
+  private updatePilot(dt: number) {
+    if (!this.fm.crashed) this.lastVelocity.copy(this.fm.velocity);
+    const p = this.pilot;
+    if (!p) return;
+    p.update(dt, this.controls);
+    for (const e of p.takeEvents()) {
+      if (e === 'opened') this.say('pilot.opened', 'info', 6);
+      else if (e === 'landed') this.say('pilot.landed', 'good', 4);
+      else if (e === 'hardLanding') this.say('pilot.hardLanding', 'bad', 4);
+      else if (e === 'fatal') {
+        this.say('pilot.fatal', 'bad', 5);
+        this.audio.impact('crash', 0.6);
+        // Back to the start place after a moment.
+        setTimeout(() => {
+          if (this.pilot === p && this.place) this.start(this.place);
+        }, 3500);
+      }
+    }
+  }
+
+  /** Pilot and wreck go away (new start, other aircraft). */
+  private clearOutside() {
+    this.crashCam = undefined;
+    this.pilot?.dispose();
+    this.pilot = undefined;
+    this.wreck?.dispose();
+    this.wreck = undefined;
+    if (this.aircraft) this.aircraft.root.visible = true;
+  }
+
   /** After a crash: continue in the air above the crash site, same heading. */
   private respawn() {
+    this.crashCam = undefined;
     if (this.challenge && !this.challenge.finished) {
       // Challenge: back at the last ring passed, pointing at the next one.
       const { position, forward } = this.challenge.respawnPose();
