@@ -105,6 +105,11 @@ export interface AircraftPhysics {
   controlRate: number;
   /** Flight control computers (else direct mechanical / hydraulic controls). */
   fbw?: FlyByWire;
+  /**
+   * The flight computers set the flaps themselves (F-35 flaperons): half down for takeoff and
+   * slow flight, up from ~115 m/s. The flap key then does nothing.
+   */
+  autoFlaps?: boolean;
   /** Pitch and roll rate while a key is held (deg/s), and the highest takeoff attitude (deg). */
   keyPitchRate: number;
   keyRollRate: number;
@@ -245,8 +250,8 @@ export const C172: AircraftType = {
   engine: { kind: 'piston', display: 'rpm', idle: 700, max: 2700, blades: 2, maxRps: 45 },
   eye: [0.27, 0.62, 0.78], // model
   wingCam: [2.4, 0.55, 0.2],
-  chaseDistance: 12,
-  chaseHeight: 3.0,
+  chaseDistance: 8,
+  chaseHeight: 2.1,
   length: 8.28,
   span: 11.0,
 };
@@ -326,8 +331,8 @@ export const PC12: AircraftType = {
   engine: { kind: 'turboprop', display: 'rpm', idle: 950, max: 1700, blades: 5, maxRps: 28 },
   eye: [0.38, 0.82, 2.75], // model
   wingCam: [3.2, -0.2, 0.2],
-  chaseDistance: 18,
-  chaseHeight: 4.2,
+  chaseDistance: 12,
+  chaseHeight: 2.9,
   length: 14.4,
   span: 16.28,
 };
@@ -401,8 +406,8 @@ export const PHENOM100: AircraftType = {
   engine: { kind: 'jet', display: 'n1', idle: 24, max: 100, blades: 22, maxRps: 60 },
   eye: [0.35, 0.72, 3.1], // model
   wingCam: [3.0, -0.1, -0.3],
-  chaseDistance: 17,
-  chaseHeight: 3.8,
+  chaseDistance: 11.5,
+  chaseHeight: 2.6,
   length: 12.82,
   span: 12.3,
 };
@@ -456,6 +461,7 @@ export const F35: AircraftType = {
     keyPitchRate: 25,
     keyRollRate: 90,
     rotationLimit: 13,
+    autoFlaps: true,
     fbw: {
       rollRate: 180,
       gMax: 9,
@@ -489,8 +495,8 @@ export const F35: AircraftType = {
   engine: { kind: 'fighter', display: 'n1', idle: 30, max: 100, blades: 18, maxRps: 70 },
   eye: [0, 0.86, 4.25], // model
   wingCam: [3.2, 0.25, -1.4],
-  chaseDistance: 20,
-  chaseHeight: 4.0,
+  chaseDistance: 13.5,
+  chaseHeight: 2.7,
   length: 15.67,
   span: 10.7,
 };
@@ -579,8 +585,8 @@ export const A320: AircraftType = {
   engine: { kind: 'jet', display: 'n1', idle: 21, max: 100, blades: 24, maxRps: 45 },
   eye: [0.52, 1.1, 16.6], // model
   wingCam: [9.0, 0.6, -1.0],
-  chaseDistance: 55,
-  chaseHeight: 11,
+  chaseDistance: 37,
+  chaseHeight: 7.5,
   length: 37.57,
   span: 35.8,
 };
@@ -661,8 +667,8 @@ export const B747: AircraftType = {
   engine: { kind: 'jet', display: 'n1', idle: 22, max: 100, blades: 38, maxRps: 40 },
   eye: [0.55, 4.2, 31.9], // model
   wingCam: [16.0, 1.5, -6.0],
-  chaseDistance: 95,
-  chaseHeight: 20,
+  chaseDistance: 64,
+  chaseHeight: 13,
   length: 70.66,
   span: 64.44,
 };

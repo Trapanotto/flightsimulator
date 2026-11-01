@@ -543,10 +543,10 @@ export class Pilot {
     } else {
       const [dist, height, aim] =
         this.state === 'walk'
-          ? [4.2, 1.2, 1.3]
+          ? [3, 0.9, 1.3]
           : this.state === 'freefall'
-            ? [7, 2.5, 0]
-            : [11, 1.5, 1.5];
+            ? [5, 1.8, 0]
+            : [8, 1.2, 1.5];
       const back = look.clone().multiplyScalar(-dist);
       cam.position.copy(this.position).add(back).addScaledVector(up, height);
       // Never below the ground.

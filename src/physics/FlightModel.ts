@@ -228,6 +228,12 @@ export class FlightModel {
   private prevAlpha = 0;
   /** Lift gained near the ground (ground effect), factor. */
   private groundLift = 1;
+  /**
+   * Nose-wheel steering -1..1, eased: on the ground left/right (keys, stick) steer as well
+   * as the pedals, building up over ~0.8 s so a tap is a small correction.
+   */
+  private steer = 0;
+  private wheelBase = 2;
   /** Angular velocity in model axes (rad/s). */
   readonly omega = new Vector3();
   /** Unit direction of flight (or the nose when standing still). */
@@ -300,6 +306,11 @@ export class FlightModel {
     });
     this.boostLeft = p.propulsion.kind === 'jet' ? p.propulsion.afterburnerSeconds : 0;
     if (p.fixedGear) this.gearDown = true;
+    // Wheel base: nose wheel to the main gear (along the nose axis).
+    const nose = this.wheels.find((w) => w.steer);
+    const mains = this.wheels.filter((w) => !w.steer);
+    const mainZ = mains.reduce((s, w) => s + w.pos.z, 0) / Math.max(1, mains.length);
+    this.wheelBase = nose ? Math.max(1, Math.abs(nose.pos.z - mainZ)) : 2;
   }
 
   /** Places the aircraft level (on the runway, or in trimmed flight at `speed`). */
@@ -455,6 +466,11 @@ export class FlightModel {
     this.updateAxes();
     this.throttle = clamp(input.throttle, 0, 1);
     const e = p.propulsion;
+    if (p.autoFlaps) {
+      // Scheduled flaperons: half down up to ~90 m/s, retracting by ~115 m/s.
+      const want = 0.5 * clamp((115 - this.speed) / 25, 0, 1);
+      this.flaps += clamp(want - this.flaps, -0.4 * dt, 0.4 * dt);
+    }
     {
       // Engine lag: piston ~0.3 s, turboprop ~1.2 s, jets slow from idle (N1 spool-up),
       // faster down than up.
@@ -664,6 +680,18 @@ export class FlightModel {
     cmd.e = input.pitch;
     cmd.a = input.roll;
     cmd.r = input.yaw;
+    if (this.onGround) {
+      // On the ground left/right steer: nose wheel (gearForces) and rudder; the ailerons only
+      // a little, so a wing does not lift while steering at speed.
+      const want = clamp(input.yaw + input.roll, -1, 1);
+      const rate =
+        Math.abs(want) > Math.abs(this.steer) && Math.sign(want) === Math.sign(this.steer || want)
+          ? 1.25
+          : 2.5;
+      this.steer += clamp(want - this.steer, -rate * dt, rate * dt);
+      cmd.r = this.steer;
+      cmd.a = input.roll * 0.3;
+    } else this.steer = 0;
     if (!fbw) this.trim = clamp(this.trim + (input.trim ?? 0) * 0.12 * dt, -1, 1);
 
     // Key held: pitch rate demand (direct-law types; fly-by-wire already commands rates).
@@ -793,7 +821,10 @@ export class FlightModel {
     omegaW.copy(this.omega).applyQuaternion(this.quaternion);
     let contact = false;
     let maxSink = 0;
-    const steerMax = 0.6 * clamp(1 - this.speed / 40, 0.15, 1);
+    // Nose-wheel lock ~20 deg when slow; faster, only as much as keeps the turn below ~0.3 g
+    // (tan(d) = a * wheelbase / v^2), so steering never tips the aircraft over.
+    const gv = Math.max(this.groundSpeed, 1);
+    const steerMax = Math.min(20 * DEG, Math.atan((0.3 * G * this.wheelBase) / (gv * gv)));
     if (this.gearDown) {
       for (const w of this.wheels) {
         const rM = new Vector3().copy(w.pos).sub(this.cg);
@@ -821,7 +852,7 @@ export class FlightModel {
           .clone()
           .addScaledVector(this.worldUp, -this.forward.dot(this.worldUp))
           .normalize();
-        if (w.steer) roll.applyAxisAngle(this.worldUp, -input.yaw * steerMax);
+        if (w.steer) roll.applyAxisAngle(this.worldUp, -this.steer * steerMax);
         const side = new Vector3().crossVectors(this.worldUp, roll);
         const vLong = vp.dot(roll);
         const vLat = vp.dot(side);

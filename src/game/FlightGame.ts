@@ -3,7 +3,7 @@ import { makeSkyEnvironment, softenReflections } from '../render/skyEnvironment'
 import { FlightAudio } from '../audio/FlightAudio';
 import { Aircraft } from '../aircraft/Aircraft';
 import { Pilot } from './Pilot';
-import { Wreck, WreckFx } from './Wreck';
+import { type Impact, Wreck, WreckFx, severityOf } from './Wreck';
 import { Traffic } from './Traffic';
 import type { CockpitData } from '../aircraft/CockpitDisplays';
 import { WingTrails } from '../aircraft/WingTrails';
@@ -607,6 +607,8 @@ export class FlightGame {
         }
         break;
       case 'flaps':
+        // The F-35's computers set its flaperons themselves.
+        if (this.type.physics.autoFlaps) break;
         this.fm.flaps = this.fm.flaps >= 1 ? 0 : this.fm.flaps + 0.5;
         this.servoUntil = this.time + 1.4;
         break;
@@ -658,7 +660,7 @@ export class FlightGame {
         for (const c of this.challenge.touchdown(lon, lat)) this.onChallenge(c);
       }
     } else if (e.type === 'crash') {
-      this.breakUp();
+      this.breakUp(e.reason);
       if (this.pilot) {
         // Nobody aboard: no respawn, the pilot carries on outside.
         this.say('pilot.aircraftLost', 'info', 5);
@@ -667,7 +669,6 @@ export class FlightGame {
       this.crashTime = this.time;
       this.say(`crash.${e.reason}`, 'bad', RESPAWN_DELAY);
       this.rig.shake = 1;
-      this.audio.impact('crash');
       this.controls.rumble(1, 600);
     }
   }
@@ -690,9 +691,19 @@ export class FlightGame {
   }
 
   /** The aircraft breaks apart and explodes where it hit. */
-  private breakUp() {
+  private breakUp(reason: Impact['reason'] = 'terrain') {
     const a = this.aircraft;
     if (!a) return;
+    // How it hit: speed, sink rate and bank decide what breaks off.
+    const v = this.lastVelocity;
+    const impact: Impact = {
+      reason,
+      speed: v.length(),
+      sink: Math.max(0, -v.dot(this.fm.worldUp)),
+      bank: this.fm.bank,
+      vStall: this.fm.stallSpeed,
+    };
+    this.lastImpact = impact;
     this.wreck?.dispose();
     // The model is drawn at the interpolated pose: put it at the impact first.
     a.root.position.copy(this.fm.position);
@@ -705,10 +716,11 @@ export class FlightGame {
         upAt: (p, out) => this.world.upAt(p, out),
       },
       this.wreckFx,
+      impact,
     );
     this.world.scene.add(this.wreck.group);
     a.root.visible = false;
-    this.audio.impact('crash', 1.6);
+    this.audio.crash(Math.min(4, Math.max(0.8, this.type.length / 10)), severityOf(impact));
     if (!this.pilot) {
       // Watch from a distance: back along the approach, above the crash site.
       const up = this.fm.worldUp.clone();
@@ -738,12 +750,14 @@ export class FlightGame {
 
   private updateCrashCam(dt: number) {
     const c = this.crashCam!;
+    // Follow the wreck (a whole airframe slides on for a few hundred metres).
+    if (this.wreck) c.centre.lerp(this.wreck.focus, 1 - Math.exp(-dt * 2));
     const cam = this.world.camera;
     const up = this.world.upAt(c.centre, new Vector3());
     const k = Math.min(5, Math.max(1, this.type.length / 10));
     c.angle += dt * 0.12;
     const dir = c.back.clone().applyAxisAngle(up, c.angle);
-    const dist = 45 * k;
+    const dist = 34 * k;
     const goal = c.centre
       .clone()
       .addScaledVector(dir, dist)
@@ -803,6 +817,9 @@ export class FlightGame {
       (Math.sin(t * 1.13 + 2) + 0.5 * Math.sin(t * 2.71)) * amp * 0.25 * Math.min(1, agl / 150);
     f.wind.add(this.gust).addScaledVector(up, vert - this.gust.dot(up));
   }
+
+  /** The last crash (debugging, tests). */
+  lastImpact?: Impact;
 
   /** Velocity just before the impact (the crash stops the flight model). */
   private readonly lastVelocity = new Vector3();

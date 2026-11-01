@@ -381,3 +381,27 @@ function timeTo(m: FlightModel, level: number) {
   }
   return t;
 }
+
+describe('ground steering', () => {
+  /** Heading change (deg, + = right) of an aircraft taxiing north. */
+  const turned = (m: FlightModel, start: Vector3) =>
+    (Math.atan2(new Vector3().crossVectors(m.forward, start).y, m.forward.dot(start)) * 180) /
+    Math.PI;
+
+  it('left/right keys steer the nose wheel, smoothly', () => {
+    const m = onRunway();
+    m.velocity.copy(m.forward).multiplyScalar(6);
+    const start = m.forward.clone();
+    // A short tap: a small correction.
+    run(m, 0.15, { ...idle(), throttle: 0.25, roll: 1, digitalRoll: true });
+    run(m, 1.5, { ...idle(), throttle: 0.25 });
+    const tap = turned(m, start);
+    expect(tap).toBeGreaterThan(0.2);
+    expect(tap).toBeLessThan(6);
+    // Held: a proper turn to the right, without tipping over.
+    run(m, 4, { ...idle(), throttle: 0.25, roll: 1, digitalRoll: true });
+    expect(turned(m, start)).toBeGreaterThan(30);
+    expect(Math.abs(m.bank)).toBeLessThan(5 * DEG);
+    expect(m.crashed).toBe(false);
+  });
+});

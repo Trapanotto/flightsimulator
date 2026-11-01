@@ -109,7 +109,7 @@ export class CameraRig {
         tmp.copy(a.worldUp).lerp(a.up, 0.25).normalize();
         const k = 1 - Math.exp(-dt * 5);
         this.chaseUp.lerp(tmp, this.initialised ? k : 1).normalize();
-        const dist = this.chaseDistance * (1 + 0.3 * fast);
+        const dist = this.chaseDistance * (1 + 0.12 * fast);
         tmp2
           .copy(a.position)
           .addScaledVector(look, -dist)
