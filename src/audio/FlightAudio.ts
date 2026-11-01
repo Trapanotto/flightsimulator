@@ -4,7 +4,21 @@ import type { EngineProfile } from '../aircraft/types';
  * Procedural flight audio with WebAudio (no sound files): engine (piston, turboprop, jet or
  * fighter), wind, boost/afterburner, warnings, touchdown and crash. All levels follow the
  * aircraft state every frame.
+ *
+ * The engines come from a sample-by-sample synthesizer (public/audio/engine-worklet.js:
+ * exhaust pulses, propeller blade pass, fan tone and buzz-saw, a deep restless jet roar).
+ * Without AudioWorklet support the simpler node graph below plays instead.
  */
+
+/** Engine synthesizer: cylinders of the piston engines (others ignore it). */
+const CYLINDERS = 4;
+/** Cockpit muffling per engine kind (low-pass, Hz): a Cessna is loud inside, an airliner quiet. */
+const INSIDE_CUTOFF: Record<EngineProfile['kind'], number> = {
+  piston: 1200,
+  turboprop: 900,
+  jet: 520,
+  fighter: 650,
+};
 
 export interface AudioState {
   /** 0..1 */
@@ -83,6 +97,8 @@ export class FlightAudio {
     maxRps: 30,
   };
   private amDepth?: GainNode;
+  /** Engine synthesizer (AudioWorklet), once loaded. */
+  private synth?: { node: AudioWorkletNode; gain: GainNode };
   private enabled = true;
   private warnPhase = 0;
   private spokenPullUp = false;
@@ -120,11 +136,21 @@ export class FlightAudio {
     master.connect(ctx.destination);
     this.master = master;
 
-    // 2 s of white noise, looped by every noise source.
+    // 2 s of pink noise (falls off 3 dB per octave like real wind and roar; white noise
+    // sounds like hiss or a vacuum cleaner), looped by every noise source.
     const len = ctx.sampleRate * 2;
     const buf = ctx.createBuffer(1, len, ctx.sampleRate);
     const data = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    let b0 = 0;
+    let b1 = 0;
+    let b2 = 0;
+    for (let i = 0; i < len; i++) {
+      const w = Math.random() * 2 - 1;
+      b0 = 0.99765 * b0 + w * 0.099046;
+      b1 = 0.963 * b1 + w * 0.2965164;
+      b2 = 0.57 * b2 + w * 1.0526913;
+      data[i] = (b0 + b1 + b2 + w * 0.1848) * 0.25;
+    }
     this.noise = buf;
     const noiseSource = () => {
       const s = ctx.createBufferSource();
@@ -202,6 +228,7 @@ export class FlightAudio {
     servoOsc.connect(servoFilter).connect(servoGain).connect(cockpit);
 
     for (const o of [propOsc, propSub, amOsc, warnOsc, servoOsc]) o.start();
+    void this.loadSynth(ctx, cockpit);
     this.nodes = {
       propOsc,
       propSub,
@@ -221,10 +248,33 @@ export class FlightAudio {
     };
   }
 
+  /** The engine synthesizer; the simple graph stays as the fallback. */
+  private async loadSynth(ctx: AudioContext, out: AudioNode) {
+    if (!ctx.audioWorklet) return;
+    try {
+      await ctx.audioWorklet.addModule(`${import.meta.env.BASE_URL}audio/engine-worklet.js`);
+      if (this.ctx !== ctx) return;
+      const node = new AudioWorkletNode(ctx, 'engine-sound', { outputChannelCount: [1] });
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      node.connect(gain).connect(out);
+      this.synth = { node, gain };
+      this.sendEngine();
+    } catch (err) {
+      console.warn('engine sound', err);
+    }
+  }
+
+  private sendEngine() {
+    const e = this.engine;
+    this.synth?.node.port.postMessage({ kind: e.kind, blades: e.blades, cylinders: CYLINDERS });
+  }
+
   /** Engine of the current aircraft type. */
   setEngine(e: EngineProfile) {
     this.engine = e;
     if (this.amDepth) this.amDepth.gain.value = MIX[e.kind].am;
+    this.sendEngine();
   }
 
   update(dt: number, s: AudioState) {
@@ -248,7 +298,23 @@ export class FlightAudio {
       ctx,
     );
     const running = s.rpm > 0.05 ? 1 : 0;
-    smooth(n.propGain.gain, mute * running * mix.prop * (0.1 + 0.14 * s.throttle), ctx, 0.15);
+    // With the synthesizer the old engine graph is silent.
+    const legacy = this.synth ? 0 : 1;
+    const syn = this.synth;
+    if (syn) {
+      const p = syn.node.parameters;
+      smooth(p.get('rps')!, s.rpm * this.engine.maxRps, ctx, 0.1);
+      smooth(p.get('load')!, s.throttle, ctx, 0.1);
+      p.get('boost')!.setValueAtTime(s.boost ? 1 : 0, ctx.currentTime);
+      smooth(p.get('pitch')!, doppler, ctx, 0.1);
+      smooth(syn.gain.gain, mute * running * 0.42, ctx, 0.15);
+    }
+    smooth(
+      n.propGain.gain,
+      legacy * mute * running * mix.prop * (0.1 + 0.14 * s.throttle),
+      ctx,
+      0.15,
+    );
     smooth(
       n.roarFilter.frequency,
       (mix.roarLo + (mix.roarHi - mix.roarLo) * s.throttle - (s.boost ? 120 : 0)) * doppler,
@@ -256,7 +322,7 @@ export class FlightAudio {
     );
     smooth(
       n.roarGain.gain,
-      mute * running * mix.roar * (0.05 + 0.16 * s.throttle + (s.boost ? 0.12 : 0)),
+      legacy * mute * running * mix.roar * (0.05 + 0.16 * s.throttle + (s.boost ? 0.12 : 0)),
       ctx,
       0.15,
     );
@@ -264,7 +330,7 @@ export class FlightAudio {
     const v = Math.min(1.6, s.speed / 100);
     smooth(n.windFilter.frequency, 160 + 440 * v, ctx);
     smooth(n.windGain.gain, mute * (s.onGround ? 0.3 : 1) * 0.22 * v * v, ctx, 0.2);
-    smooth(n.cockpit.frequency, s.inside ? 700 : 3500, ctx, 0.1);
+    smooth(n.cockpit.frequency, s.inside ? INSIDE_CUTOFF[this.engine.kind] : 6000, ctx, 0.1);
 
     smooth(n.servoGain.gain, mute * (s.servo ? 0.03 : 0), ctx, 0.1);
 
@@ -375,6 +441,7 @@ export class FlightAudio {
     void this.ctx?.close();
     this.ctx = undefined;
     this.nodes = undefined;
+    this.synth = undefined;
   }
 
   /** For tests/debugging: whether the audio graph runs. */
