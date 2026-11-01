@@ -14,6 +14,7 @@ import {
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { type CockpitData, CockpitDisplays } from './CockpitDisplays';
+import { ExhaustGlow } from './ExhaustGlow';
 import type { AircraftType } from './types';
 
 /** Control inputs, all normalised. */
@@ -32,6 +33,9 @@ export interface AircraftControls {
   rpm: number;
   /** thrust lever 0 .. 1 */
   throttle: number;
+  /** Engine output 0..1 and afterburner (exhaust glow). */
+  power?: number;
+  boost?: boolean;
 }
 
 const DEG = Math.PI / 180;
@@ -138,6 +142,8 @@ export class Aircraft {
     rpm: 0,
     throttle: 0,
   };
+  /** Glowing jet nozzle and afterburner flame (fighters). */
+  private exhaust?: ExhaustGlow;
   /** Live instruments; created when the model has display surfaces. */
   displays?: CockpitDisplays;
   private readonly parts: Parts = {
@@ -207,6 +213,11 @@ export class Aircraft {
       });
       this.triangles.push(Math.round(tris));
       this.lod.addLevel(node, LOD_DISTANCES[level]! * k);
+    }
+    const nz = this.type.nozzle;
+    if (nz) {
+      this.exhaust = new ExhaustGlow(nz.pos, nz.radius);
+      this.root.add(this.exhaust.group);
     }
     if (!displays) return;
     const d = new CockpitDisplays(this.lod, this.type.id);
@@ -344,6 +355,7 @@ export class Aircraft {
       (d.material as MeshStandardMaterial).opacity = 0.35 * blur;
     }
     this.updateCockpit();
+    this.exhaust?.update(dt, c.power ?? c.throttle, !!c.boost);
   }
 
   /**

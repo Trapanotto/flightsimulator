@@ -92,14 +92,16 @@ export class CameraRig {
 
   /** Floating origin moved: keep the smoothed state in place. */
   rebase(delta: Vector3) {
-    this.chasePos.sub(delta);
+    // chasePos is an offset from the aircraft: nothing to move.
+    void delta;
   }
 
   update(dt: number, a: CameraTarget) {
     this.t += dt;
     const cam = this.camera;
     const fast = Math.min(1, Math.max(0, (a.speed - 50) / 90));
-    let fov = 60 + 14 * fast;
+    // A touch wider when fast, not so much that the aircraft shrinks away.
+    let fov = 60 + 4 * fast;
     let near = 0.5;
 
     switch (this.mode) {
@@ -109,15 +111,13 @@ export class CameraRig {
         tmp.copy(a.worldUp).lerp(a.up, 0.25).normalize();
         const k = 1 - Math.exp(-dt * 5);
         this.chaseUp.lerp(tmp, this.initialised ? k : 1).normalize();
-        const dist = this.chaseDistance * (1 + 0.12 * fast);
-        tmp2
-          .copy(a.position)
-          .addScaledVector(look, -dist)
-          .addScaledVector(this.chaseUp, this.chaseHeight);
+        const dist = this.chaseDistance * (1 + 0.05 * fast);
+        // The spring works on the offset from the aircraft, not on a world position: turns
+        // and pitch changes swing the camera softly, but it never falls behind at speed.
+        tmp2.copy(look).multiplyScalar(-dist).addScaledVector(this.chaseUp, this.chaseHeight);
         if (!this.initialised) this.chasePos.copy(tmp2);
-        // Spring: fast enough to keep up at 600 km/h, soft enough to feel the motion.
-        this.chasePos.lerp(tmp2, 1 - Math.exp(-dt * 7));
-        cam.position.copy(this.chasePos);
+        this.chasePos.lerp(tmp2, 1 - Math.exp(-dt * 6));
+        cam.position.copy(a.position).add(this.chasePos);
         cam.up.copy(this.chaseUp);
         tmp
           .copy(a.position)

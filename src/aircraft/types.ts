@@ -154,6 +154,8 @@ export interface AircraftType {
   /** Cameras: pilot eye, wing camera (model coordinates), chase distance and height (m). */
   eye: V3;
   wingCam: V3;
+  /** Jet nozzle exit (model coordinates) and radius: the exhaust glows there. */
+  nozzle?: { pos: V3; radius: number };
   chaseDistance: number;
   chaseHeight: number;
   length: number;
@@ -250,8 +252,8 @@ export const C172: AircraftType = {
   engine: { kind: 'piston', display: 'rpm', idle: 700, max: 2700, blades: 2, maxRps: 45 },
   eye: [0.27, 0.62, 0.78], // model
   wingCam: [2.4, 0.55, 0.2],
-  chaseDistance: 8,
-  chaseHeight: 2.1,
+  chaseDistance: 8.8,
+  chaseHeight: 2.3,
   length: 8.28,
   span: 11.0,
 };
@@ -331,8 +333,8 @@ export const PC12: AircraftType = {
   engine: { kind: 'turboprop', display: 'rpm', idle: 950, max: 1700, blades: 5, maxRps: 28 },
   eye: [0.38, 0.82, 2.75], // model
   wingCam: [3.2, -0.2, 0.2],
-  chaseDistance: 12,
-  chaseHeight: 2.9,
+  chaseDistance: 13,
+  chaseHeight: 3.2,
   length: 14.4,
   span: 16.28,
 };
@@ -406,8 +408,8 @@ export const PHENOM100: AircraftType = {
   engine: { kind: 'jet', display: 'n1', idle: 24, max: 100, blades: 22, maxRps: 60 },
   eye: [0.35, 0.72, 3.1], // model
   wingCam: [3.0, -0.1, -0.3],
-  chaseDistance: 11.5,
-  chaseHeight: 2.6,
+  chaseDistance: 12.5,
+  chaseHeight: 2.9,
   length: 12.82,
   span: 12.3,
 };
@@ -495,8 +497,9 @@ export const F35: AircraftType = {
   engine: { kind: 'fighter', display: 'n1', idle: 30, max: 100, blades: 18, maxRps: 70 },
   eye: [0, 0.86, 4.25], // model
   wingCam: [3.2, 0.25, -1.4],
-  chaseDistance: 13.5,
-  chaseHeight: 2.7,
+  nozzle: { pos: [0, 0, -7.95], radius: 0.44 }, // model
+  chaseDistance: 15,
+  chaseHeight: 3,
   length: 15.67,
   span: 10.7,
 };
@@ -585,8 +588,8 @@ export const A320: AircraftType = {
   engine: { kind: 'jet', display: 'n1', idle: 21, max: 100, blades: 24, maxRps: 45 },
   eye: [0.52, 1.1, 16.6], // model
   wingCam: [9.0, 0.6, -1.0],
-  chaseDistance: 37,
-  chaseHeight: 7.5,
+  chaseDistance: 40,
+  chaseHeight: 8.2,
   length: 37.57,
   span: 35.8,
 };
@@ -667,8 +670,8 @@ export const B747: AircraftType = {
   engine: { kind: 'jet', display: 'n1', idle: 22, max: 100, blades: 38, maxRps: 40 },
   eye: [0.55, 4.2, 31.9], // model
   wingCam: [16.0, 1.5, -6.0],
-  chaseDistance: 64,
-  chaseHeight: 13,
+  chaseDistance: 70,
+  chaseHeight: 14,
   length: 70.66,
   span: 64.44,
 };

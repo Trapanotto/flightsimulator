@@ -12,8 +12,9 @@ import {
 export interface CockpitData {
   /** Airspeed m/s, altitude m (sea level), vertical speed m/s. */
   ias: number;
-  /** Ground speed m/s; wind direction (from, degrees) and speed (m/s); outside air °C. */
+  /** Ground speed and true airspeed m/s; wind direction (from, deg) and speed (m/s); °C. */
   gs: number;
+  tas?: number;
   /** Traffic around (relative bearing deg, distance m, relative altitude m, vertical speed). */
   traffic?: Array<{ bearing: number; dist: number; relAlt: number; vs: number }>;
   windFrom: number;
@@ -822,7 +823,7 @@ function nd(c: Ctx, W: number, H: number, d: CockpitData, color: string) {
   // Heading box, data in the corners.
   box(c, cx - W * 0.07, H * 0.02, W * 0.14, H * 0.07, color, '#000');
   label(c, pad(wrap360(Math.round(d.heading)), 3), cx, H * 0.055, H * 0.05, color, 'center');
-  const tas = d.ias * KT * (1 + d.alt / 50000);
+  const tas = (d.tas ?? d.ias) * KT;
   label(
     c,
     `GS ${Math.round(d.gs * KT)}  TAS ${Math.round(tas)}`,

@@ -213,6 +213,17 @@ export class FlightModel {
    */
   readonly wind = new Vector3();
   groundSpeed = 0;
+  /** Air density ratio at the aircraft (last step). */
+  private sigma = 1;
+
+  /**
+   * Indicated airspeed (m/s): what the airspeed indicator shows - the true airspeed scaled by
+   * the air density. Lift-off, stall and approach speeds are the same in IAS at any airfield.
+   */
+  get ias(): number {
+    return this.speed * Math.sqrt(this.sigma);
+  }
+
   /** Temperature deviation from the standard atmosphere, K (from the weather). */
   isaDeviation = 0;
   /**
@@ -513,6 +524,7 @@ export class FlightModel {
     vAirM.copy(this.velocity).sub(this.wind).applyQuaternion(qInv);
     const V = vAirM.length();
     const sigma = densityRatio(this.altitudeOf(this.cgW), this.isaDeviation);
+    this.sigma = sigma;
     const qbar = 0.5 * RHO0 * sigma * V * V;
     this.alpha = V > 1 ? Math.atan2(-vAirM.y, vAirM.z) : 0;
     this.beta = V > 1 ? Math.asin(clamp(-vAirM.x / V, -1, 1)) : 0;

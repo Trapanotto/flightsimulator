@@ -398,7 +398,8 @@ export class FlightView {
     }
     if (this.frame++ % 3 === 0) {
       const [, , alt] = this.world.toGeo(fm.position);
-      this.set('speed', String(Math.round(fm.speed * 3.6)));
+      // Indicated airspeed, as on a real airspeed indicator.
+      this.set('speed', String(Math.round(fm.ias * 3.6)));
       // Engine: propeller rpm or fan speed N1 %, from idle to max with the throttle.
       const e = g.type.engine;
       const v = fm.crashed ? 0 : e.idle + (e.max - e.idle) * fm.engine;
@@ -418,7 +419,7 @@ export class FlightView {
             ? 'PULL UP'
             : fm.stalled
               ? 'STALL'
-              : fm.speed > fm.p.vne
+              : fm.ias > fm.p.vne
                 ? 'OVERSPEED'
                 : '';
       this.set('warn', warn);

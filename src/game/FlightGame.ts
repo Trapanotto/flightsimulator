@@ -322,8 +322,12 @@ export class FlightGame {
       .multiplyScalar(Math.cos(pose.heading * DEG))
       .addScaledVector(basis.east, Math.sin(pose.heading * DEG));
     this.fm.gearDown = this.gearFor(pose.onGround);
-    this.fm.flaps = 0;
+    // On the runway: takeoff flaps, retracted automatically after the climb-out.
+    const takeoffFlaps = pose.onGround && !this.type.physics.autoFlaps;
+    this.fm.flaps = takeoffFlaps ? 0.5 : 0;
+    this.autoFlapsUp = takeoffFlaps;
     this.fm.reset(pos, fwd, pose.onGround ? 0 : this.airStartSpeed, pose.onGround);
+    if (takeoffFlaps) this.fm.flaps = 0.5;
 
     this.renderValid = false;
     this.fm.gearDown = this.gearFor(pose.onGround);
@@ -385,6 +389,7 @@ export class FlightGame {
     if (!this.paused && !this.waitingForTerrain) {
       this.acc = Math.min(this.acc + dt, 0.25);
       this.updateWind(dt);
+      this.retractTakeoffFlaps();
       const input = this.pilot ? this.unmannedInput() : c.input;
       while (this.acc >= STEP) {
         this.prevPos.copy(this.fm.position);
@@ -510,7 +515,8 @@ export class FlightGame {
     const b = this.world.basisAt(f.position);
     const [lon, lat, alt] = this.world.toGeo(f.position);
     const e = this.type.engine;
-    d.ias = f.speed;
+    d.ias = f.ias;
+    d.tas = f.speed;
     d.gs = f.groundSpeed;
     const wx = this.world.currentWeather();
     d.windFrom = wx.windFrom;
@@ -581,6 +587,8 @@ export class FlightGame {
     a.controls.gear = this.fm.gearDown ? 1 : 0;
     a.controls.rpm = this.fm.crashed ? 0 : 0.3 + 0.7 * this.fm.engine;
     a.controls.throttle = this.fm.throttle;
+    a.controls.power = this.fm.crashed ? 0 : this.fm.engine;
+    a.controls.boost = this.fm.boosting;
     a.update(dt);
     if (this.rig.mode === 'cockpit' && a.displays) a.updateDisplays(dt, this.cockpitData());
     // Vortex trails at high load or high angle of attack while fast enough.
@@ -609,6 +617,7 @@ export class FlightGame {
       case 'flaps':
         // The F-35's computers set its flaperons themselves.
         if (this.type.physics.autoFlaps) break;
+        this.autoFlapsUp = false;
         this.fm.flaps = this.fm.flaps >= 1 ? 0 : this.fm.flaps + 0.5;
         this.servoUntil = this.time + 1.4;
         break;
@@ -785,6 +794,21 @@ export class FlightGame {
     if (w.done) {
       w.dispose();
       this.wreck = undefined;
+    }
+  }
+
+  /** Takeoff flaps go up by themselves once after the climb-out (until the pilot uses V). */
+  private autoFlapsUp = false;
+
+  private retractTakeoffFlaps() {
+    const f = this.fm;
+    if (!this.autoFlapsUp || f.onGround || f.flaps <= 0) return;
+    const agl = this.world.heightAboveGround(f.position) ?? 0;
+    if (agl > 120 && f.ias > 1.3 * stallSpeed(f.p, 0) && f.verticalSpeed > 0) {
+      f.flaps = 0;
+      this.autoFlapsUp = false;
+      this.servoUntil = this.time + 1.4;
+      this.say('flaps.up', 'info', 3);
     }
   }
 

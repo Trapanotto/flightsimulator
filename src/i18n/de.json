@@ -128,5 +128,6 @@
   "traffic.sim": "Simuliert",
   "traffic.off": "Aus",
   "traffic.labels": "Verkehr: Beschriftung an",
-  "traffic.labelsOff": "Verkehr: Beschriftung aus"
+  "traffic.labelsOff": "Verkehr: Beschriftung aus",
+  "flaps.up": "Klappen eingefahren"
 }

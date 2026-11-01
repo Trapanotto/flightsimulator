@@ -128,5 +128,6 @@
   "traffic.sim": "Simulated",
   "traffic.off": "Off",
   "traffic.labels": "Traffic labels on",
-  "traffic.labelsOff": "Traffic labels off"
+  "traffic.labelsOff": "Traffic labels off",
+  "flaps.up": "Flaps up"
 }
