@@ -424,18 +424,21 @@ export const F35: AircraftType = {
   registration: 'T-35',
   url: `${base}assets/aircraft/f35.glb`,
   physics: {
-    mass: 22_000,
+    // Training configuration: empty 13.3 t, pilot, ~5 t fuel.
+    mass: 18_500,
     wingArea: 42.7,
     span: 10.7,
     chord: 4.58,
-    inertia: [190_000, 220_000, 40_000],
+    inertia: [160_000, 185_000, 34_000],
     cg: [0, 0, -0.6],
     aero: {
       ...LIGHT,
       CL0: 0.05,
-      CLa: 3.6,
+      // Wing plus leading-edge extensions and chines (body and vortex lift).
+      CLa: 4.2,
       CLmax: 1.6,
-      CLflaps: 0.3,
+      // Flaperons and leading-edge flaps drooped together.
+      CLflaps: 0.6,
       CD0: 0.022,
       CDgear: 0.02,
       CDflaps: 0.04,
