@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.11.0 – Live-Wetter, Flugphysik, Triebwerksklang (2026-11-03)
+
+### Neu
+
+- **Live-Wetter mit Wind** (Open-Meteo): Wolken, Sicht, Temperatur und Wind wie gerade
+  draussen. Der Wind versetzt das Flugzeug; angezeigt wird die Geschwindigkeit gegenüber der
+  Luft, das Navigationsdisplay zeigt zusätzlich Grundgeschwindigkeit und Wind.
+- **Flugverkehr**: simulierte Flugzeuge starten und landen gegen den Wind, fliegen Platzrunden
+  und überfliegen die Gegend.
+- **Flugphysik nach JSBSim / FlightGear**: weicher Übergang in den Strömungsabriss mit
+  abkippendem Flügel, Auftriebsverzögerung bei schnellen Lagewechseln, mehr Auftrieb in
+  Bodennähe, Propellerdrehmoment, Propellerstrahl und P-Faktor bei langsamer Fahrt,
+  Triebwerke laufen verzögert hoch, Luftdichte mit Temperatur.
+- **Triebwerksklang neu berechnet** statt gefiltertem Rauschen: Auspuffstösse und
+  Propeller beim Kolbenmotor, sägender Propeller und Turbinenpfeifen beim Turboprop,
+  Fan-Ton und tiefes Dröhnen beim Jet, Grollen und Knistern beim Nachbrenner der F-35.
+- **Abstürze je nach Aufprall**: leichtes Aufsetzen, harter Aufprall oder Einschlag – das
+  Flugzeug bricht entsprechend in wenige oder viele Teile, die über den Boden rutschen;
+  kurz danach die Explosion. Eigener Klang für Aufprall, Bersten und Explosion.
+- **Glühende Düse der F-35**: dunkelrot im Leerlauf, orange bei Vollgas; mit Nachbrenner
+  eine lange Flamme mit Schockdiamanten.
+- **Startklappen**: am Boden starten die Flugzeuge mit Klappen, die über 120 m über Grund
+  automatisch einfahren. Die F-35 steuert ihre Klappen selbst.
+
+### Verbessert
+
+- **Startbildschirm in 8 s statt 46 s**, ohne Szenenwechsel nach dem Laden; das Flugzeug
+  wird zuerst von der Seite gezeigt. Startorte laden direkt mit der richtigen Ausrichtung.
+- Kein Stocken mehr beim Absturz.
+- **Geschwindigkeitsanzeige** in angezeigter Fluggeschwindigkeit (IAS) wie im Cockpit;
+  die Flugzeuge heben bei realistischem Tempo ab (C172 ~100 km/h, A320 ~250 km/h,
+  F-35 ~235 km/h).
+- **Lenkung am Boden** mit den Pfeiltasten links/rechts weicher und ohne Umkippen.
+- **Aussenkamera** näher am Flugzeug und ohne Zurückfallen bei hoher Geschwindigkeit.
+- **Minimap** immer nach Norden ausgerichtet.
+
 ## v0.10.0 – Wetter, Cockpits, Aussteigen (2026-10-30)
 
 ### Neu
