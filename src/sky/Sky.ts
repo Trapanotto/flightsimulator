@@ -65,13 +65,22 @@ import {
 import { CloudNode } from './clouds';
 import type { CloudNoise } from './cloudNoise';
 import { AtmosphereLuts } from './luts';
-import type { F, V3, V4 } from './nodes';
+import { R, distanceToGround, hitsGround, type F, type V3, type V4 } from './nodes';
 import { pixelAngleOf, skyRadiance } from './skyDome';
 import { solarPosition } from './solar';
 import { SkyUniforms } from './uniforms';
 import { WEATHER_PRESETS, cloudWind, type Weather } from './weather';
 
 const DEG = Math.PI / 180;
+
+/**
+ * Share of the light on top of the cloud layer that comes out of its underside as seen from
+ * below: broken cumulus let much through their gaps and sides, a thick deck about a sixth
+ * (matched to what the ray march gives, so the haze, the environment and the deck agree).
+ */
+function deckTransmission(cover: number): number {
+  return 0.5 - 0.35 * cover;
+}
 
 /** The light of the moment, for everything that is lit or tinted by the sky. */
 export interface SkyState {
@@ -391,7 +400,15 @@ export class Sky {
         const shadowT = select(lit, clouds.shadow(pos, h, q.cloudShadowSamples), float(1));
         out.mulAssign(mix(u.diffuseShare, float(1), shadowT));
       }
-      const ap = aerialLookup(u, this.luts, dir, dist.mul(0.001));
+      // Empty sky below the horizon is land beyond the drawn terrain: give it the same air
+      // as the terrain (and the cloud deck's shade), so the two meet without a seam.
+      const hKm = max(u.altitude.mul(0.001), 0.001);
+      const rKm = hKm.add(R);
+      const muView = dir.dot(u.up);
+      const farGround = sd.sky.and(hitsGround(rKm, hKm, muView));
+      const apDist = select(farGround, distanceToGround(rKm, hKm, muView).mul(1000), dist);
+      out.assign(select(farGround, u.groundRadiance.mul(1 / 1.3), out));
+      const ap = aerialLookup(u, this.luts, dir, apDist.mul(0.001));
       const T = ap.transmittance;
       const fade = float(1).sub(T.dot(vec3(...LUMA)));
       // Under an overcast deck the haze is lit by the grey cloud base instead of the sun.
@@ -399,7 +416,7 @@ export class Sky {
         .mul(u.exposure)
         .mul(float(1).sub(u.hazeShadow))
         .add(u.deckRadiance.mul(u.hazeShadow).mul(fade));
-      out.assign(select(geometry, out.mul(T).add(haze), out));
+      out.assign(select(geometry.or(farGround), out.mul(T).add(haze), out));
       if (clouds) {
         // Depth-aware upsampling: of the four nearest low-resolution texels, trust those whose
         // depth matches this pixel's (no cloud bleeding over a mountain's edge).
@@ -530,12 +547,16 @@ export class Sky {
     u.lightDir.value.copy(s.lightDirection);
     const lum = luminance(direct);
     if (lum > 0) this.sun.color.setRGB(direct[0] / lum, direct[1] / lum, direct[2] / lum);
-    this.sun.intensity = lum * X;
+    // A closed deck takes the sun away below it altogether (the post pass shades only the
+    // broken cloud's shadows, and cannot tell direct from diffuse light per pixel).
+    const deckClosed = Math.min(Math.max((cover - 0.7) / 0.25, 0), 1);
+    const sunThrough = 1 - deckClosed * deckClosed * (3 - 2 * deckClosed) * below;
+    this.sun.intensity = lum * X * sunThrough;
     const lightMu = moonMain ? muMoon : muSun;
 
     // Sky light (diffuse) on a horizontal surface, sky units; bluish by day.
     const skyE = (skyDiffuseLux(sunEl) * cloudDim + moonLux * 0.1) / SOLAR_ILLUMINANCE_LUX;
-    const directH = lum * Math.max(lightMu, 0);
+    const directH = lum * Math.max(lightMu, 0) * sunThrough;
     const tint: Vec3 = sunEl > -4 ? [0.78, 0.9, 1.15] : [0.7, 0.82, 1.2];
     const tl = luminance(tint);
     this.ambient.color.setRGB(tint[0] / tl, tint[1] / tl, tint[2] / tl);
@@ -548,7 +569,7 @@ export class Sky {
     const atCloudsEnv = luminance(sunIlluminance(midKmEnv, lightMu, this.mieDensity));
     const deckE =
       (atCloudsEnv * (moonMain ? moonToa : 1) * Math.max(lightMu, 0) + skyE) *
-      (0.55 - 0.27 * cover);
+      deckTransmission(cover);
     const envE = skyE * (1 - cover) + deckE * cover;
     u.diffuseShare.value = envE / Math.max(envE + directH, 1e-12);
 
@@ -567,7 +588,8 @@ export class Sky {
     u.groundRadiance.value.set(g[0], g[1], g[2]).multiplyScalar((groundE / Math.PI) * X * 1.3);
     // Under a deck the haze is lit by the grey cloud base, not by the sun.
     u.hazeShadow.value = this.altitude < this.weather.cloudBase ? Math.pow(cover, 2.5) * 0.9 : 0;
-    const deck = ((luminance(atClouds) * Math.max(lightMu, 0) + skyE) * 0.3) / Math.PI;
+    const deck =
+      ((luminance(atClouds) * Math.max(lightMu, 0) + skyE) * deckTransmission(cover)) / Math.PI;
     u.deckRadiance.value.set(0.95, 0.97, 1.0).multiplyScalar(deck * X);
   }
 
@@ -627,7 +649,7 @@ export class Sky {
     // Clouds hide more of the sky towards the horizon, where one looks through more of them.
     const seen = mix(cover, sqrt(cover), float(1).sub(mu.abs()));
     const light = u.cloudSun.mul(max(u.lightDir.dot(u.up), 0)).add(u.cloudAmbient.mul(Math.PI));
-    const fromBelow = light.mul(mix(float(0.55), float(0.28), cover)).div(Math.PI);
+    const fromBelow = light.mul(float(0.5).sub(cover.mul(0.35))).div(Math.PI);
     const fromAbove = light.mul(0.8 / Math.PI);
     const below = u.altitude.lessThan(u.cloudBase);
     const above = u.altitude.greaterThan(u.cloudTop);
