@@ -15,6 +15,9 @@
  */
 import {
   ACESFilmicToneMapping,
+  BoxGeometry,
+  Mesh,
+  MeshStandardNodeMaterial,
   Color,
   DirectionalLight,
   HemisphereLight,
@@ -96,7 +99,11 @@ declare global {
 const query = new URLSearchParams(location.search);
 const view = VIEWS[query.get('view') ?? 'belp'] ?? VIEWS.belp!;
 const mobile = query.get('device') === 'mobile';
-const quality = WORLD_QUALITY[mobile ? 'mobile' : 'desktop'];
+const quality = {
+  ...WORLD_QUALITY[mobile ? 'mobile' : 'desktop'],
+  ...(query.get('detail') === '0' ? { detail: false } : {}),
+  ...(query.has('tiles') ? { maxTiles: Number(query.get('tiles')) } : {}),
+};
 const depth = query.get('depth') ?? 'reversed';
 if (query.has('clean')) document.body.classList.add('clean');
 
@@ -140,12 +147,7 @@ world.setSkyColors(skyZenith, skyHorizon);
 await world.init();
 scene.add(world.object);
 
-const camera = new PerspectiveCamera(
-  55,
-  1,
-  depth === 'standard' ? 2 : 0.5,
-  quality.viewDistance * 1.5,
-);
+const camera = new PerspectiveCamera(55, 1, 0.5, quality.viewDistance * 1.5);
 const camGeo = { lon: view.lon, lat: view.lat, h: 0 };
 const camH = (agl: number | undefined) =>
   view.agl ? (agl ?? groundGuess) + view.h : seaLevelToEllipsoid(view.lon, view.lat, view.h);
@@ -165,6 +167,23 @@ const placeCamera = () => {
   lookAt(view.look);
 };
 placeCamera();
+
+// ?shadow=1: a 4 m block 25 m ahead on the ground, casting the sun's shadow onto the terrain.
+const block = new Mesh(new BoxGeometry(4, 4, 4), new MeshStandardNodeMaterial({ color: 0xc03020 }));
+if (query.has('shadow')) {
+  renderer.shadowMap.enabled = true;
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  const s = sun.shadow.camera;
+  s.left = s.bottom = -20;
+  s.right = s.top = 20;
+  s.near = 1;
+  s.far = 400;
+  sun.shadow.bias = -0.0005;
+  sun.shadow.normalBias = 0.03;
+  block.castShadow = true;
+  scene.add(block);
+}
 
 const resize = () => {
   const w = Math.max(1, canvas.clientWidth);
@@ -274,6 +293,15 @@ renderer.setAnimationLoop((now: number) => {
       camGeo.h = camH(g);
       placeCamera();
     }
+  }
+  if (query.has('shadow')) {
+    const ahead = camera.getWorldDirection(new Vector3()).setY(0).normalize().multiplyScalar(25);
+    const at = camera.position.clone().add(ahead);
+    const g = frame.toGeodetic(at);
+    const h = world.groundHeight(g.lon, g.lat);
+    if (h !== undefined) frame.fromGeodetic(g.lon, g.lat, h + 2, block.position);
+    sun.target.position.copy(block.position);
+    sun.position.copy(block.position).addScaledVector(sunDir, 200);
   }
   world.update(camera);
   renderer.render(scene, camera);

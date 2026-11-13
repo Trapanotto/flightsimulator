@@ -219,7 +219,9 @@ export class TerrainStreamer implements TileProvider<TileData> {
   // ---- GPU ----
 
   private upload({ node, out }: Upload) {
-    if (node.state !== 'loading') {
+    // A load cancelled after its data arrived is still good data: use it. Only a node that
+    // meanwhile became ready or failed has no use for it.
+    if (node.state === 'ready' || node.state === 'failed') {
       out.image.close();
       return;
     }

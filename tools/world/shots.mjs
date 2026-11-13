@@ -27,6 +27,10 @@ const SCENES = [
   { name: 'alps', query: 'view=alps', ...DESKTOP },
   { name: 'runway', query: 'view=runway', ...DESKTOP },
   { name: 'top', query: 'view=top', ...DESKTOP },
+  { name: 'shadow', query: 'view=runway&shadow=1', ...DESKTOP },
+  { name: 'shadow-webgl', query: 'view=runway&shadow=1&webgl=1', ...DESKTOP },
+  // A small tile budget forces evictions while flying: nothing may break or leak.
+  { name: 'evict', query: 'view=belp&fly=1&tiles=90', flySeconds: 25, ...DESKTOP },
   { name: 'thun-webgl', query: 'view=thun&webgl=1', ...DESKTOP },
   { name: 'low-webgl', query: 'view=low&webgl=1', ...DESKTOP },
   { name: 'thun-mobile', query: 'view=thun&device=mobile', ...PHONE },

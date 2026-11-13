@@ -119,6 +119,8 @@ export class World {
   readonly object = new Group();
   private readonly materials: TerrainMaterials;
   private terrain?: TerrainStreamer;
+  private initPromise?: Promise<void>;
+  private retryAt = 0;
   private screenHeight = 1080;
   /** Render-space x/z of the detail pattern origin, see setFrame. */
   private readonly detailOrigin = { x: 0, z: 0 };
@@ -141,14 +143,24 @@ export class World {
     this.materials = new TerrainMaterials({ detail: quality.detail, water: quality.water });
   }
 
-  /** Loads what is needed before the first frame (data source descriptions and the like). */
-  async init(): Promise<void> {
-    if (this.terrain) return;
-    const res = await fetch(TERRAIN_BASE + 'layer.json');
-    if (!res.ok) throw new Error(`terrain layer.json: HTTP ${res.status}`);
-    const layer = parseTerrainLayer(await res.json());
-    this.terrain = new TerrainStreamer(layer, this.frame, { ...this.quality }, this.materials);
-    this.object.add(this.terrain.group);
+  /**
+   * Loads what is needed before the first frame: swisstopo's terrain layer description (its tile
+   * path carries the data version). update() starts this by itself if the app did not, and
+   * retries after a failure (offline start), so the world appears once the network is there.
+   */
+  init(): Promise<void> {
+    this.initPromise ??= (async () => {
+      const res = await fetch(TERRAIN_BASE + 'layer.json');
+      if (!res.ok) throw new Error(`terrain layer.json: HTTP ${res.status}`);
+      const layer = parseTerrainLayer(await res.json());
+      this.terrain = new TerrainStreamer(layer, this.frame, { ...this.quality }, this.materials);
+      this.object.add(this.terrain.group);
+    })().catch((err: unknown) => {
+      this.retryAt = performance.now() + 5000;
+      this.initPromise = undefined;
+      throw err;
+    });
+    return this.initPromise;
   }
 
   /** The render frame moved (floating origin). */
@@ -181,7 +193,11 @@ export class World {
 
   /** Per frame: load and place what the camera sees. */
   update(camera: Camera) {
-    if (!this.terrain) return;
+    if (!this.terrain) {
+      if (!this.initPromise && performance.now() >= this.retryAt)
+        this.init().catch((err: unknown) => console.warn('world: terrain unavailable', err));
+      return;
+    }
     camera.updateMatrixWorld();
     const frame = this.frame;
     const pos = camera.getWorldPosition(this.v);
@@ -191,7 +207,11 @@ export class World {
     const forward = frame.dirToEcef(dir, { x: 0, y: 0, z: 0 });
 
     this.m.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-    this.frustum.setFromProjectionMatrix(this.m, camera.coordinateSystem);
+    this.frustum.setFromProjectionMatrix(
+      this.m,
+      camera.coordinateSystem,
+      (camera as Camera & { reversedDepth?: boolean }).reversedDepth ?? false,
+    );
     const origin = frame.originEcef({ x: 0, y: 0, z: 0 });
     this.frustum.planes.forEach((p, i) => {
       const n = frame.dirToEcef(p.normal, { x: 0, y: 0, z: 0 });
