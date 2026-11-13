@@ -1,0 +1,347 @@
+/*
+ * On-screen flight controls. Every control owns its touch: no page scroll, zoom, selection
+ * or callout, and each tracks its own pointer so two thumbs work at once.
+ */
+
+.touch {
+  position: absolute;
+  inset: 0;
+  --pad: 56px;
+  --stick: 184px;
+  --lever-w: 68px;
+  --lever-h: 200px;
+}
+
+.touch :where(.stick-zone, .throttle-track, .rudder-track, .pad-btn) {
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* In the cockpit the controls stay usable but step back visually. */
+.touch.is-cockpit {
+  opacity: 0.7;
+}
+
+/* A small dark tab: captions stay legible over bright snow. */
+.touch-caption {
+  display: table;
+  margin: 0 auto 6px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: rgb(9 13 20 / 0.55);
+  color: var(--c-ink-2);
+}
+
+/* Stick -------------------------------------------------------------------------------- */
+
+.stick-zone {
+  position: absolute;
+  left: var(--safe-l);
+  bottom: var(--safe-b);
+  width: var(--stick);
+  height: var(--stick);
+  display: grid;
+  place-items: center;
+}
+
+.stick-base {
+  position: relative;
+  width: calc(var(--stick) - 40px);
+  height: calc(var(--stick) - 40px);
+  border: 1.5px solid rgb(255 255 255 / 0.28);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgb(255 255 255 / 0.06) 0 30%, transparent 31%), rgb(10 14 22 / 0.42);
+  -webkit-backdrop-filter: blur(10px) brightness(0.85);
+  backdrop-filter: blur(10px) brightness(0.85);
+  transition: border-color var(--t-fast) var(--ease-out);
+}
+
+.stick-cross {
+  position: absolute;
+  inset: 18%;
+  background:
+    linear-gradient(rgb(255 255 255 / 0.16), rgb(255 255 255 / 0.16)) center / 1px 100% no-repeat,
+    linear-gradient(rgb(255 255 255 / 0.16), rgb(255 255 255 / 0.16)) center / 100% 1px no-repeat;
+}
+
+.stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 60px;
+  height: 60px;
+  margin: -30px 0 0 -30px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #fff, #c9d2de 70%);
+  box-shadow:
+    0 6px 16px rgb(0 0 0 / 0.45),
+    inset 0 -3px 6px rgb(0 0 0 / 0.2);
+  transition: transform 160ms var(--ease-out);
+  will-change: transform;
+}
+
+.stick-zone.is-active .stick-base {
+  border-color: var(--c-accent);
+}
+
+/* While held the knob follows the thumb exactly; it springs back only on release. */
+.stick-zone.is-active .stick-knob {
+  transition: none;
+}
+
+/* Throttle ------------------------------------------------------------------------------ */
+
+.throttle {
+  position: absolute;
+  right: var(--safe-r);
+  bottom: var(--safe-b);
+  width: var(--lever-w);
+}
+
+.throttle-track {
+  position: relative;
+  width: 100%;
+  height: var(--lever-h);
+  border: 1.5px solid rgb(255 255 255 / 0.28);
+  border-radius: 14px;
+  background: rgb(10 14 22 / 0.42);
+  -webkit-backdrop-filter: blur(10px) brightness(0.85);
+  backdrop-filter: blur(10px) brightness(0.85);
+  overflow: hidden;
+  --level: 0;
+}
+
+.throttle-track.is-active {
+  border-color: var(--c-accent);
+}
+
+.throttle-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 100%;
+  background: linear-gradient(0deg, rgb(143 211 255 / 0.5), rgb(143 211 255 / 0.14));
+  transform: scaleY(var(--level));
+  transform-origin: bottom center;
+}
+
+.throttle-scale {
+  position: absolute;
+  inset: 22px 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.throttle-scale i {
+  width: 14px;
+  height: 1px;
+  background: rgb(255 255 255 / 0.3);
+}
+
+.throttle-handle {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: 0;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fff, #c9d2de);
+  color: #0b1018;
+  font-size: var(--fs-2);
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.45);
+  will-change: transform;
+}
+
+/* Rudder -------------------------------------------------------------------------------- */
+
+.rudder {
+  position: absolute;
+  left: 50%;
+  bottom: var(--safe-b);
+  width: 220px;
+  transform: translateX(-50%);
+}
+
+.rudder-track {
+  position: relative;
+  height: 52px;
+  border: 1.5px solid rgb(255 255 255 / 0.28);
+  border-radius: 26px;
+  background: rgb(10 14 22 / 0.42);
+  -webkit-backdrop-filter: blur(10px) brightness(0.85);
+  backdrop-filter: blur(10px) brightness(0.85);
+}
+
+.rudder-track.is-active {
+  border-color: var(--c-accent);
+}
+
+.rudder-centre {
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  bottom: 10px;
+  width: 1px;
+  background: rgb(255 255 255 / 0.3);
+}
+
+.rudder-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #fff, #c9d2de 70%);
+  box-shadow: 0 4px 10px rgb(0 0 0 / 0.45);
+  transition: transform 160ms var(--ease-out);
+}
+
+.rudder-track.is-active .rudder-knob {
+  transition: none;
+}
+
+/* Buttons -------------------------------------------------------------------------------- */
+
+.pad {
+  position: absolute;
+  right: calc(var(--safe-r) + var(--lever-w) + 12px);
+  bottom: var(--safe-b);
+  display: grid;
+  grid-template-columns: repeat(2, var(--pad));
+  gap: 8px;
+}
+
+.pad-btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: var(--pad);
+  height: var(--pad);
+  padding: 0;
+  border: 1.5px solid rgb(255 255 255 / 0.28);
+  border-radius: 14px;
+  background: rgb(10 14 22 / 0.5);
+  -webkit-backdrop-filter: blur(10px) brightness(0.85);
+  backdrop-filter: blur(10px) brightness(0.85);
+  color: var(--c-ink);
+  cursor: pointer;
+  transition:
+    transform 80ms var(--ease-out),
+    background 80ms var(--ease-out);
+}
+
+.pad-btn.is-pressed {
+  transform: scale(0.94);
+  background: rgb(255 255 255 / 0.2);
+}
+
+.pad-text {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--c-ink-2);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 3px;
+}
+
+.pad-flaps-meter {
+  position: relative;
+  width: 30px;
+  height: 4px;
+  margin-top: 3px;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.2);
+  overflow: hidden;
+}
+
+.pad-flaps-meter i {
+  position: absolute;
+  inset: 0;
+  background: var(--c-accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 120ms linear;
+}
+
+.pad-gear.is-down {
+  border-color: rgb(75 213 141 / 0.7);
+}
+
+.pad-gear.is-down .icon {
+  color: var(--c-ok);
+}
+
+.pad-gear.is-moving {
+  border-color: rgb(255 181 58 / 0.8);
+}
+
+.pad-brake.is-on {
+  border-color: var(--c-caution);
+  background: rgb(255 181 58 / 0.28);
+}
+
+/* Tablets and larger touch screens: a little more room for the thumbs. */
+@media (min-height: 700px) and (min-width: 700px) {
+  .touch {
+    --stick: 210px;
+    --lever-h: 240px;
+    --pad: 60px;
+  }
+}
+
+/* Short landscape screens: the lever has to fit under the HUD cards. */
+@media (max-height: 420px) {
+  .touch {
+    --stick: 168px;
+    --lever-h: 176px;
+  }
+}
+
+/* Portrait: stick and lever stay at the bottom corners, buttons move up in one row. */
+@media (orientation: portrait) {
+  .touch {
+    --stick: 160px;
+    --lever-w: 60px;
+  }
+  .pad {
+    right: var(--safe-r);
+    bottom: calc(var(--safe-b) + var(--lever-h) + 30px);
+    grid-template-columns: repeat(4, var(--pad));
+  }
+  /* One row reads left to right: flaps up, flaps down, gear, brake. */
+  .pad-flaps-up {
+    order: 0;
+  }
+  .pad-flaps-down {
+    order: 1;
+  }
+  .pad-gear {
+    order: 2;
+  }
+  .pad-brake {
+    order: 3;
+  }
+  .rudder {
+    left: calc(var(--safe-l) + var(--stick) + 8px);
+    right: calc(var(--safe-r) + var(--lever-w) + 8px);
+    width: auto;
+    transform: none;
+  }
+}

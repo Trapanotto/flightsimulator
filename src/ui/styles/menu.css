@@ -1,0 +1,482 @@
+/* Loading screen and main menu: one stage, the wordmark never moves. */
+
+.menu-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  overflow: hidden;
+  transition: background var(--t-slow) var(--ease-out);
+}
+
+/* Behind the flight setup the scene is dimmed: the sheet is the one thing to act on. */
+.menu-stage.is-setup {
+  background: rgb(4 7 12 / 0.42);
+}
+
+/* Opaque while loading (the scene is not drawn yet), then fades to show the live scene. */
+.menu-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 80% at 75% 110%, rgb(46 74 112 / 0.55), transparent 60%),
+    radial-gradient(80% 60% at 10% 0%, rgb(32 44 70 / 0.6), transparent 70%),
+    linear-gradient(180deg, #0a0f19 0%, #070b12 100%);
+  opacity: 0;
+  transition: opacity 900ms var(--ease-in-out);
+  pointer-events: none;
+}
+
+.menu-stage.is-loading .menu-backdrop {
+  opacity: 1;
+  transition: none;
+}
+
+/* The scrim darkens only where the text is, so the scene stays the hero. */
+.menu-scrim {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      90deg,
+      rgb(4 7 12 / 0.84) 0%,
+      rgb(4 7 12 / 0.72) 26%,
+      rgb(4 7 12 / 0.36) 46%,
+      rgb(4 7 12 / 0) 66%
+    ),
+    linear-gradient(0deg, rgb(4 7 12 / 0.55) 0%, rgb(4 7 12 / 0) 28%);
+  pointer-events: none;
+  transition: opacity var(--t-slow) var(--ease-out);
+}
+
+.menu-stage.is-setup .menu-scrim {
+  opacity: 0;
+}
+
+.menu-col {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(440px, 100%);
+  height: 100%;
+  padding: calc(var(--safe-t) + clamp(8px, 9vh, 112px)) var(--s-4) var(--safe-b)
+    calc(var(--safe-l) + var(--gutter) - var(--s-4));
+  transition:
+    opacity var(--t-base) var(--ease-out),
+    transform var(--t-slow) var(--ease-out);
+}
+
+.menu-stage.is-setup .menu-col,
+.menu-stage.is-setup .menu-credits {
+  opacity: 0;
+  transform: translateX(-24px);
+  pointer-events: none;
+}
+
+/* Wordmark ---------------------------------------------------------------------------- */
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  text-shadow: 0 2px 18px rgb(0 0 0 / 0.35);
+}
+
+.brand-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-mark {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background:
+    linear-gradient(#fff, #fff) center / 12px 3.5px no-repeat,
+    linear-gradient(#fff, #fff) center / 3.5px 12px no-repeat,
+    var(--c-brand);
+  box-shadow: 0 2px 10px rgb(227 49 58 / 0.4);
+}
+
+.brand-name {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: var(--fs-3);
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--c-ink-2);
+}
+
+.brand-title {
+  margin: 0;
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: var(--fs-hero);
+  line-height: 0.92;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.brand-tagline {
+  margin-top: var(--s-2);
+  color: var(--c-ink-2);
+  font-size: var(--fs-4);
+  font-weight: 400;
+}
+
+/* Main block: loading progress, then the menu, in the same place. */
+.menu-main {
+  margin-top: clamp(24px, 7vh, 72px);
+  min-height: 0;
+}
+
+.loading-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  width: min(320px, 100%);
+  animation: ui-fade var(--t-slow) var(--ease-out) both;
+}
+
+.loading-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-4);
+  font-size: var(--fs-2);
+  color: var(--c-ink-2);
+}
+
+.loading-pct {
+  color: var(--c-ink);
+  font-weight: 600;
+}
+
+.loading-dots::after {
+  content: '';
+  display: inline-block;
+  width: 1.2em;
+  text-align: left;
+  animation: dots 1.6s steps(4, end) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-dots::after {
+    content: '…';
+    animation: none;
+  }
+}
+
+@keyframes dots {
+  0% {
+    content: '';
+  }
+  25% {
+    content: '.';
+  }
+  50% {
+    content: '..';
+  }
+  75% {
+    content: '...';
+  }
+}
+
+.progress {
+  position: relative;
+  height: 3px;
+  border-radius: var(--r-pill);
+  background: rgb(255 255 255 / 0.14);
+  overflow: hidden;
+}
+
+.progress-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--c-ink-2), var(--c-ink));
+  transform-origin: left center;
+  transition: transform 300ms var(--ease-out);
+}
+
+/* Menu entries ------------------------------------------------------------------------ */
+
+.menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: calc(-1 * var(--s-4));
+}
+
+.menu-item {
+  position: relative;
+  /* backwards, not both: once in, hover and focus own the transform again. */
+  animation: ui-enter var(--t-slow) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 45ms);
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  min-height: 60px;
+  padding: var(--s-2) var(--s-4);
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease-out),
+    transform var(--t-base) var(--ease-out);
+}
+
+.menu-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--c-ink);
+  transform: scaleY(0);
+  transition: transform var(--t-base) var(--ease-out);
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: linear-gradient(90deg, rgb(255 255 255 / 0.11), rgb(255 255 255 / 0.02));
+  transform: translateX(4px);
+}
+
+.menu-item:hover::before,
+.menu-item:focus-visible::before {
+  transform: scaleY(1);
+}
+
+/* The menu draws its own selection; the global ring would double it. */
+.menu-item:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.18);
+}
+
+.menu-item:active {
+  transform: translateX(4px) scale(0.99);
+}
+
+.menu-item-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--c-line-strong);
+  color: var(--c-ink-2);
+}
+
+.menu-item-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.menu-item-label {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: var(--fs-6);
+  line-height: 1.05;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.menu-item-sub {
+  color: var(--c-ink-3);
+  font-size: var(--fs-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-item.is-primary {
+  min-height: 76px;
+  margin-bottom: var(--s-2);
+}
+
+.menu-item.is-primary .menu-item-icon {
+  width: 44px;
+  height: 44px;
+  border: 0;
+  background: var(--c-brand);
+  color: #fff;
+  box-shadow: 0 8px 24px rgb(227 49 58 / 0.4);
+}
+
+.menu-item.is-primary .menu-item-label {
+  font-size: var(--fs-7);
+}
+
+.menu-item.is-primary .menu-item-sub {
+  color: var(--c-ink-2);
+}
+
+.menu-item-go {
+  display: grid;
+  place-items: center;
+  color: var(--c-ink-2);
+  transition: transform var(--t-base) var(--ease-out);
+}
+
+.menu-item.is-primary:hover .menu-item-go,
+.menu-item.is-primary:focus-visible .menu-item-go {
+  transform: translateX(4px);
+  color: var(--c-ink);
+}
+
+.menu-item.is-soon .menu-item-label {
+  color: var(--c-ink-3);
+}
+
+.menu-item.is-soon .menu-item-icon {
+  color: var(--c-ink-3);
+  border-color: var(--c-line);
+}
+
+.badge {
+  flex: none;
+  padding: 3px 8px;
+  border: 1px solid var(--c-line-strong);
+  border-radius: var(--r-pill);
+  color: var(--c-ink-2);
+  font-size: var(--fs-0);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Menu foot and credits ------------------------------------------------------------------- */
+
+.menu-foot {
+  margin-top: auto;
+  padding-top: var(--s-5);
+}
+
+.lang-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  color: var(--c-ink-3);
+}
+
+.lang-switch .seg {
+  background: rgb(0 0 0 / 0.3);
+}
+
+.lang-switch .seg-option {
+  flex: none;
+  min-height: 36px;
+  padding: 0 var(--s-3);
+}
+
+.menu-credits {
+  position: absolute;
+  right: calc(var(--safe-r) + var(--s-2));
+  bottom: var(--safe-b);
+  display: flex;
+  gap: var(--s-4);
+  padding: 4px 12px;
+  border-radius: var(--r-pill);
+  background: rgb(4 7 12 / 0.4);
+  color: var(--c-ink-2);
+  font-size: var(--fs-1);
+  transition: opacity var(--t-base) var(--ease-out);
+}
+
+.menu-version {
+  color: var(--c-ink-3);
+}
+
+/* Short screens (phones in landscape): smaller wordmark, entries without subtitles. */
+@media (max-height: 560px) {
+  .menu-col {
+    padding-top: calc(var(--safe-t) + 4px);
+    width: min(380px, 100%);
+  }
+  .brand-title {
+    font-size: 2.1rem;
+  }
+  .brand-tagline {
+    display: none;
+  }
+  .menu-main {
+    margin-top: var(--s-3);
+  }
+  .menu-item {
+    min-height: 44px;
+    padding-block: 2px;
+  }
+  .menu-item.is-primary {
+    min-height: 54px;
+    margin-bottom: 2px;
+  }
+  .menu-item-sub {
+    display: none;
+  }
+  .menu-item.is-primary .menu-item-sub {
+    display: block;
+  }
+  .menu-item-icon {
+    width: 30px;
+    height: 30px;
+  }
+  .menu-item.is-primary .menu-item-icon {
+    width: 38px;
+    height: 38px;
+  }
+  .menu-item-label {
+    font-size: var(--fs-5);
+  }
+  .menu-item.is-primary .menu-item-label {
+    font-size: var(--fs-6);
+  }
+  /* Fixed: out of the column, to the free top-right corner of the screen. */
+  .menu-foot {
+    position: fixed;
+    right: var(--safe-r);
+    top: var(--safe-t);
+    padding: 0;
+  }
+}
+
+/* Portrait phones: wordmark on top, the menu low where the thumb is, scene in between. */
+@media (max-width: 600px) and (orientation: portrait) {
+  .menu-scrim {
+    background:
+      linear-gradient(180deg, rgb(4 7 12 / 0.72) 0%, rgb(4 7 12 / 0) 30%),
+      linear-gradient(0deg, rgb(4 7 12 / 0.9) 0%, rgb(4 7 12 / 0.7) 44%, rgb(4 7 12 / 0) 70%);
+  }
+  .menu-col {
+    width: 100%;
+    padding: calc(var(--safe-t) + var(--s-5)) var(--safe-r) calc(var(--safe-b) + 28px) var(--safe-l);
+  }
+  .brand-title {
+    font-size: 2.75rem;
+  }
+  .menu-main {
+    margin-top: auto;
+  }
+  .menu-list {
+    margin-left: 0;
+  }
+  .menu-foot {
+    margin-top: var(--s-4);
+    padding-top: 0;
+    display: flex;
+    justify-content: space-between;
+  }
+  .menu-credits {
+    left: var(--safe-l);
+    right: var(--safe-r);
+    justify-content: space-between;
+  }
+}

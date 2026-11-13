@@ -1,0 +1,264 @@
+/* Pause, settings and the debug overlay. */
+
+.pause-layer,
+.modal-layer {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l);
+  pointer-events: auto;
+}
+
+.pause-layer {
+  background: linear-gradient(90deg, rgb(4 7 12 / 0.7), rgb(4 7 12 / 0.35)), rgb(4 7 12 / 0.15);
+  -webkit-backdrop-filter: blur(3px) saturate(0.8);
+  backdrop-filter: blur(3px) saturate(0.8);
+}
+
+.modal-layer {
+  z-index: 2;
+  background: rgb(4 7 12 / 0.5);
+}
+
+/* Pause ---------------------------------------------------------------------------------- */
+
+.pause {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  width: min(380px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: var(--s-5);
+}
+
+.pause-title {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: var(--fs-8);
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pause-facts {
+  margin-top: var(--s-2);
+  color: var(--c-ink-2);
+  font-size: var(--fs-2);
+}
+
+.pause-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.pause-list .btn--primary {
+  justify-content: flex-start;
+}
+
+.pause-hint {
+  color: var(--c-ink-3);
+  font-size: var(--fs-1);
+  text-align: center;
+}
+
+/* Settings ------------------------------------------------------------------------------- */
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  height: min(640px, 100%);
+  background: var(--c-glass-strong);
+  overflow: hidden;
+}
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-4) var(--s-3) var(--s-2) var(--s-5);
+}
+
+.settings-title {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: var(--fs-6);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.tabs {
+  display: flex;
+  gap: var(--s-5);
+  padding: 0 var(--s-5);
+  border-bottom: 1px solid var(--c-line);
+}
+
+.tab {
+  position: relative;
+  min-height: var(--tap);
+  min-width: var(--tap);
+  padding: 0 2px;
+  border-radius: var(--r-1);
+  border: 0;
+  background: none;
+  color: var(--c-ink-3);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--t-fast) var(--ease-out);
+}
+
+.tab:focus-visible {
+  outline-offset: -2px;
+  box-shadow: none;
+}
+
+.tab:hover {
+  color: var(--c-ink);
+}
+
+.tab.is-on {
+  color: var(--c-ink);
+}
+
+.tab::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--c-accent);
+  transform: scaleX(0);
+  transition: transform var(--t-base) var(--ease-out);
+}
+
+.tab.is-on::after {
+  transform: scaleX(1);
+}
+
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+  padding: var(--s-5);
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.2) transparent;
+}
+
+.toggle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: calc(-1 * var(--s-2)) calc(-1 * var(--s-3)) 0;
+}
+
+.settings-body > .toggle {
+  margin: 0 calc(-1 * var(--s-3));
+  width: auto;
+}
+
+.volume-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  color: var(--c-ink-2);
+}
+
+.volume-row.is-muted {
+  opacity: 0.5;
+}
+
+/* Debug ---------------------------------------------------------------------------------- */
+
+.debug {
+  position: absolute;
+  left: var(--safe-l);
+  bottom: calc(var(--safe-b) + 50%);
+  z-index: 3;
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--r-1);
+  background: rgb(0 0 0 / 0.65);
+  font-size: var(--fs-0);
+  line-height: 1.3;
+  pointer-events: none;
+}
+
+.debug div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+
+.debug dt {
+  color: var(--c-ink-3);
+}
+
+.debug dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+@media (max-height: 560px) {
+  .pause {
+    gap: var(--s-2);
+    padding: var(--s-4);
+  }
+  .pause-title {
+    font-size: var(--fs-7);
+  }
+  .pause-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .pause-list .btn--primary {
+    grid-column: 1 / -1;
+  }
+  .pause-list .btn {
+    min-height: var(--tap);
+  }
+  .settings {
+    height: 100%;
+  }
+  .settings-head {
+    padding-top: var(--s-2);
+  }
+  .settings-body {
+    padding: var(--s-3) var(--s-5);
+    gap: var(--s-4);
+  }
+}
+
+@media (max-width: 600px) {
+  .modal-layer {
+    padding: 0;
+  }
+  /* Full screen on phones: opaque, nothing of the menu behind should compete. */
+  .settings {
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    border: 0;
+    background: #0a0e16;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+      env(safe-area-inset-left);
+  }
+  .settings-body {
+    padding: var(--s-4);
+  }
+  .tabs {
+    padding: 0 var(--s-4);
+  }
+}

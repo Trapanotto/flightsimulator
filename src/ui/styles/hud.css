@@ -1,0 +1,646 @@
+/*
+ * Heads-up display. Keeps to the edges: the middle of the view belongs to the flight.
+ * Numbers are Inter with tabular figures so they do not jitter sideways as they change.
+ */
+
+.hud {
+  position: absolute;
+  inset: 0;
+  /* Darker than menu glass: HUD text is small and sits over anything, including snow. */
+  --c-hud-glass: rgb(9 13 20 / 0.64);
+  --hud-top: var(--safe-t);
+  --hud-side-y: 30%;
+}
+
+.hud-data {
+  transition: opacity var(--t-slow) var(--ease-out);
+}
+
+/* In the cockpit the real instruments take over; the HUD fades almost away (not warnings). */
+.hud.is-cockpit .hud-data {
+  opacity: 0.12;
+}
+
+.hud.is-cockpit .hud-btn {
+  opacity: 0.6;
+}
+
+.hud.is-paused .hud-data,
+.hud.is-paused .hud-btn {
+  opacity: 0.35;
+}
+
+.hud-top {
+  position: absolute;
+  top: var(--hud-top);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+}
+
+.hud-btn {
+  pointer-events: auto;
+  color: var(--c-ink);
+  transition: opacity var(--t-base) var(--ease-out);
+}
+
+/* Heading tape ---------------------------------------------------------------------------- */
+
+.tape {
+  position: relative;
+  width: 340px;
+  height: 52px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  background: var(--c-hud-glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  overflow: hidden;
+}
+
+.tape-window {
+  position: absolute;
+  inset: 0;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+}
+
+.tape-strip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  will-change: transform;
+}
+
+.tape-tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 7px;
+  background: var(--c-ink-3);
+}
+
+.tape-tick.is-major {
+  height: 12px;
+  background: var(--c-ink-2);
+}
+
+.tape-label {
+  position: absolute;
+  bottom: 14px;
+  left: 0;
+  transform: translateX(-50%);
+  color: var(--c-ink-3);
+  font-size: var(--fs-0);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.tape-label.is-thirty {
+  color: var(--c-ink-2);
+  font-size: var(--fs-1);
+  font-weight: 600;
+}
+
+.tape-label.is-cardinal {
+  color: var(--c-accent);
+  font-size: var(--fs-2);
+  font-weight: 600;
+}
+
+.tape-pointer {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  margin-left: -6px;
+  border: 6px solid transparent;
+  border-bottom-color: var(--c-accent);
+  border-top: 0;
+}
+
+.tape-readout {
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 56px;
+  padding: 1px 8px;
+  border: 1px solid rgb(143 211 255 / 0.5);
+  border-radius: var(--r-1);
+  background: rgb(6 10 16 / 0.92);
+  color: var(--c-ink);
+  font-size: var(--fs-4);
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: center;
+}
+
+.tape-deg {
+  color: var(--c-ink-3);
+  font-size: var(--fs-1);
+  vertical-align: top;
+}
+
+/* Speed and altitude ------------------------------------------------------------------ */
+
+.hud-side {
+  position: absolute;
+  top: var(--hud-side-y);
+}
+
+.hud-side--left {
+  left: var(--safe-l);
+}
+
+.hud-side--right {
+  right: var(--safe-r);
+}
+
+.hud-card {
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  background: var(--c-hud-glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+}
+
+.hud-speed,
+.hud-alt {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'label label'
+    'value unit';
+  align-items: baseline;
+  column-gap: 6px;
+  min-width: 128px;
+  padding: 8px 14px 10px;
+}
+
+.hud-alt {
+  grid-template-areas:
+    'label label'
+    'value unit'
+    'vs vs'
+    'agl agl';
+  justify-items: end;
+  text-align: right;
+}
+
+.hud-speed {
+  justify-items: start;
+}
+
+.hud-label {
+  grid-area: label;
+  color: var(--c-ink-2);
+}
+
+.hud-value {
+  grid-area: value;
+  font-size: 2.125rem;
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  min-width: 3ch;
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.35);
+}
+
+/* Right-aligned digits: the last digit stays put as the number grows or shrinks. */
+.hud-value {
+  text-align: right;
+}
+
+.hud-alt .hud-value {
+  min-width: 5ch;
+}
+
+.hud-unit {
+  grid-area: unit;
+  color: var(--c-ink-2);
+  font-size: var(--fs-2);
+  font-weight: 500;
+  justify-self: start;
+}
+
+.hud-vs {
+  grid-area: vs;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  font-size: var(--fs-3);
+  font-weight: 600;
+}
+
+.hud-vs-unit {
+  color: var(--c-ink-3);
+  font-size: var(--fs-1);
+  font-weight: 500;
+}
+
+.hud-vs-arrow {
+  width: 0;
+  height: 0;
+  border: 5px solid transparent;
+  border-left-color: var(--c-ink-3);
+  border-right: 0;
+  transition: transform var(--t-base) var(--ease-out);
+}
+
+.hud-vs-arrow.is-up {
+  border-left-color: var(--c-ink);
+  transform: rotate(-90deg);
+}
+
+.hud-vs-arrow.is-down {
+  border-left-color: var(--c-ink);
+  transform: rotate(90deg);
+}
+
+.hud-agl {
+  grid-area: agl;
+  margin-top: 2px;
+  color: var(--c-accent);
+  font-size: var(--fs-1);
+  white-space: nowrap;
+}
+
+.hud-agl.is-hidden {
+  display: none;
+}
+
+/* Systems ----------------------------------------------------------------------------- */
+
+.hud-bottom-left {
+  position: absolute;
+  left: var(--safe-l);
+  bottom: var(--safe-b);
+}
+
+.hud-systems {
+  display: grid;
+  gap: 8px;
+  width: 240px;
+  padding: 10px 14px 12px;
+}
+
+.sys-bar {
+  display: grid;
+  grid-template-columns: 64px 1fr 44px;
+  align-items: center;
+  gap: 10px;
+}
+
+.sys-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sys-meter {
+  position: relative;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: rgb(255 255 255 / 0.14);
+  overflow: hidden;
+}
+
+.sys-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--c-ink);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 120ms linear;
+}
+
+/* Flap detents at a third and two thirds. */
+.sys-meter--notched::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      90deg,
+      transparent calc(33.3% - 1px),
+      rgb(0 0 0 / 0.7) 0 calc(33.3% + 1px),
+      transparent 0
+    ),
+    linear-gradient(
+      90deg,
+      transparent calc(66.6% - 1px),
+      rgb(0 0 0 / 0.7) 0 calc(66.6% + 1px),
+      transparent 0
+    );
+}
+
+.sys-meter--notched .sys-fill {
+  background: var(--c-accent);
+}
+
+.sys-value {
+  font-weight: 600;
+  font-size: var(--fs-3);
+  text-align: right;
+}
+
+.sys-value small {
+  margin-left: 1px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-0);
+}
+
+.sys-chips {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.sys-gear,
+.sys-brake {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 8px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-1);
+  font-size: var(--fs-2);
+}
+
+.sys-chip-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.sys-state {
+  font-weight: 600;
+}
+
+.sys-lights {
+  display: grid;
+  grid-template-columns: repeat(3, 6px);
+  gap: 3px;
+}
+
+.sys-lights i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.18);
+}
+
+.sys-gear.is-down .sys-lights i {
+  background: var(--c-ok);
+  box-shadow: 0 0 6px rgb(75 213 141 / 0.7);
+}
+
+.sys-gear.is-moving .sys-lights i {
+  background: var(--c-caution);
+}
+
+.sys-gear.is-moving .sys-state {
+  color: var(--c-caution);
+}
+
+.sys-lamp {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.18);
+}
+
+.sys-brake {
+  color: var(--c-ink-3);
+}
+
+.sys-brake.is-on,
+.sys-brake.is-park {
+  color: var(--c-ink);
+  border-color: rgb(255 181 58 / 0.6);
+}
+
+.sys-brake.is-on .sys-lamp,
+.sys-brake.is-park .sys-lamp {
+  background: var(--c-caution);
+  box-shadow: 0 0 6px rgb(255 181 58 / 0.8);
+}
+
+/* Alerts: warnings and notices under the heading tape -------------------------------- */
+
+.hud-alerts {
+  position: absolute;
+  top: calc(var(--hud-top) + 64px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+  width: min(440px, 100% - 2 * var(--s-4));
+}
+
+.warnings {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--s-2);
+}
+
+.warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px 6px 12px;
+  border-radius: var(--r-1);
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: var(--fs-5);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.35);
+}
+
+.warn--stall {
+  background: var(--c-warning);
+  color: #fff;
+  animation: warn-pulse 0.9s steps(2, jump-none) infinite;
+}
+
+.warn--caution {
+  background: var(--c-caution);
+  color: #1a1000;
+}
+
+@keyframes warn-pulse {
+  50% {
+    background: #a8181b;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .warn--stall {
+    animation: none;
+  }
+}
+
+.notice {
+  max-width: 100%;
+  padding: 8px 16px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-pill);
+  background: var(--c-glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  font-size: var(--fs-3);
+  font-weight: 500;
+  text-align: center;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition:
+    opacity var(--t-base) var(--ease-out),
+    transform var(--t-base) var(--ease-out);
+}
+
+.notice:empty {
+  display: none;
+}
+
+.notice.is-shown {
+  opacity: 1;
+  transform: none;
+}
+
+/* Crash -------------------------------------------------------------------------------- */
+
+.crash-layer {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l);
+  background: radial-gradient(70% 70% at 50% 50%, rgb(60 0 0 / 0.35), rgb(0 0 0 / 0.55));
+  pointer-events: auto;
+}
+
+.crash {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+  width: min(400px, 100%);
+  padding: var(--s-6) var(--s-5) var(--s-5);
+  text-align: center;
+}
+
+.crash-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgb(255 77 79 / 0.16);
+  color: var(--c-warning);
+}
+
+.crash-title {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: var(--fs-7);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.crash-reason {
+  color: var(--c-ink-2);
+}
+
+.crash-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  width: 100%;
+  margin-top: var(--s-4);
+}
+
+@media (max-height: 560px) {
+  .crash {
+    padding: var(--s-4);
+    gap: 4px;
+  }
+  .crash-icon {
+    width: 40px;
+    height: 40px;
+  }
+  .crash-title {
+    font-size: var(--fs-6);
+  }
+  .crash-actions {
+    flex-direction: row;
+    margin-top: var(--s-3);
+  }
+  .crash-actions .btn {
+    flex: 1;
+    min-height: var(--tap);
+    font-size: var(--fs-3);
+    padding: 0 var(--s-3);
+  }
+}
+
+/* Touch layout: cards to the top corners, out of the thumbs' way. */
+.hud.is-touch {
+  --hud-side-y: var(--safe-t);
+}
+
+.hud.is-touch .tape {
+  width: 260px;
+}
+
+@media (max-width: 760px) {
+  .tape {
+    width: 220px;
+  }
+  .hud.is-touch .tape {
+    width: 220px;
+  }
+}
+
+@media (max-height: 560px) {
+  .tape {
+    height: 46px;
+  }
+  .tape-readout {
+    font-size: var(--fs-3);
+  }
+  .hud-speed,
+  .hud-alt {
+    min-width: 108px;
+    padding: 6px 10px 8px;
+  }
+  .hud-value {
+    font-size: 1.75rem;
+  }
+  .hud-alerts {
+    top: calc(var(--hud-top) + 54px);
+  }
+}
+
+/* Narrow portrait: the cards would meet the tape row, so they drop below it. */
+@media (max-width: 600px) and (orientation: portrait) {
+  .hud,
+  .hud.is-touch {
+    --hud-side-y: calc(var(--safe-t) + 60px);
+  }
+  .hud-alerts {
+    top: calc(var(--safe-t) + 60px + 120px);
+  }
+}

@@ -1,0 +1,93 @@
+/*
+ * Design tokens: every colour, size, radius and timing of the interface comes from here.
+ * The interface floats over a live 3D scene that can be bright snow or a night sky, so the
+ * glass is dark and dims what is behind it (backdrop brightness) instead of relying on blur
+ * alone; text on glass stays above 7:1 even over white.
+ */
+:root {
+  color-scheme: dark;
+
+  /* Ink (text and icons) */
+  --c-ink: #f3f6fa;
+  --c-ink-2: rgb(243 246 250 / 0.76);
+  --c-ink-3: rgb(243 246 250 / 0.56);
+  --c-ink-4: rgb(243 246 250 / 0.34);
+
+  /* Surfaces */
+  --c-glass: rgb(10 14 22 / 0.7);
+  --c-glass-strong: rgb(8 11 18 / 0.86);
+  --c-glass-soft: rgb(10 14 22 / 0.5);
+  --c-fill: rgb(255 255 255 / 0.06);
+  --c-fill-hover: rgb(255 255 255 / 0.1);
+  --c-fill-active: rgb(255 255 255 / 0.16);
+  --c-line: rgb(255 255 255 / 0.11);
+  --c-line-strong: rgb(255 255 255 / 0.22);
+  --c-scrim: rgb(4 7 12 / 0.55);
+  --c-backdrop: #070b12;
+
+  /* Brand and signal colours */
+  --c-brand: #e3313a; /* Swiss red: the one call to action per screen */
+  --c-brand-hi: #f2434b;
+  --c-accent: #8fd3ff; /* selection, focus, instrument pointers */
+  --c-accent-dim: rgb(143 211 255 / 0.18);
+  --c-ok: #4bd58d;
+  --c-caution: #ffb53a;
+  --c-warning: #ff4d4f;
+
+  /* Type */
+  --f-text: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --f-display: 'Rajdhani', 'Inter', system-ui, sans-serif;
+  --fs-0: 0.6875rem; /* 11 */
+  --fs-1: 0.75rem; /* 12 */
+  --fs-2: 0.8125rem; /* 13 */
+  --fs-3: 0.9375rem; /* 15 */
+  --fs-4: 1.0625rem; /* 17 */
+  --fs-5: 1.25rem; /* 20 */
+  --fs-6: 1.5rem; /* 24 */
+  --fs-7: 2rem; /* 32 */
+  --fs-8: 2.625rem; /* 42 */
+  --fs-hero: clamp(2.5rem, 4.6vw + 0.5rem, 4.75rem);
+  --tracking-caps: 0.14em;
+  --tracking-wide: 0.06em;
+
+  /* Space: a 4 px grid */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+  --gutter: clamp(16px, 4.5vw, 72px);
+
+  /* Shape */
+  --r-1: 6px;
+  --r-2: 10px;
+  --r-3: 16px;
+  --r-pill: 999px;
+  --shadow: 0 18px 48px rgb(0 0 0 / 0.38), 0 2px 8px rgb(0 0 0 / 0.22);
+  --glass-filter: blur(22px) saturate(1.25) brightness(0.78);
+  --tap: 44px;
+
+  /* Motion: short and purposeful */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --t-fast: 120ms;
+  --t-base: 220ms;
+  --t-slow: 520ms;
+
+  /* Safe areas (notches, home indicator) */
+  --safe-t: max(var(--s-4), env(safe-area-inset-top));
+  --safe-r: max(var(--s-4), env(safe-area-inset-right));
+  --safe-b: max(var(--s-4), env(safe-area-inset-bottom));
+  --safe-l: max(var(--s-4), env(safe-area-inset-left));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-fast: 0ms;
+    --t-base: 0ms;
+    --t-slow: 0ms;
+  }
+}
