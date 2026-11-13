@@ -25,6 +25,8 @@ const SHOTS = [
   ['front-left', 'landing', 'night=1'],
   ['rear', 'cruise', 'night=1'],
   ['front-left', 'parked', 'device=mobile'],
+  ['far', 'climb-turn'],
+  ['distant', 'cruise'],
 ];
 const outDir = path.resolve('.scratch/shots');
 mkdirSync(outDir, { recursive: true });

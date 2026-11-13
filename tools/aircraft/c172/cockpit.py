@@ -210,7 +210,7 @@ def attitude(b):
     b.add("needle_orange", M.cylinder(c + VN * 0.0065, c + VN * 0.0085, 0.0022, 12))
     # Lower half of the case hides the card's bottom edge, like the real instrument's mask.
     mask = [(-r * math.cos(t), -r * math.sin(t)) for t in np.linspace(0.12, math.pi - 0.12, 18)]
-    mask = [(-r * 0.99, -r * 0.40)] + [(x * 0.99, min(y * 0.99, -r * 0.40)) for x, y in mask] + [(r * 0.99, -r * 0.40)]
+    mask = [(-r * 0.99, -r * 0.72)] + [(x * 0.99, min(y * 0.99, -r * 0.72)) for x, y in mask] + [(r * 0.99, -r * 0.72)]
     b.add("gauge_bezel", _flat_shape(mask, c, 0.0040, 0.0006))
 
 

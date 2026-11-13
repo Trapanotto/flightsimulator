@@ -43,6 +43,7 @@ def _font():
 # World size of one texel of the atlas (set per bake); features never get thinner than this,
 # or they would fall between texel centres and vanish.
 TEXEL = [0.005]
+DEPTH = 1.8   # overall relief of panel lines and rivets
 
 
 def _groove(d, w):
@@ -255,9 +256,10 @@ def compute(pos, nrm, pid, cov, ao, names):
                                             D.HSTAB_TIP_CHORD, 0, D.HSTAB_HALF), 1.0)
     xv = np.where(vtail, _tail_chord_coords(wl, fs, D.FIN_ROOT_LE, D.FIN_TOP_LE, D.FIN_ROOT_CHORD, D.FIN_TOP_CHORD,
                                             D.FIN_ROOT_WL, D.FIN_TOP_WL), 1.0)
-    le_zone = ((wing_box & (x < 0.035)) | (htail & (xt < 0.03)) | (vtail & (xv < 0.03)) |
-               (strut & (nf < -0.7)) | (fuse & (fs < -0.70) & (fs > -0.80)))
-    chips = le_zone & (noise(p, 70.0) > 0.80) & (n_hi > 0.45)
+    fin_only = part("Fin", "Rudder")
+    le_zone = ((wing_box & (x < 0.02)) | (htail & (xt < 0.02) & (xt > -0.05)) |
+               (fin_only & (xv < 0.02) & (xv > -0.05)) | (strut & (nf < -0.85)))
+    chips = le_zone & (noise(p, 90.0) > 0.86) & (n_hi > 0.5)
     col[chips] = METAL
     metal[chips] = 1.0
     rough[chips] = 0.35
@@ -274,5 +276,5 @@ def compute(pos, nrm, pid, cov, ao, names):
     base[~cov] = WHITE
     orm = np.stack([ao_out, rough, metal], -1)
     orm[~cov] = (1.0, 0.3, 0.0)
-    nmap = B.height_to_normal(height, pos, cov, pid, strength=1.0)
+    nmap = B.height_to_normal(height, pos, cov, pid, strength=DEPTH)
     return srgb_to_linear(base), orm, nmap

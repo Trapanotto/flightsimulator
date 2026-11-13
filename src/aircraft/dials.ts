@@ -546,8 +546,8 @@ export function drawPropDisc(
   g.addColorStop(0, 'rgba(30,30,32,0.30)');
   g.addColorStop(0.4, 'rgba(30,30,32,0.22)');
   g.addColorStop(tipFraction - 0.02, 'rgba(40,40,42,0.14)');
-  g.addColorStop(tipFraction, 'rgba(235,235,230,0.22)');
-  g.addColorStop(0.985, 'rgba(235,235,230,0.16)');
+  g.addColorStop(tipFraction, 'rgba(235,235,230,0.10)');
+  g.addColorStop(0.985, 'rgba(235,235,230,0.07)');
   g.addColorStop(1, 'rgba(235,235,230,0)');
   c.fillStyle = g;
   c.beginPath();

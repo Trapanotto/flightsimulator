@@ -45,7 +45,7 @@ def fairing(nose_fs, length, center_bl, top_wl, half_w, axle_wl, n_sec=30, n_rin
     """Speed fairing: a teardrop lofted along FS, its bottom cut open for the tyre."""
     rows = []
     ts = 0.5 * (1 - np.cos(np.linspace(0, math.pi, n_sec)))
-    prof = 2.2 * np.sqrt(ts) * (1 - ts) ** 0.85
+    prof = 2.2 * np.sqrt(ts) * (1 - ts) ** 1.2
     prof /= prof.max()
     for t, f in zip(ts, prof):
         fs = nose_fs + t * length
@@ -106,7 +106,7 @@ def build(col, mats, parts):
                             (0.03, 0.05, 0.06), 0.008, 2)
         fixed.append(M.make_object(f"Caliper_{sfx}", *cal, col, mats["steel"], sharp_angle=40))
         # Speed fairing, fixed to the axle.
-        v, f = fairing(D.MAIN_AXLE_FS - 0.36, 0.94, bl, 0.46, 0.135, axle[2])
+        v, f = fairing(D.MAIN_AXLE_FS - 0.34, 1.02, bl, 0.445, 0.13, axle[2])
         fo = M.make_object(f"WheelFairing_{sfx}", v, f, col, mats["paint"], sharp_angle=60)
         cut_bottom(fo, 0.06)
         parts[f"WheelFairing_{sfx}"] = fo

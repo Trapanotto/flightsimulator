@@ -264,6 +264,9 @@ const cams: Record<string, [number, number, number]> = {
   rear: [-6.5, 2.8, -10],
   tail: [3.0, 1.6, -7.8],
   low: [4.2, -0.6, 4.6],
+  // Beyond the LOD distances: 60 m (LOD1) and 200 m (LOD2).
+  far: [35, 6, 48],
+  distant: [120, 20, 160],
 };
 let controlsOrbit: OrbitControls | undefined;
 if (view === 'cockpit' || view === 'panel') {
@@ -286,6 +289,9 @@ if (view === 'cockpit' || view === 'panel') {
   const p = cams[view] ?? cams['front-left']!;
   camera.position.set(p[0], ac.object.position.y + p[1], p[2]);
   if (view === 'side') camera.fov = 30;
+  // Zoomed in, so the reduced models can be judged at their switching distance.
+  if (view === 'far') camera.fov = 12;
+  if (view === 'distant') camera.fov = 4;
   if (view === 'top') camera.up.set(0, 0, 1);
   camera.lookAt(target);
   if (!shot) {

@@ -19,6 +19,7 @@ import {
   MeshPhysicalMaterial,
   MeshStandardNodeMaterial,
   type Object3D,
+  type PerspectiveCamera,
   Quaternion,
   RepeatWrapping,
   SRGBColorSpace,
@@ -484,7 +485,6 @@ class C172 implements AircraftVisual {
         depthWrite: false,
         blending: AdditiveBlending,
       });
-      m.sizeAttenuation = false;
       const vis = d.cone
         ? smoothstep(d.cone[0], d.cone[1], dot(normalize(cameraPosition.sub(pos)), dir))
         : float(1);
@@ -492,6 +492,18 @@ class C172 implements AircraftVisual {
       const g = pow(texture(tex, uv()).a, 2.2);
       m.colorNode = vec4(color.mul(intensity).mul(vis).mul(g), 1);
       const sprite = new Sprite(m);
+      // A fixed share of the screen height, so a light reads the same at 50 m and at 2 km
+      // and does not swamp a zoomed-in view; never smaller than the lamp's own halo.
+      const fraction = GLOW_SCREEN[kind] ?? 0.05;
+      sprite.onBeforeRender = (_r, _s, camera) => {
+        sprite.getWorldPosition(tmpV);
+        const dist = tmpV.distanceTo(camera.getWorldPosition(tmpV2));
+        const pc = camera as PerspectiveCamera;
+        const span = pc.isPerspectiveCamera ? (2 * Math.tan((pc.fov * DEG) / 2)) / pc.zoom : 1;
+        const world = Math.min(Math.max(fraction * dist * span, 0.18), 3.5);
+        sprite.scale.set(world, world, 1);
+        sprite.updateMatrixWorld();
+      };
       sprite.position.copy(local);
       sprite.renderOrder = 10;
       sprite.frustumCulled = false;
@@ -648,21 +660,12 @@ class C172 implements AircraftVisual {
       Landing: L.landing ? 4 : 0,
       Taxi: L.taxi ? 3 : 0,
     };
-    const size: Record<string, number> = {
-      Strobe_L: 0.09,
-      Strobe_R: 0.09,
-      Beacon: 0.05,
-      Landing: 0.09,
-      Taxi: 0.07,
-    };
     this.object.updateWorldMatrix(true, false);
     const q = this.object.getWorldQuaternion(tmpQ);
     for (const g of this.glows) {
       const lv = (level[g.kind] ?? 0) * this.glowScale;
       g.intensity.value = lv;
       g.sprite.visible = lv > 0;
-      const sz = size[g.kind] ?? 0.035;
-      g.sprite.scale.set(sz, sz, 1);
       g.pos.value.copy(g.local).applyMatrix4(this.object.matrixWorld);
       g.dir.value.copy(g.localDir).applyQuaternion(q);
     }
@@ -685,3 +688,16 @@ class C172 implements AircraftVisual {
 }
 
 const tmpQ = new Quaternion();
+const tmpV = new Vector3();
+const tmpV2 = new Vector3();
+/** Glow size as a share of the screen height. */
+const GLOW_SCREEN: Record<string, number> = {
+  Nav_L: 0.045,
+  Nav_R: 0.045,
+  Tail: 0.04,
+  Beacon: 0.07,
+  Strobe_L: 0.12,
+  Strobe_R: 0.12,
+  Landing: 0.12,
+  Taxi: 0.1,
+};
