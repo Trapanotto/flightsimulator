@@ -226,6 +226,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   let groundHeight = 0;
   let plan: FlightPlan | null = null;
   /** The season the landscape is shown in: the calendar's, until a flight chooses one. */
+  // eslint-disable-next-line prefer-const -- the flight plan will set it
   let season: Season = seasonOf(startDate);
 
   const say = (key: string) => {
