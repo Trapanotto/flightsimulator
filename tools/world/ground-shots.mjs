@@ -120,9 +120,11 @@ try {
       : '-';
     const build = w.buildMs !== undefined && w.built ? (w.buildMs / w.built).toFixed(1) : '-';
     const bake = w.bakeMs !== undefined && w.built ? (w.bakeMs / w.built).toFixed(1) : '-';
+    const per = (v) => (v !== undefined && w.built ? (v / w.built).toFixed(1) : '-');
+    const parts = `lights ${per(w.lightsMs)} roads ${per(w.roadsMs)} horizon ${per(w.horizonMs)} mips ${per(w.mipsMs)}`;
     console.log(
       `${scene.name}: ${stats.backend} load ${loadSeconds.toFixed(1)} s, tiles ${w.tilesDrawn}/${w.tilesLoaded} z${w.maxZoom}, ` +
-        `gpu ~${(w.gpuBytes / 2 ** 20).toFixed(0)} MB (${perTile} MB/tile), build ${build} ms/tile (bake ${bake}), ` +
+        `gpu ~${(w.gpuBytes / 2 ** 20).toFixed(0)} MB (${perTile} MB/tile), build ${build} ms/tile (cpu ${bake}: ${parts}), ` +
         `cpu max ${stats.cpuMaxMs.toFixed(1)} ms, bench ${benchMs.toFixed(2)} ms/frame` +
         (errors.length ? `\n  ${errors.slice(0, 5).join('\n  ')}` : ''),
     );
