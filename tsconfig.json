@@ -4,7 +4,9 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["ES2023", "DOM", "DOM.Iterable", "WebWorker"],
-    "types": ["vite/client"],
+    "types": ["vite/client", "@webgpu/types"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -14,7 +16,17 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "@sim": ["./src/sim/index.ts"],
+      "@geo": ["./src/geo/index.ts"],
+      "@world": ["./src/world/index.ts"],
+      "@sky": ["./src/sky/index.ts"],
+      "@aircraft": ["./src/aircraft/index.ts"],
+      "@audio": ["./src/audio/index.ts"],
+      "@ui": ["./src/ui/index.ts"],
+      "@app": ["./src/app/index.ts"]
+    }
   },
   "include": ["src", "tests", "vite.config.ts"]
 }

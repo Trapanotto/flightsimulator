@@ -2,39 +2,33 @@
 <html lang="de">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"
+    />
     <title>Trapanotto Flight Simulator</title>
     <meta
       name="description"
-      content="Flugsimulator im Browser über einer echten 3D-Schweiz mit swisstopo-Daten – mit der Flotte von Trapanotto Airlines vom Cessna 172 bis zur Boeing 747."
+      content="Flugsimulator im Browser über der echten Schweiz mit swisstopo-Daten – im Neuaufbau."
     />
-    <meta name="theme-color" content="#1a2f5a" />
+    <meta name="theme-color" content="#0b111c" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Trapanotto Flight Simulator" />
     <meta
       property="og:description"
-      content="Fliege Cessna 172, Pilatus PC-12, Embraer Phenom 100, F-35, Airbus A320 oder Boeing 747 über eine echte, gestreamte 3D-Schweiz – direkt im Browser."
+      content="Flugsimulator im Browser über der echten Schweiz – im Neuaufbau."
     />
-    <meta
-      property="og:image"
-      content="https://trapanotto.github.io/flightsimulator/assets/ui/og.jpg"
-    />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
     <meta property="og:url" content="https://trapanotto.github.io/flightsimulator/" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <link rel="preload" as="image" href="/flightsimulator/assets/ui/hero.jpg" />
     <link rel="icon" href="/flightsimulator/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&family=Inter:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&family=Inter:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
   </head>
   <body>
-    <canvas id="world" hidden></canvas>
-    <canvas id="hangar" hidden></canvas>
+    <canvas id="scene"></canvas>
     <div id="ui"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

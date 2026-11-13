@@ -1,0 +1,101 @@
+// Screenshot comparison of fixed scenes: `npm run shots` compares against the stored images in
+// tests/shots/baseline, `npm run shots:update` stores new ones (after an intended change).
+// Differences are written to tests/shots/out. Runs a real browser with a GPU, so it is a local
+// tool, not part of CI (a CI machine renders in software and would never match).
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import pixelmatch from 'pixelmatch';
+import { chromium } from 'playwright-core';
+import { PNG } from 'pngjs';
+import { createServer } from 'vite';
+
+/** Every scene is drawn with a fixed time and camera (`?shot=1`). */
+const SCENES = [
+  { name: 'home-desktop', query: 'shot=1', width: 1280, height: 720 },
+  { name: 'home-mobile', query: 'shot=1&device=mobile', width: 390, height: 844 },
+];
+/** A scene fails when more than this share of its pixels differ. */
+const MAX_DIFF = 0.005;
+
+const update = process.argv.includes('--update');
+const only = process.argv.find((a) => a.startsWith('--only='))?.slice(7);
+const baselineDir = path.resolve('tests/shots/baseline');
+const outDir = path.resolve('tests/shots/out');
+mkdirSync(baselineDir, { recursive: true });
+mkdirSync(outDir, { recursive: true });
+
+const server = await createServer({ server: { port: 5199, strictPort: true }, logLevel: 'error' });
+await server.listen();
+const base = `http://localhost:5199${server.config.base}`;
+
+async function launch() {
+  const args = ['--enable-unsafe-webgpu', '--enable-gpu', '--ignore-gpu-blocklist'];
+  for (const channel of ['msedge', 'chrome']) {
+    try {
+      return await chromium.launch({ channel, headless: true, args });
+    } catch {
+      // Try the next installed browser.
+    }
+  }
+  throw new Error('No Edge or Chrome found for the screenshots.');
+}
+
+const browser = await launch();
+let failed = 0;
+try {
+  for (const scene of SCENES) {
+    if (only && scene.name !== only) continue;
+    const page = await browser.newPage({
+      viewport: { width: scene.width, height: scene.height },
+      deviceScaleFactor: 1,
+    });
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await page.goto(`${base}?${scene.query}`);
+    await page.waitForFunction(() => window.__app?.ready, null, { timeout: 60_000 });
+    await page.evaluate(() => document.fonts.ready);
+    await page.waitForTimeout(400);
+    const backend = await page.evaluate(() => window.__app.backend);
+    const shot = PNG.sync.read(await page.screenshot());
+    await page.close();
+    if (errors.length) {
+      console.log(`FAIL ${scene.name}: page error: ${errors[0]}`);
+      failed++;
+      continue;
+    }
+
+    const file = path.join(baselineDir, `${scene.name}.png`);
+    if (update || !existsSync(file)) {
+      writeFileSync(file, PNG.sync.write(shot));
+      console.log(`${update ? 'updated' : 'created'} ${scene.name} (${backend})`);
+      continue;
+    }
+    const want = PNG.sync.read(readFileSync(file));
+    if (want.width !== shot.width || want.height !== shot.height) {
+      console.log(
+        `FAIL ${scene.name}: size ${shot.width}x${shot.height}, stored ${want.width}x${want.height}`,
+      );
+      failed++;
+      continue;
+    }
+    const diff = new PNG({ width: shot.width, height: shot.height });
+    const pixels = pixelmatch(want.data, shot.data, diff.data, shot.width, shot.height, {
+      threshold: 0.1,
+    });
+    const share = pixels / (shot.width * shot.height);
+    if (share > MAX_DIFF) {
+      writeFileSync(path.join(outDir, `${scene.name}.png`), PNG.sync.write(shot));
+      writeFileSync(path.join(outDir, `${scene.name}.diff.png`), PNG.sync.write(diff));
+      console.log(
+        `FAIL ${scene.name}: ${(share * 100).toFixed(2)} % of pixels differ (${backend}), see tests/shots/out`,
+      );
+      failed++;
+    } else {
+      console.log(`ok   ${scene.name}: ${(share * 100).toFixed(2)} % differ (${backend})`);
+    }
+  }
+} finally {
+  await browser.close();
+  await server.close();
+}
+process.exit(failed ? 1 : 0);

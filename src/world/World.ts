@@ -1,802 +1,87 @@
+import { Group, Mesh, MeshStandardNodeMaterial, PlaneGeometry, type Camera } from 'three/webgpu';
 import {
-  Color,
-  DirectionalLight,
-  Frustum,
-  HemisphereLight,
-  PCFSoftShadowMap,
-  Matrix4,
-  PerspectiveCamera,
-  Scene,
-  Vector3,
-  WebGLRenderer,
-} from 'three';
-import { Sky } from 'three/examples/jsm/objects/Sky.js';
-import {
-  DEG,
-  type EnuFrame,
-  ecefDirToLocal,
-  ecefToGeodetic,
-  ecefToLocal,
-  enuFrame,
-  geodeticToEcef,
-  localToEcef,
-} from '../geo/ellipsoid';
-import { wgs84ToLv95 } from '../geo/lv95';
-import {
-  type Quality,
-  type QualityLevel,
-  type Settings,
-  loadSettings,
-  resolveQuality,
-  timeSpec,
-  weatherPreset,
-} from '../core/settings';
-import { BuildingLayer } from '../buildings/BuildingLayer';
-import { updateRunways } from './runwayMarkings';
-import { FogDome } from '../render/FogDome';
-import { Atmosphere } from '../render/Atmosphere';
-import { CloudLayer } from '../render/CloudLayer';
-import { PostFX } from '../render/PostFX';
-import { LiveWeather, type WeatherLook, windAtHeight } from './liveWeather';
-import { SunFlare } from '../render/SunFlare';
-import { resolveTime } from '../render/sun';
-import { DEFAULT_TERRAIN, TerrainEngine } from '../terrain/TerrainEngine';
-import { loadTerrainSource } from '../terrain/sources';
-import type { Quality as WorldQuality } from '../core/settings';
+  abs,
+  cameraPosition,
+  color,
+  float,
+  fract,
+  fwidth,
+  length,
+  min,
+  mix,
+  positionWorld,
+  smoothstep,
+} from 'three/tsl';
+import type { LocalFrame } from '@geo';
 
-/** Something that drives the camera and the floating origin: the flight game or the showcase. */
-export interface WorldDriver {
-  update(dt: number): void;
-  /** The point the floating origin follows. */
-  readonly anchor: Vector3;
-  /** While true, the camera (not the anchor) is the origin. */
-  readonly waitingForTerrain: boolean;
-  rebase(delta: Vector3): void;
-  applyQuality(q: WorldQuality): void;
-}
-import { type Basis, FreeCamera } from './FreeCamera';
-import { PLACES, type Place, TEST_ROUTE } from './places';
-
-/** Base frame: centre of Switzerland. Its axes stay fixed; only the origin moves (floating origin). */
-const BASE = { lon: 8.2275, lat: 46.8182 };
-/** Re-centre the render origin when the camera is this far from it. */
-const REBASE_DISTANCE = 5000;
-
-export interface WorldStats {
-  fps: number;
-  frameMs: number;
-  worstFrameMs: number;
-  /** Pixel ratio we render at (full device resolution, capped at 2). */
-  pixelRatio: number;
-  /** CPU ms per frame: our update / three.js render call. */
-  tickMs: number;
-  renderMs: number;
-  calls: number;
-  triangles: number;
-  textures: number;
-  geometries: number;
-  tilesRendered: number;
-  tilesReady: number;
-  tilesLoading: number;
-  tilesFailed: number;
-  maxZoom: number;
-  /** Share of drawn tiles already at their wanted detail (1 = nothing pending). */
-  coverage: number;
-  uploads: number;
-  requestsInFlight: number;
-  queued: number;
-  altitude: number;
-  agl: number | undefined;
-  speedKmh: number;
-  lv95: [number, number];
-  originKm: number;
-  reversedDepth: boolean;
-  quality: QualityLevel;
-  sunElevation: number;
-  route?: RouteStats;
+/** How much of the world is drawn; set from the device class and the graphics setting. */
+export interface WorldQuality {
+  /** Metres to the far edge of what is drawn. */
+  viewDistance: number;
 }
 
-export interface RouteStats {
-  leg: number;
-  legs: number;
-  distanceKm: number;
-  seconds: number;
-  frames: number;
-  /** Frames where some drawn tile was still waiting for more detail. */
-  pendingFrames: number;
-  minCoverage: number;
-  worstFrameMs: number;
-  done: boolean;
-}
-
-function supportsClipControl(): boolean {
-  // ?depth=log forces the logarithmic depth buffer (debugging).
-  if (location.search.includes('depth=log')) return false;
-  const gl = document.createElement('canvas').getContext('webgl2');
-  const ok = !!gl?.getExtension('EXT_clip_control');
-  gl?.getExtension('WEBGL_lose_context')?.loseContext();
-  return ok;
-}
-
-const TIME_SCALE = Math.min(
-  5,
-  Math.max(1, Number(new URLSearchParams(location.search).get('timescale')) || 1),
-);
+/**
+ * The ground and everything standing on it: terrain, trees, buildings, water, airports.
+ *
+ * Phase 0 placeholder: a flat reference plane with a 100 m / 1 km grid at the frame's origin
+ * height. Phase 1 replaces the inside with the streamed terrain; this interface stays.
+ */
 export class World {
-  readonly renderer: WebGLRenderer;
-  readonly scene = new Scene();
-  readonly camera: PerspectiveCamera;
-  readonly fly: FreeCamera;
-  readonly sky = new Sky();
-  readonly atmosphere: Atmosphere;
-  readonly clouds: CloudLayer;
-  private readonly fogDome: FogDome;
-  readonly sun: DirectionalLight;
-  readonly hemi: HemisphereLight;
-  readonly post: PostFX;
-  readonly flare: SunFlare;
-  settings: Settings;
-  quality: Quality;
-  qualityLevel: QualityLevel;
-  private flareOcclusion = 0;
-  private frameCount = 0;
-  readonly frame: EnuFrame = enuFrame(BASE.lon, BASE.lat, 0);
-  terrain?: TerrainEngine;
-  buildings?: BuildingLayer;
-  private running = false;
-  private active = false;
-  private raf = 0;
-  private lastTime = 0;
-  private fpsAcc = 0;
-  private fpsFrames = 0;
-  private fps = 0;
-  private frameMs = 0;
-  private worstMs = 0;
-  private worstAcc = 0;
-  private basePixelRatio = 1;
-  private tickMs = 0;
-  private renderMs = 0;
-  private readonly reversedDepth: boolean;
-  private readonly frustum = new Frustum();
-  private readonly projView = new Matrix4();
-  private readonly basis: Basis = { up: new Vector3(), north: new Vector3(), east: new Vector3() };
-  private readonly forward = new Vector3();
-  /** Render origin relative to the base frame origin: render = base - shift. */
-  private readonly shift = new Vector3();
-  private geo: [number, number, number] = [0, 0, 0];
-  private ground: number | undefined;
-  private route?: { leg: number; stats: RouteStats; speed: number };
-  /** When set, the world is in flight mode: the game moves the camera and anchors the origin. */
-  game?: WorldDriver;
+  /** Add to the scene. */
+  readonly object = new Group();
+  private readonly ground: Mesh;
 
-  constructor(readonly canvas: HTMLCanvasElement) {
-    this.reversedDepth = supportsClipControl();
-    this.renderer = new WebGLRenderer({
-      canvas,
-      // MSAA is expensive on integrated GPUs; post-process AA follows in phase 5.
-      antialias: false,
-      powerPreference: 'high-performance',
-      // Reversed-Z keeps depth precise from 3 m to 600 km. Without it, fall back to a log buffer.
-      reversedDepthBuffer: this.reversedDepth,
-      logarithmicDepthBuffer: !this.reversedDepth,
-    });
-    this.settings = loadSettings();
-    const { level, quality } = resolveQuality(this.settings);
-    this.qualityLevel = level;
-    this.quality = quality;
-    this.basePixelRatio = Math.min(window.devicePixelRatio, quality.maxPixelRatio);
-    this.renderer.setPixelRatio(this.basePixelRatio);
-    this.renderer.shadowMap.type = PCFSoftShadowMap;
-
-    this.camera = new PerspectiveCamera(60, 1, 3, 600_000);
-    this.fly = new FreeCamera(this.camera, canvas);
-
-    this.atmosphere = new Atmosphere(resolveTime(timeSpec(this.settings)), BASE.lat, BASE.lon);
-
-    // Sky dome: drawn first (renderOrder) and without depth writes, so terrain always covers it.
-    this.sky.scale.setScalar(450_000);
-    this.sky.renderOrder = -1;
-    // The built-in sky clouds cost ~6 ms per frame on Intel UHD; we draw our own cloud deck.
-    this.sky.material.uniforms.cloudCoverage!.value = 0;
-    this.scene.add(this.sky);
-
-    // Lights are tuned for PBR materials (aircraft). The orthophotos are dark and already contain
-    // shadows, so the terrain material brightens itself instead (TERRAIN_GAIN).
-    this.sun = new DirectionalLight(0xfff1dc, 1.1);
-    this.sun.shadow.camera.left = this.sun.shadow.camera.bottom = -14;
-    this.sun.shadow.camera.right = this.sun.shadow.camera.top = 14;
-    this.sun.shadow.camera.near = 1;
-    this.sun.shadow.camera.far = 800;
-    this.sun.shadow.bias = -0.0004;
-    this.sun.shadow.normalBias = 0.04;
-    this.scene.add(this.sun, this.sun.target);
-    this.hemi = new HemisphereLight(0xdfe9ff, 0x8a7a66, 1.3);
-    this.scene.add(this.hemi);
-    this.scene.background = new Color(0x9fb3c8);
-
-    this.clouds = new CloudLayer(this.atmosphere.uniforms, quality.cloudLayers);
-    this.scene.add(this.clouds.group);
-    this.fogDome = new FogDome(this.atmosphere.uniforms);
-    this.scene.add(this.fogDome.mesh);
-    this.post = new PostFX(this.renderer, this.scene, this.camera, this.atmosphere.uniforms);
-    this.flare = new SunFlare(document.body);
-    this.applySettings(this.settings);
-
-    window.addEventListener('resize', this.resize);
-    document.addEventListener('visibilitychange', this.onVisibility);
-    this.resize();
-    this.goTo(PLACES[3]!);
-  }
-
-  async init() {
-    const source = await loadTerrainSource();
-    const anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
-    // Tuning knobs for testing, e.g. ?tau=8&uploads=2&tiles=300
-    const q = new URLSearchParams(location.search);
-    const num = (k: string, d: number) => (q.has(k) ? Number(q.get(k)) : d);
-    const q2 = this.quality;
-    this.terrain = new TerrainEngine(
-      source,
-      this.frame,
-      anisotropy,
-      this.atmosphere.uniforms,
-      { detail: q2.terrainDetail, cloudShadows: q2.cloudShadows, water: q2.water },
-      {
-        ...DEFAULT_TERRAIN,
-        tau: num('tau', q2.tau),
-        maxZoom: q2.maxZoom,
-        uploadsPerFrame: num('uploads', DEFAULT_TERRAIN.uploadsPerFrame),
-        maxTiles: num('tiles', q2.maxTiles),
-      },
-    );
-    this.terrain.setReceiveShadow(q2.shadowMap > 0);
-    this.buildings = new BuildingLayer(this, this.atmosphere.uniforms);
-    this.buildings.radius = q2.buildingRadius;
-    this.scene.add(this.buildings.group);
-    this.applyStartup();
-    this.terrain.rebase(this.shift);
-    this.scene.add(this.terrain.group);
-  }
-
-  private startup = false;
-
-  /**
-   * Behind the start screen's loading screen: coarser terrain (fewer, smaller tiles), no
-   * water mask and no houses. Switched off when the menu shows; the detail then streams in.
-   */
-  setStartup(on: boolean) {
-    if (this.startup === on) return;
-    this.startup = on;
-    if (on) this.applyStartup();
-    else {
-      this.terrain?.applyQuality(this.quality);
-      if (this.buildings) this.buildings.radius = this.quality.buildingRadius;
-    }
-  }
-
-  private applyStartup() {
-    if (!this.startup) return;
-    const q = this.quality;
-    this.terrain?.applyQuality({
-      ...q,
-      tau: q.tau * 2.2,
-      maxZoom: Math.min(q.maxZoom, 15),
-      water: false,
-    });
-    if (this.buildings) this.buildings.radius = 0;
-  }
-
-  /** Shows the world: renders until stop(). Pauses by itself while the tab is hidden. */
-  start() {
-    this.active = true;
-    this.flare.el.hidden = false;
-    // The canvas may have been hidden (zero size) when the world was built.
-    this.resize();
-    this.run();
-  }
-
-  stop() {
-    this.active = false;
-    this.flare.el.hidden = true;
-    this.halt();
-  }
-
-  /** Real weather at the camera (setting `live`). */
-  private readonly liveWeather = new LiveWeather();
-  private weatherCheck = 0;
-
-  /** The weather in effect: live data, or the preset (also while live data is loading). */
-  currentWeather(): WeatherLook {
-    const s = this.settings;
-    if (s.weather === 'live' && this.liveWeather.look) return this.liveWeather.look;
-    return weatherPreset(s.weather);
-  }
-
-  /**
-   * Wind at a point (render space, m/s, the direction the air moves): surface wind of the
-   * weather, stronger with the height above ground.
-   */
-  windAt(p: Vector3, out: Vector3): Vector3 {
-    const w = this.currentWeather();
-    const agl = this.heightAboveGround(p) ?? 500;
-    const speed = windAtHeight(w.windSpeed, agl);
-    const b = this.basisAt(p);
-    const to = ((w.windFrom + 180) * Math.PI) / 180;
-    return out
-      .copy(b.north)
-      .multiplyScalar(Math.cos(to) * speed)
-      .addScaledVector(b.east, Math.sin(to) * speed);
-  }
-
-  /** Sky, haze, cloud layer and fog from a weather look. */
-  private applyWeather(w: WeatherLook) {
-    const fu = this.atmosphere.uniforms;
-    fu.uCloudCoverage.value = w.coverage;
-    fu.uMie.value = w.mie;
-    this.atmosphere.update();
-    this.atmosphere.apply(this.sun, this.hemi, this.sky);
-    fu.uCloudBase.value = w.base;
-    fu.uCloudTop.value = w.top;
-    // Flat layers and the cloud shadows sit in the lower third of the cumulus layer.
-    fu.uCloudAltitude.value = w.base + 0.3 * (w.top - w.base);
-    const fog = w.fog;
-    fu.uFogDensity.value = fog ? fog.density : 0;
-    if (fog) {
-      // ?fogtop=1300 moves the top of the fog (testing, sharing a look).
-      const top = Number(new URLSearchParams(location.search).get('fogtop'));
-      fu.uFogTop.value = top > 0 ? top : fog.top;
-      fu.uFogBase.value = Math.min(fog.base, fu.uFogTop.value - 150);
-    }
-  }
-
-  /** Applies settings: quality preset, time of day, weather. Safe to call at any time. */
-  applySettings(s: Settings) {
-    this.settings = s;
-    const { level, quality } = resolveQuality(s);
-    this.qualityLevel = level;
-    this.quality = quality;
-    this.basePixelRatio = Math.min(window.devicePixelRatio, quality.maxPixelRatio);
-    this.renderer.setPixelRatio(this.basePixelRatio);
-    this.renderer.shadowMap.enabled = quality.shadowMap > 0;
-    if (quality.shadowMap > 0) {
-      this.sun.shadow.mapSize.set(quality.shadowMap, quality.shadowMap);
-      this.sun.shadow.map?.dispose();
-      this.sun.shadow.map = null;
-    }
-    this.sun.castShadow = quality.shadowMap > 0;
-    this.atmosphere.setDate(resolveTime(timeSpec(s)));
-    this.atmosphere.apply(this.sun, this.hemi, this.sky);
-    this.renderer.toneMappingExposure = this.atmosphere.exposure;
-    this.liveWeather.onChange = (w) => {
-      if (this.settings.weather === 'live') this.applyWeather(w);
-    };
-    this.applyWeather(this.currentWeather());
-    this.post.configure(quality);
-    // Volumetric clouds replace the flat layers (they need the post-processing chain).
-    this.clouds.setLayers(this.post.volumetric ? 0 : quality.cloudLayers);
-    this.flare.enabled = quality.flare;
-    this.terrain?.applyQuality(quality);
-    if (this.buildings) {
-      this.buildings.radius = quality.buildingRadius;
-    }
-    this.applyStartup();
-    this.game?.applyQuality(quality);
-    this.resize();
-  }
-
-  goTo(p: Place) {
-    this.route = undefined;
-    this.fly.autoForward = false;
-    this.camera.position.copy(this.fromGeo(p.lon, p.lat, p.h));
-    this.fly.yaw = p.heading * DEG;
-    this.fly.pitch = (p.pitch ?? -8) * DEG;
-    this.rebaseIfNeeded(true);
-    this.updateBasis();
-    this.fly.aim(this.basis);
-  }
-
-  /** Autopilot along TEST_ROUTE at `kmh` (default 500 km/h) to check streaming. */
-  startRoute(kmh = 500) {
-    const a = TEST_ROUTE[0]!;
-    this.goTo({ name: 'route', lon: a.lon, lat: a.lat, h: a.h, heading: 45 });
-    this.route = {
-      leg: 1,
-      speed: kmh / 3.6,
-      stats: {
-        leg: 1,
-        legs: TEST_ROUTE.length - 1,
-        distanceKm: 0,
-        seconds: 0,
-        frames: 0,
-        pendingFrames: 0,
-        minCoverage: 1,
-        worstFrameMs: 0,
-        done: false,
-      },
-    };
-  }
-
-  stopRoute() {
-    this.route = undefined;
-  }
-
-  get routeActive() {
-    return !!this.route && !this.route.stats.done;
-  }
-
-  stats(): WorldStats {
-    const info = this.renderer.info;
-    const t = this.terrain;
-    const ts = t?.tree.stats;
-    const rendered = ts?.rendered ?? 0;
-    return {
-      fps: this.fps,
-      frameMs: this.frameMs,
-      worstFrameMs: this.worstMs,
-      pixelRatio: this.basePixelRatio,
-      tickMs: this.tickMs,
-      renderMs: this.renderMs,
-      calls: info.render.calls,
-      triangles: info.render.triangles,
-      textures: info.memory.textures,
-      geometries: info.memory.geometries,
-      tilesRendered: rendered,
-      tilesReady: ts?.ready ?? 0,
-      tilesLoading: ts?.loading ?? 0,
-      tilesFailed: t?.failed ?? 0,
-      maxZoom: ts?.maxZoomRendered ?? 0,
-      coverage: rendered ? 1 - (ts?.pending ?? 0) / rendered : 0,
-      uploads: t?.pendingUploads ?? 0,
-      requestsInFlight: t?.inFlight ?? 0,
-      queued: t?.queued ?? 0,
-      altitude: this.geo[2],
-      agl: this.ground === undefined ? undefined : this.geo[2] - this.ground,
-      speedKmh: (this.route ? this.route.speed : this.fly.velocity.length()) * 3.6,
-      lv95: wgs84ToLv95(this.geo[0], this.geo[1]),
-      originKm: this.shift.length() / 1000,
-      reversedDepth: this.reversedDepth,
-      quality: this.qualityLevel,
-      sunElevation: this.atmosphere.sunElevation,
-      route: this.route?.stats,
-    };
-  }
-
-  // ---- loop ----
-
-  private run() {
-    if (this.running) return;
-    this.running = true;
-    this.lastTime = performance.now();
-    const loop = (now: number) => {
-      if (!this.running) return;
-      this.raf = requestAnimationFrame(loop);
-      const dtMs = now - this.lastTime;
-      this.lastTime = now;
-      const dt = Math.min(dtMs, 100) / 1000;
-      this.measure(dtMs);
-      const t0 = performance.now();
-      this.tick(dt, dtMs);
-      const t1 = performance.now();
-      this.post.render(dt);
-      const t2 = performance.now();
-      // Smoothed CPU cost of our update and of three.js render submission.
-      this.tickMs += (t1 - t0 - this.tickMs) * 0.05;
-      this.renderMs += (t2 - t1 - this.renderMs) * 0.05;
-    };
-    this.raf = requestAnimationFrame(loop);
-  }
-
-  /**
-   * Video capture (tools/capture-showcase.mjs): one frame with a fixed time step while the
-   * loop is stopped, so the recording is smooth however slow each frame is to grab.
-   */
-  captureFrame(dt: number) {
-    this.running = false;
-    cancelAnimationFrame(this.raf);
-    this.tick(dt, dt * 1000);
-    this.post.render(dt);
-  }
-
-  private tick(dt: number, dtMs: number) {
-    this.updateBasis();
-    // ?timescale=3 runs the flight faster (automated test flights only).
-    if (this.game) this.game.update(dt * TIME_SCALE);
-    else if (this.route) this.flyRoute(dt, dtMs);
-    else this.fly.update(dt, this.basis, this.geo[2], this.ground);
-    this.rebaseIfNeeded();
-    updateRunways(this, this.geo[0], this.geo[1]);
-    // Real weather: check every few seconds whether it needs fetching here.
-    if (this.settings.weather === 'live' && (this.weatherCheck -= dt) <= 0) {
-      this.weatherCheck = 5;
-      this.liveWeather.update(this.geo[0], this.geo[1]);
-    }
-    this.sky.position.copy(this.camera.position);
-    this.updateEnvironment(dt);
-    this.buildings?.update(performance.now());
-
-    this.camera.updateMatrixWorld();
-    this.projView.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
-    this.frustum.setFromProjectionMatrix(this.projView);
-    this.camera.getWorldDirection(this.forward);
-    this.terrain?.update(
-      this.camera.position,
-      this.forward,
-      this.frustum,
-      this.canvas.clientHeight * this.basePixelRatio,
-      this.camera.fov * DEG,
-    );
-  }
-
-  private flyRoute(dt: number, dtMs: number) {
-    const r = this.route!;
-    const s = r.stats;
-    if (s.done) return;
-    const wp = TEST_ROUTE[r.leg]!;
-    const toTarget = this.fromGeo(wp.lon, wp.lat, wp.h).sub(this.camera.position);
-    const up = this.basis.up;
-    const horizontal = toTarget.addScaledVector(up, -toTarget.dot(up));
-    const dist = horizontal.length();
-
-    if (dist < 1500) {
-      r.leg++;
-      s.leg = Math.min(r.leg, s.legs);
-      if (r.leg >= TEST_ROUTE.length) s.done = true;
-      return;
-    }
-    // Head for the waypoint and look slightly down at the terrain.
-    const dir = horizontal.normalize();
-    this.fly.yaw = Math.atan2(dir.dot(this.basis.east), dir.dot(this.basis.north));
-    this.fly.pitch = -10 * DEG;
-    const step = r.speed * dt;
-    this.camera.position.addScaledVector(dir, step);
-    // Climb/descend towards the waypoint height, but stay 300 m above ground.
-    const want = Math.max(wp.h, (this.ground ?? 0) + 300);
-    this.camera.position.addScaledVector(up, Math.max(-15, Math.min(25, want - this.geo[2])) * dt);
-    this.fly.aim(this.basis);
-
-    s.distanceKm += step / 1000;
-    s.seconds += dt;
-    s.frames++;
-    const ts = this.terrain?.tree.stats;
-    // Ignore the first seconds while the start area loads.
-    if (ts && ts.rendered && s.seconds > 10) {
-      if (ts.pending > 0) s.pendingFrames++;
-      s.minCoverage = Math.min(s.minCoverage, 1 - ts.pending / ts.rendered);
-      s.worstFrameMs = Math.max(s.worstFrameMs, dtMs);
-    }
-  }
-
-  /** Clouds, shadow camera, sun glare: everything that follows the camera or the aircraft. */
-  private updateEnvironment(dt: number) {
-    const camGeo = this.toGeo(this.camera.position);
-    const camUp = this.upAt(this.camera.position, new Vector3());
-    this.atmosphere.tick(dt, this.shift, camGeo[2], camUp);
-    this.atmosphere.dimLights(this.sun, this.hemi, camGeo[2]);
-    this.fogDome.update(this.camera.position);
-    const u = this.atmosphere.uniforms;
-    const sunDir = u.uSunDir.value;
-
-    const cloudBase = this.fromGeo(camGeo[0], camGeo[1], u.uCloudAltitude.value);
-    this.clouds.update(cloudBase, this.upAt(this.camera.position, new Vector3()), camGeo[2]);
-
-    // The shadow map only covers the aircraft and its surroundings.
-    if (this.sun.castShadow) {
-      const anchor =
-        this.game && !this.game.waitingForTerrain ? this.game.anchor : this.camera.position;
-      this.sun.target.position.copy(anchor);
-      this.sun.position.copy(anchor).addScaledVector(sunDir, 300);
-      this.sun.target.updateMatrixWorld();
-    } else {
-      this.sun.position.copy(sunDir).multiplyScalar(10_000);
-      this.sun.target.position.set(0, 0, 0);
-    }
-
-    // Sun glare: hidden behind mountains or clouds (checked every few frames).
-    if (this.flare.enabled && this.frameCount++ % 6 === 0)
-      this.flareOcclusion = this.sunOcclusion(camGeo[2]);
-    this.flare.update(dt, this.camera, sunDir, this.flareOcclusion);
-  }
-
-  private sunOcclusion(cameraElevation: number): number {
-    const sunDir = this.atmosphere.uniforms.uSunDir.value;
-    if (this.atmosphere.sunElevation < -1) return 1;
-    const p = new Vector3();
-    for (const d of [150, 400, 900, 1800, 3500, 6000, 10_000, 16_000, 25_000, 40_000]) {
-      p.copy(this.camera.position).addScaledVector(sunDir, d);
-      const h = this.heightAboveGround(p);
-      if (h !== undefined && h < 0) return 1;
-    }
-    const u = this.atmosphere.uniforms;
-    // Inside or below the fog the sun is only a bright patch, no glare.
-    if (this.atmosphere.underFog(cameraElevation) > 0.5) return 1;
-    if (u.uCloudCoverage.value <= 0) return 0;
-    // Clouds between the camera and the sun: sample the coverage where the sun ray crosses the
-    // layer (several heights for the volumetric clouds, the flat layer otherwise).
-    if (this.post.volumetric) {
-      // Exact: what the ray-marched clouds let through at the sun's position on screen.
-      const sp = p.copy(this.camera.position).addScaledVector(sunDir, 1000).project(this.camera);
-      if (sp.z < 1) return 1 - this.post.cloudTransmittanceAt(sp.x * 0.5 + 0.5, sp.y * 0.5 + 0.5);
-    }
-    const heights = this.post.volumetric
-      ? [0.15, 0.4, 0.65].map(
-          (f) => u.uCloudBase.value + f * (u.uCloudTop.value - u.uCloudBase.value),
-        )
-      : [u.uCloudAltitude.value];
-    const s = this.shift;
-    let occ = 0;
-    for (const h of heights) {
-      const toCloud = (h - cameraElevation) / Math.max(sunDir.y, 0.05);
-      if (toCloud <= 0) continue;
-      p.copy(this.camera.position).addScaledVector(sunDir, toCloud);
-      occ = Math.max(occ, this.atmosphere.cloudDensityAt(p.x + s.x, p.z + s.z) * 1.2);
-    }
-    return Math.min(1, occ);
-  }
-
-  private measure(dtMs: number) {
-    this.fpsAcc += dtMs;
-    this.fpsFrames++;
-    this.worstAcc = Math.max(this.worstAcc, dtMs);
-    if (this.fpsAcc >= 500) {
-      this.fps = (this.fpsFrames * 1000) / this.fpsAcc;
-      this.frameMs = this.fpsAcc / this.fpsFrames;
-      this.worstMs = this.worstAcc;
-      this.fpsAcc = 0;
-      this.fpsFrames = 0;
-      this.worstAcc = 0;
-    }
-  }
-
-  private halt() {
-    this.running = false;
-    cancelAnimationFrame(this.raf);
-  }
-
-  // ---- coordinates ----
-
-  /** Geodetic -> render coordinates. */
-  fromGeo(lon: number, lat: number, h: number): Vector3 {
-    return new Vector3(...ecefToLocal(this.frame, ...geodeticToEcef(lon, lat, h))).sub(this.shift);
-  }
-
-  /** Render coordinates -> [lon, lat, h]. */
-  toGeo(p: Vector3): [number, number, number] {
-    const s = this.shift;
-    return ecefToGeodetic(...localToEcef(this.frame, p.x + s.x, p.y + s.y, p.z + s.z));
-  }
-
-  private updateBasis() {
-    this.geo = this.toGeo(this.camera.position);
-    const lon = this.geo[0] * DEG;
-    const lat = this.geo[1] * DEG;
-    const sl = Math.sin(lon);
-    const cl = Math.cos(lon);
-    const sp = Math.sin(lat);
-    const cp = Math.cos(lat);
-    this.basis.up.set(...ecefDirToLocal(this.frame, cp * cl, cp * sl, sp));
-    this.basis.north.set(...ecefDirToLocal(this.frame, -sp * cl, -sp * sl, cp));
-    this.basis.east.set(...ecefDirToLocal(this.frame, -sl, cl, 0));
-    this.ground = this.terrain?.tree.heightAt(this.geo[0], this.geo[1]);
-  }
-
-  /**
-   * Floating origin: move everything so the anchor (camera, or the aircraft in flight mode)
-   * sits at (0,0,0) again.
-   */
-  private rebaseIfNeeded(force = false) {
-    const anchor =
-      this.game && !this.game.waitingForTerrain ? this.game.anchor : this.camera.position;
-    if (!force && anchor.length() < REBASE_DISTANCE) return;
-    const delta = anchor.clone();
-    this.shift.add(delta);
-    this.terrain?.rebase(delta);
-    this.buildings?.rebase(delta);
-    this.post.resetHistory();
-    this.camera.position.sub(delta);
-    this.game?.rebase(delta);
-  }
-
-  // ---- queries for the flight game (render coordinates) ----
-
-  /** Render origin relative to the base frame (render = base - shift). */
-  get originShift(): Vector3 {
-    return this.shift;
-  }
-
-  /** Local vertical at a point. */
-  upAt(p: Vector3, out: Vector3): Vector3 {
-    const [lon, lat] = this.toGeo(p);
-    const l = lon * DEG;
-    const b = lat * DEG;
-    return out.set(
-      ...ecefDirToLocal(
-        this.frame,
-        Math.cos(b) * Math.cos(l),
-        Math.cos(b) * Math.sin(l),
-        Math.sin(b),
-      ),
-    );
-  }
-
-  /** Local up/north/east at a point. */
-  basisAt(p: Vector3): Basis {
-    const [lon, lat] = this.toGeo(p);
-    const sl = Math.sin(lon * DEG);
-    const cl = Math.cos(lon * DEG);
-    const sp = Math.sin(lat * DEG);
-    const cp = Math.cos(lat * DEG);
-    return {
-      up: new Vector3(...ecefDirToLocal(this.frame, cp * cl, cp * sl, sp)),
-      north: new Vector3(...ecefDirToLocal(this.frame, -sp * cl, -sp * sl, cp)),
-      east: new Vector3(...ecefDirToLocal(this.frame, -sl, cl, 0)),
-    };
-  }
-
-  /** Terrain height (m) at lon/lat from the loaded tiles. */
-  groundAt(lon: number, lat: number): number | undefined {
-    return this.terrain?.tree.heightAt(lon, lat);
-  }
-
-  /** Zoom level of the most detailed loaded tile at lon/lat (0 if none). */
-  terrainDetailAt(lon: number, lat: number): number {
-    return this.terrain?.tree.detailAt(lon, lat) ?? 0;
-  }
-
-  heightAboveGround(p: Vector3): number | undefined {
-    const [lon, lat, h] = this.toGeo(p);
-    const g = this.groundAt(lon, lat);
-    return g === undefined ? undefined : h - g;
-  }
-
-  /** Moves the camera (and with it the streaming focus) to a place. */
-  /**
-   * Puts the camera at a place (terrain streams in around it). With `view`: behind a point
-   * (`back` metres against the heading, `up` above) looking along the heading, like the chase
-   * camera will once the aircraft is there; otherwise looking north and a little down.
-   */
-  moveCameraTo(
-    lon: number,
-    lat: number,
-    h: number,
-    view?: { heading: number; back: number; up: number },
+  constructor(
+    private frame: LocalFrame,
+    quality: WorldQuality,
   ) {
-    const target = this.fromGeo(lon, lat, h);
-    let b = this.basisAt(target);
-    const fwd = view
-      ? b.north
-          .clone()
-          .multiplyScalar(Math.cos((view.heading * Math.PI) / 180))
-          .addScaledVector(b.east, Math.sin((view.heading * Math.PI) / 180))
-      : b.north.clone();
-    this.camera.position.copy(target);
-    if (view) this.camera.position.addScaledVector(fwd, -view.back).addScaledVector(b.up, view.up);
-    const offset = this.camera.position.clone().sub(target);
-    this.rebaseIfNeeded(true);
-    // The origin may have moved: recompute the target in the new frame.
-    const t2 = this.fromGeo(lon, lat, h);
-    this.camera.position.copy(t2).add(offset);
-    b = this.basisAt(t2);
-    this.camera.up.copy(b.up);
-    if (view) {
-      this.camera.lookAt(
-        t2.addScaledVector(fwd, Math.max(view.back, 10)).addScaledVector(b.up, view.up * 0.38),
-      );
-    } else {
-      this.camera.lookAt(this.camera.position.clone().add(b.north).addScaledVector(b.up, -0.3));
-    }
+    const p = positionWorld.xz;
+    // Antialiased grid lines: distance to the nearest line in pixels.
+    const grid = (cell: number) => {
+      const c = p.div(cell);
+      const d = abs(fract(c.sub(0.5)).sub(0.5)).div(fwidth(c));
+      return float(1).sub(min(min(d.x, d.y), 1));
+    };
+    // The grids fade out with distance, where the lines would only shimmer.
+    const dist = length(positionWorld.sub(cameraPosition));
+    const fine = grid(100).mul(float(1).sub(smoothstep(1500, 6000, dist)));
+    const coarse = grid(1000).mul(float(1).sub(smoothstep(20_000, 60_000, dist)));
+    const material = new MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0 });
+    material.colorNode = mix(
+      mix(color(0x4f6b3c), color(0xa9c48c), fine.mul(0.85)),
+      color(0xdfe7d2),
+      coarse.mul(0.8),
+    );
+    const size = quality.viewDistance * 2;
+    this.ground = new Mesh(new PlaneGeometry(size, size, 1, 1), material);
+    this.ground.rotation.x = -Math.PI / 2;
+    this.ground.receiveShadow = true;
+    this.object.name = 'World';
+    this.object.add(this.ground);
   }
 
-  private readonly resize = () => {
-    const w = this.canvas.clientWidth;
-    const h = this.canvas.clientHeight;
-    this.renderer.setSize(w, h, false);
-    this.post?.setSize(w, h);
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
-  };
+  /** The render frame moved (floating origin). */
+  setFrame(frame: LocalFrame) {
+    this.frame = frame;
+  }
 
-  private readonly onVisibility = () => {
-    if (document.hidden) this.halt();
-    else if (this.active) this.run();
-  };
+  /** Per frame: load and place what the camera sees. */
+  update(camera: Camera) {
+    // The plane follows the camera in whole kilometres, so the grid stays put.
+    this.ground.position.x = Math.round(camera.position.x / 1000) * 1000;
+    this.ground.position.z = Math.round(camera.position.z / 1000) * 1000;
+  }
+
+  /**
+   * Height of the ground above the ellipsoid at lon/lat in metres, or undefined while that
+   * place is not loaded.
+   */
+  groundHeight(_lon: number, _lat: number): number | undefined {
+    return this.frame.origin.h;
+  }
+
+  /** True while tiles for the current view are still loading. */
+  get loading(): boolean {
+    return false;
+  }
 }

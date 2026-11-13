@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.0-alpha.0 – Neuaufbau, Phase 0: Fundament (2026-11-13)
+
+Der Simulator wird von Grund auf neu gebaut ([Konzept](docs/KONZEPT.md)). Der bisherige Code
+ist entfernt und bleibt als Tag `v0.11.0` abrufbar.
+
+- Neuer Aufbau in acht Paketen mit festen Schnittstellen; die Grenzen prüft der Linter.
+- Darstellung auf WebGPU (three.js), mit Rückfall auf WebGL 2.
+- Simulation mit festem Zeitschritt von 120 Hz, getrennt von der Bildrate.
+- Koordinaten: WGS84, ECEF, lokales Bezugssystem, LV95.
+- Geräteklassen Desktop und Mobil mit eigenem Budget; Bedienung mit Maus und Finger.
+- Oberfläche mit Preact, Deutsch und Englisch.
+- Bildvergleich fester Szenen im echten Browser (`npm run shots`).
+
+Zu sehen ist eine Platzhalter-Szene: Himmel mit Sonnenstand, Bezugsraster, Bezugsmodell.
+
 ## v0.11.0 – Live-Wetter, Flugphysik, Triebwerksklang (2026-11-03)
 
 ### Neu

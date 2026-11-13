@@ -1,95 +1,105 @@
 import { describe, expect, it } from 'vitest';
 import {
+  LocalFrame,
+  WGS84_A,
+  WGS84_B,
   ecefToGeodetic,
-  ecefToLocal,
-  enuFrame,
   geodeticToEcef,
-  localToEcef,
-} from '../src/geo/ellipsoid';
-import { lv95ToWgs84, wgs84ToLv95 } from '../src/geo/lv95';
-import {
-  geoTileAt,
-  geoTileBounds,
-  mercatorPx,
-  mercatorPy,
-  mercatorTileRange,
-} from '../src/geo/tiles';
+  lv95ToWgs84,
+  upAt,
+  wgs84ToLv95,
+} from '../src/geo';
 
-const dms = (d: number, m: number, s: number) => d + m / 60 + s / 3600;
+const v = () => ({ x: 0, y: 0, z: 0 });
+
+describe('WGS84', () => {
+  it('places the equator and the pole on the ellipsoid', () => {
+    expect(geodeticToEcef(0, 0, 0, v())).toEqual({ x: WGS84_A, y: 0, z: 0 });
+    const pole = geodeticToEcef(0, 90, 0, v());
+    expect(pole.z).toBeCloseTo(WGS84_B, 6);
+    expect(Math.hypot(pole.x, pole.y)).toBeLessThan(1e-6);
+  });
+
+  it('round-trips points over Switzerland to well below a millimetre', () => {
+    for (const [lon, lat, h] of [
+      [7.4972, 46.9122, 510],
+      [8.5492, 47.4582, 432],
+      [7.6586, 45.9763, 4478],
+      [10.4, 46.6, 12_000],
+      [5.96, 45.82, -50],
+    ] as const) {
+      const g = ecefToGeodetic(geodeticToEcef(lon, lat, h, v()));
+      expect(g.lon).toBeCloseTo(lon, 10);
+      expect(g.lat).toBeCloseTo(lat, 10);
+      expect(g.h).toBeCloseTo(h, 5);
+    }
+  });
+});
+
+describe('LocalFrame', () => {
+  const frame = new LocalFrame(7.4972, 46.9122, 510);
+
+  it('has its origin at zero and y pointing up', () => {
+    const o = frame.fromGeodetic(7.4972, 46.9122, 510, v());
+    expect(Math.hypot(o.x, o.y, o.z)).toBeLessThan(1e-6);
+    const above = frame.fromGeodetic(7.4972, 46.9122, 610, v());
+    expect(above.y).toBeCloseTo(100, 6);
+    expect(Math.hypot(above.x, above.z)).toBeLessThan(1e-6);
+  });
+
+  it('has x east and z south', () => {
+    const east = frame.fromGeodetic(7.5072, 46.9122, 510, v());
+    expect(east.x).toBeGreaterThan(700);
+    expect(Math.abs(east.z)).toBeLessThan(1);
+    const north = frame.fromGeodetic(7.4972, 46.9222, 510, v());
+    expect(north.z).toBeLessThan(-1100);
+    expect(Math.abs(north.x)).toBeLessThan(1);
+  });
+
+  it('round-trips through ECEF and geodetic coordinates', () => {
+    const p = { x: 12_345.6, y: 789.1, z: -23_456.7 };
+    const back = frame.toLocal(frame.toEcef(p, v()), v());
+    expect(back.x).toBeCloseTo(p.x, 6);
+    expect(back.y).toBeCloseTo(p.y, 6);
+    expect(back.z).toBeCloseTo(p.z, 6);
+    const g = frame.toGeodetic(p);
+    const again = frame.fromGeodetic(g.lon, g.lat, g.h, v());
+    expect(again.x).toBeCloseTo(p.x, 4);
+    expect(again.z).toBeCloseTo(p.z, 4);
+  });
+
+  it('turns the local vertical at the origin into +y', () => {
+    const up = frame.dirToLocal(upAt(7.4972, 46.9122, v()), v());
+    expect(up.y).toBeCloseTo(1, 12);
+  });
+
+  it('shows the curvature of the Earth: 100 km away the ground is ~780 m lower', () => {
+    const far = frame.fromGeodetic(8.81, 46.9122, 510, v());
+    expect(far.x).toBeGreaterThan(99_000);
+    expect(far.y).toBeLessThan(-700);
+    expect(far.y).toBeGreaterThan(-860);
+  });
+});
 
 describe('LV95', () => {
-  // Reference example from the swisstopo formula document.
-  const lon = dms(8, 43, 49.79);
-  const lat = dms(46, 2, 38.87);
-
-  it('converts WGS84 to LV95 like the swisstopo example', () => {
-    const [e, n] = wgs84ToLv95(lon, lat);
-    expect(e).toBeCloseTo(2699999.76, 0);
-    expect(n).toBeCloseTo(1099999.97, 0);
+  it('puts the old observatory of Bern at 2 600 000 / 1 200 000', () => {
+    // 46°57'03.9" N, 7°26'19.1" E (WGS84)
+    const { e, n } = wgs84ToLv95(7 + 26 / 60 + 19.1 / 3600, 46 + 57 / 60 + 3.9 / 3600);
+    expect(Math.abs(e - 2_600_000)).toBeLessThan(2);
+    expect(Math.abs(n - 1_200_000)).toBeLessThan(2);
   });
 
-  it('converts LV95 back to WGS84 within ~1 m', () => {
-    const [lo, la] = lv95ToWgs84(2700000, 1100000);
-    expect(Math.abs(lo - lon) * 77000).toBeLessThan(1.5);
-    expect(Math.abs(la - lat) * 111000).toBeLessThan(1.5);
-  });
-});
-
-describe('ECEF', () => {
-  it('round-trips geodetic coordinates', () => {
-    const p = geodeticToEcef(7.9625, 46.5367, 4158);
-    const [lo, la, h] = ecefToGeodetic(...p);
-    expect(lo).toBeCloseTo(7.9625, 9);
-    expect(la).toBeCloseTo(46.5367, 9);
-    expect(h).toBeCloseTo(4158, 3);
-  });
-
-  it('places local axes east / up / south', () => {
-    const f = enuFrame(7.9, 46.5, 0);
-    const up = ecefToLocal(f, ...geodeticToEcef(7.9, 46.5, 1000));
-    expect(up[0]).toBeCloseTo(0, 3);
-    expect(up[1]).toBeCloseTo(1000, 3);
-    expect(up[2]).toBeCloseTo(0, 3);
-
-    const north = ecefToLocal(f, ...geodeticToEcef(7.9, 46.51, 0));
-    expect(north[2]).toBeLessThan(-1100); // north is -z
-    const east = ecefToLocal(f, ...geodeticToEcef(7.91, 46.5, 0));
-    expect(east[0]).toBeGreaterThan(700);
-  });
-
-  it('round-trips local coordinates', () => {
-    const f = enuFrame(7.9, 46.5, 500);
-    const p = localToEcef(f, 1234.5, -50, -9876.25);
-    const l = ecefToLocal(f, ...p);
-    expect(l[0]).toBeCloseTo(1234.5, 6);
-    expect(l[1]).toBeCloseTo(-50, 6);
-    expect(l[2]).toBeCloseTo(-9876.25, 6);
-  });
-});
-
-describe('tiles', () => {
-  it('finds the geographic TMS tile for Bern', () => {
-    // Verified against the swisstopo terrain service.
-    expect(geoTileAt(7.43863, 46.95108, 17)).toEqual({ z: 17, x: 136488, y: 99724 });
-  });
-
-  it('computes tile bounds that contain the point', () => {
-    const b = geoTileBounds(geoTileAt(7.9625, 46.5367, 12));
-    expect(b.west).toBeLessThanOrEqual(7.9625);
-    expect(b.east).toBeGreaterThan(7.9625);
-    expect(b.south).toBeLessThanOrEqual(46.5367);
-    expect(b.north).toBeGreaterThan(46.5367);
-  });
-
-  it('computes Web Mercator pixels', () => {
-    expect(mercatorPx(0, 0)).toBe(128);
-    expect(mercatorPy(0, 0)).toBeCloseTo(128, 9);
-    expect(mercatorPy(85.0511287798, 0)).toBeCloseTo(0, 3);
-  });
-
-  it('covers a terrain tile with mercator tiles', () => {
-    const r = mercatorTileRange(geoTileBounds({ z: 12, x: 4276, y: 3108 }), 14);
-    expect(r.x1 - r.x0 + 1).toBe(2);
-    expect(r.y1 - r.y0 + 1).toBeGreaterThanOrEqual(3);
+  it('round-trips within the accuracy of the approximate formulas', () => {
+    for (const [lon, lat] of [
+      [8.5492, 47.4582],
+      [6.1089, 46.2381],
+      [9.8, 46.5],
+    ] as const) {
+      const { e, n } = wgs84ToLv95(lon, lat);
+      const back = lv95ToWgs84(e, n);
+      // A few metres: both directions are approximations.
+      expect(Math.abs(back.lon - lon)).toBeLessThan(5e-5);
+      expect(Math.abs(back.lat - lat)).toBeLessThan(5e-5);
+    }
   });
 });
