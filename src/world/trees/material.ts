@@ -13,7 +13,6 @@ import {
   fract,
   int,
   interleavedGradientNoise,
-  materialReference,
   min,
   mix,
   modelWorldMatrix,
@@ -125,18 +124,28 @@ export class TreeUniforms {
   }
 }
 
-/** One draw's material: the shared graph, plus what differs per chunk. */
-export class TreeMaterial extends MeshPhysicalNodeMaterial {
+/**
+ * What differs between chunks, read per draw from `mesh.userData.trees`: one material per form
+ * and level serves every chunk, so a new chunk never builds a shader.
+ */
+export interface ChunkUniforms {
   /** 0 .. 1: from the previous ground heights to the current ones (re-seating without a jump). */
-  groundBlend = 1;
+  blend: number;
   /** Geoid undulation at the chunk (ellipsoid minus sea level), metres. */
-  undulation = 50;
+  undulation: number;
   /**
-   * Far level only: distance below which the near and mid levels take over. 0 while a chunk
-   * has no near meshes yet (a far chunk that came close before its full build arrived).
+   * 1 when the chunk has near and mid meshes; 0 while it has only its far meshes (a far chunk
+   * that came close before its full build arrived): then the far level draws every tree.
    */
-  farFrom = 0;
+  farFrom: number;
 }
+
+export class TreeMaterial extends MeshPhysicalNodeMaterial {}
+
+const perChunk = (key: keyof ChunkUniforms, fallback: number) =>
+  uniform(fallback).onObjectUpdate(
+    ({ object }) => (object?.userData.trees as ChunkUniforms | undefined)?.[key] ?? fallback,
+  );
 
 export type Lod = 0 | 1 | 2;
 
@@ -157,9 +166,9 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
   const ao = attribute('ao', 'float') as N;
   const position = attribute('position', 'vec3') as N;
   const normal = attribute('normal', 'vec3') as N;
-  const groundBlend = materialReference('groundBlend', 'float') as N;
-  const undulation = materialReference('undulation', 'float') as N;
-  const farFrom = materialReference('farFrom', 'float') as N;
+  const groundBlend = perChunk('blend', 1) as N;
+  const undulation = perChunk('undulation', 50) as N;
+  const farFrom = perChunk('farFrom', 0) as N;
 
   const rank = iPos.w;
   const height = iShape.x;
@@ -319,11 +328,16 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
       Discard(isLeaf.and(clump.mul(0.5).add(0.5).lessThan(rim.mul(0.75))));
     }
     // Bare crowns in winter: a lacy net of twigs through which the ground shows.
-    const lace = mx_noise_float(vTreePos.mul(vec3(9, 26, 9)).add(seed.mul(31))) as N;
     const isCrown = part.greaterThan(0.5).and(part.lessThan(1.5));
-    Discard(
-      isCrown.and(bare.greaterThan(0.01)).and(lace.mul(0.5).add(0.5).lessThan(bare.mul(0.62))),
-    );
+    if (detail > 1) {
+      // Close up: a net of thin twigs (the ridges of a noise) through which the ground shows.
+      const lace = mx_noise_float(vTreePos.mul(vec3(11, 30, 11)).add(seed.mul(31))) as N;
+      Discard(isCrown.and(abs(lace).greaterThan(mix(float(2), float(0.11), bare))));
+    } else {
+      // Further out the twigs merge into a thin grey-brown haze with holes.
+      const lace = mx_noise_float(vTreePos.mul(vec3(5, 14, 5)).add(seed.mul(31))) as N;
+      Discard(isCrown.and(lace.mul(0.5).add(0.5).lessThan(bare.mul(0.6))));
+    }
 
     const barkColor = (u.bark.element(species) as N).xyz;
     const occlusion = mix(float(0.42), float(1), ao);

@@ -25,7 +25,6 @@ import {
 import type { DeviceClass, LayerContext, Season, WorldLayer } from '../layers';
 import { tileToRenderMatrix } from '../terrain/placement';
 import {
-  CELLS,
   CHUNK_ZOOM,
   type ChunkKey,
   chunkBounds,
@@ -38,15 +37,17 @@ import {
 } from './chunks';
 import { type TreeMesh, buildTreeMeshes } from './geometry';
 import {
+  type ChunkUniforms,
   type Lod,
-  TreeMaterial,
+  type TreeMaterial,
   TreeUniforms,
   buildTreeNodes,
   createTreeMaterial,
 } from './material';
 import { type ChunkHandle, type ChunkResult, TreeWorkerPool } from './pool';
 import { LOD_BAND, LOD_JITTER, TREE_PRESETS, type TreePreset } from './presets';
-import { type ChunkOutput, type FormData, STRIDE } from './protocol';
+import { type CellData, type ChunkOutput, STRIDE } from './protocol';
+import { NearSet } from './near';
 import { mixPalettes, seasonPalette } from './season';
 import { HeightGrid, fillGaps } from './seat';
 import { Form } from './species';
@@ -62,25 +63,21 @@ const LOADING_PATIENCE = 25;
 /** A chunk whose build failed this often is given up for the session. */
 const MAX_ERRORS = 3;
 
-interface CellGpu {
-  /** Indices into the form's arrays. */
-  index: Uint32Array;
-  ground: InstancedBufferAttribute;
-  groundPrev: InstancedBufferAttribute;
-  near: Mesh;
-  mid: Mesh;
-  box: Box3;
-}
-
-interface FormGpu {
-  count: number;
+/**
+ * A set of trees with its own instance buffer: a whole chunk (far level only, for chunks stored
+ * below full detail) or one cell of a fully stored chunk (mid and far level).
+ */
+interface Part {
+  form: Form;
+  /** STRIDE floats per tree, sorted by rank. */
   data: Float32Array;
+  count: number;
   ground: InstancedBufferAttribute;
   groundPrev: InstancedBufferAttribute;
+  mid?: Mesh;
   far: Mesh;
-  cells: CellGpu[];
-  /** Instance and per-cell buffers, bytes. */
-  bytes: number;
+  /** Trunk extent in the chunk frame (x, z), grown by the crowns. */
+  box: Box3;
 }
 
 interface Chunk {
@@ -101,8 +98,11 @@ interface Chunk {
   empty: boolean;
   /** Worker output waiting for its upload. */
   pending?: { out: ChunkOutput; level: number };
-  forms?: FormGpu[];
-  materials: TreeMaterial[];
+  /** What the GPU has of the chunk; undefined until its first upload. */
+  parts?: Part[];
+  bytes: number;
+  /** Read by the shared materials per draw. */
+  draw: ChunkUniforms;
   grid?: HeightGrid;
   probe?: { grid: HeightGrid; next: number };
   stale: boolean;
@@ -122,6 +122,8 @@ export interface TreeStats {
   chunksReady: number;
   instances: number;
   instancesDrawn: number;
+  /** Trees drawn at the near level (full geometry). */
+  nearInstances: number;
   draws: number;
   queued: number;
   inFlight: number;
@@ -134,6 +136,9 @@ export interface TreeStats {
   evicted: number;
   reseated: number;
   probeMs: number;
+  /** CPU time of update(), mean over the last frames and worst since the start, ms. */
+  updateMs: number;
+  updateMaxMs: number;
   loading: boolean;
   workerMs: number;
   species: number[];
@@ -157,7 +162,8 @@ export class TreeLayer implements WorldLayer {
   private readonly chunks = new Map<string, Chunk>();
   /** Shared vertex data per form and level of detail. */
   private readonly base: BufferGeometry[][];
-  private readonly nodes: Array<Array<ReturnType<typeof buildTreeNodes>>>;
+  /** One material per form and level of detail, shared by all chunks. */
+  private readonly materials: TreeMaterial[][];
   private frame: LocalFrame;
   private revision = -1;
   private season: Season | undefined;
@@ -172,6 +178,7 @@ export class TreeLayer implements WorldLayer {
   private readonly m = new Matrix4();
   private readonly cam = new Vector3();
   private readonly camLocal = new Vector3();
+  private readonly dir = new Vector3();
   private readonly box = new Box3();
   private readonly counters = {
     built: 0,
@@ -182,13 +189,19 @@ export class TreeLayer implements WorldLayer {
     workerMs: 0,
   };
   private probeMs = 0;
-  private drawn = { instances: 0, draws: 0 };
+  private updateMs = 0;
+  private updateMaxMs = 0;
+  private drawn = { instances: 0, draws: 0, near: 0 };
+  private nearDirty = true;
+  private readonly near: NearSet;
 
   constructor(frame: LocalFrame, device: DeviceClass) {
     this.frame = frame;
     this.preset = TREE_PRESETS[device];
     this.object.name = 'Trees';
     this.object.userData.treeStats = () => this.stats();
+    // For the demo page's experiments: the live distances and the preset.
+    this.object.userData.treeDebug = { uniforms: this.uniforms, preset: this.preset };
     const meshes = buildTreeMeshes(this.preset.lite);
     const toGeometry = (t: TreeMesh) => {
       const g = new BufferGeometry();
@@ -200,16 +213,24 @@ export class TreeLayer implements WorldLayer {
       return g;
     };
     this.base = [meshes.conifer.map(toGeometry), meshes.broadleaf.map(toGeometry)];
-    this.nodes = [Form.Conifer, Form.Broadleaf].map((form) =>
+    this.materials = [Form.Conifer, Form.Broadleaf].map((form) =>
       MESH_LODS.map((lod) =>
-        buildTreeNodes(
-          this.uniforms,
-          form,
-          lod,
-          lod === 0 ? 2 : lod === 1 && !this.preset.lite ? 1 : 0,
+        createTreeMaterial(
+          buildTreeNodes(
+            this.uniforms,
+            form,
+            lod,
+            lod === 0 ? 2 : lod === 1 && !this.preset.lite ? 1 : 0,
+          ),
         ),
       ),
     );
+    this.near = new NearSet(
+      this.base.map((byLod) => byLod[0]!),
+      this.materials.map((byLod) => byLod[0]!),
+      this.preset.nearCapacity,
+    );
+    for (const m of this.near.meshes) this.object.add(m);
     this.uniforms.wind.value = this.preset.wind ? 1 : 0;
     this.uniforms.thin.value = this.preset.thinStart;
     this.uniforms.fadeStart.value = this.preset.fadeStart;
@@ -247,6 +268,7 @@ export class TreeLayer implements WorldLayer {
     const camera = ctx.camera;
     camera.updateWorldMatrix(true, false);
     camera.getWorldPosition(this.cam);
+    camera.getWorldDirection(this.dir);
     this.m.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(
       this.m,
@@ -305,12 +327,15 @@ export class TreeLayer implements WorldLayer {
     // ---- Loading: the trees of the near view, not the far fringe ----
     let missing = 0;
     for (const c of this.chunks.values())
-      if (c.wanted && !c.empty && c.distance3 < p.thinStart && (!c.forms || c.level < c.wantLevel))
+      if (c.wanted && !c.empty && c.distance3 < p.thinStart && (!c.parts || c.level < c.wantLevel))
         missing++;
     if (missing === 0) {
       this.isLoading = false;
       this.loadingSince = now;
     } else this.isLoading = now - this.loadingSince < LOADING_PATIENCE;
+    const ms = performance.now() - t0;
+    this.updateMs += (ms - this.updateMs) * 0.05;
+    this.updateMaxMs = Math.max(this.updateMaxMs, ms);
   }
 
   private updateConditions(ctx: LayerContext) {
@@ -352,13 +377,6 @@ export class TreeLayer implements WorldLayer {
     group.name = `trees ${chunkId(key)}`;
     group.matrixAutoUpdate = false;
     const undulation = geoidUndulation(midLon, midLat);
-    const materials = this.nodes.flatMap((byLod) =>
-      byLod.map((nodes) => {
-        const m = createTreeMaterial(nodes);
-        m.undulation = undulation;
-        return m;
-      }),
-    );
     const c: Chunk = {
       id: chunkId(key),
       key,
@@ -373,7 +391,8 @@ export class TreeLayer implements WorldLayer {
       errors: 0,
       retryAt: 0,
       empty: false,
-      materials,
+      draw: { blend: 1, undulation, farFrom: 0 },
+      bytes: 0,
       stale: false,
       minY: 0,
       maxY: 0,
@@ -502,15 +521,15 @@ export class TreeLayer implements WorldLayer {
     }
     c.minY = minY;
     c.maxY = maxY;
-    if (!c.forms) return;
+    if (!c.parts) return;
     let moved = 0;
     const blend = c.blend;
-    for (const f of c.forms) {
-      const ground = f.ground.array as Float32Array;
-      const prev = f.groundPrev.array as Float32Array;
-      for (let i = 0; i < f.count; i++) {
+    for (const part of c.parts) {
+      const ground = part.ground.array as Float32Array;
+      const prev = part.groundPrev.array as Float32Array;
+      for (let i = 0; i < part.count; i++) {
         const o = i * STRIDE;
-        const next = g.sample(f.data[o]!, f.data[o + 2]!);
+        const next = g.sample(part.data[o]!, part.data[o + 2]!);
         const shown = prev[i]! + (ground[i]! - prev[i]!) * blend;
         if (Math.abs(next - ground[i]!) > 0.05) moved++;
         prev[i] = shown;
@@ -519,30 +538,17 @@ export class TreeLayer implements WorldLayer {
     }
     if (moved === 0 && old) {
       // Nothing moved: keep what is shown, but settle the glide.
-      for (const f of c.forms)
-        (f.groundPrev.array as Float32Array).set(f.ground.array as Float32Array);
+      for (const part of c.parts)
+        (part.groundPrev.array as Float32Array).set(part.ground.array as Float32Array);
       return;
     }
     c.blend = 0;
     this.counters.reseated++;
-    for (const f of c.forms) {
-      f.ground.needsUpdate = true;
-      f.groundPrev.needsUpdate = true;
-      for (const cell of f.cells) this.gatherGround(f, cell);
+    this.nearDirty = true;
+    for (const part of c.parts) {
+      part.ground.needsUpdate = true;
+      part.groundPrev.needsUpdate = true;
     }
-  }
-
-  private gatherGround(f: FormGpu, cell: CellGpu) {
-    const g = f.ground.array as Float32Array;
-    const p = f.groundPrev.array as Float32Array;
-    const cg = cell.ground.array as Float32Array;
-    const cp = cell.groundPrev.array as Float32Array;
-    for (let i = 0; i < cell.index.length; i++) {
-      cg[i] = g[cell.index[i]!]!;
-      cp[i] = p[cell.index[i]!]!;
-    }
-    cell.ground.needsUpdate = true;
-    cell.groundPrev.needsUpdate = true;
   }
 
   // ---- GPU ----
@@ -551,187 +557,171 @@ export class TreeLayer implements WorldLayer {
     const { out, level } = c.pending!;
     c.pending = undefined;
     const g = c.grid!;
-    this.disposeForms(c);
+    this.disposeParts(c);
     c.stats = out.stats;
-    c.forms = out.forms.map((fd, form) => this.buildForm(c, fd, form as Form, level, g));
+    const parts: Part[] = [];
+    out.forms.forEach((fd, form) => {
+      // A fully stored chunk draws per cell (mid and far level); others as a whole (far only).
+      const whole: CellData = {
+        data: fd.data,
+        index: new Uint32Array(0),
+        minX: -c.halfX,
+        maxX: c.halfX,
+        minZ: -c.halfZ,
+        maxZ: c.halfZ,
+      };
+      const sets = fd.cells.length > 0 ? fd.cells : [whole];
+      for (const set of sets)
+        if (set.data.length > 0)
+          parts.push(this.buildPart(c, form as Form, set, fd.cells.length > 0, g));
+    });
+    c.parts = parts;
+    c.bytes = 0;
+    for (const part of parts) c.bytes += part.data.byteLength + part.count * 8;
     c.level = level;
     c.blend = 1;
+    this.nearDirty = true;
     // A coarse grid on a chunk that is now detailed: refine it.
     if (g.n < this.gridSize(c)) c.stale = true;
   }
 
-  private buildForm(c: Chunk, fd: FormData, form: Form, level: number, g: HeightGrid): FormGpu {
-    const { data, count } = fd;
+  private buildPart(c: Chunk, form: Form, set: CellData, withMid: boolean, g: HeightGrid): Part {
+    const data = set.data;
+    const count = data.length / STRIDE;
     const ground = new Float32Array(count);
     for (let i = 0; i < count; i++) ground[i] = g.sample(data[i * STRIDE]!, data[i * STRIDE + 2]!);
     const groundAttr = new InstancedBufferAttribute(ground, 1);
     const prevAttr = new InstancedBufferAttribute(ground.slice(), 1);
-    const far = this.instancedMesh(c, form, 2, data, groundAttr, prevAttr, count);
-    let bytes = data.byteLength + ground.byteLength * 2;
-    const cells: CellGpu[] = [];
-    if (level >= 1) {
-      const lists: number[][] = Array.from({ length: CELLS * CELLS }, () => []);
-      for (let i = 0; i < count; i++) lists[fd.cells[i]!]!.push(i);
-      lists.forEach((list, cellIndex) => {
-        if (list.length === 0) return;
-        const index = Uint32Array.from(list);
-        const cd = new Float32Array(list.length * STRIDE);
-        const cg = new Float32Array(list.length);
-        let minX = Infinity;
-        let maxX = -Infinity;
-        let minZ = Infinity;
-        let maxZ = -Infinity;
-        list.forEach((src, i) => {
-          cd.set(data.subarray(src * STRIDE, src * STRIDE + STRIDE), i * STRIDE);
-          cg[i] = ground[src]!;
-          const x = data[src * STRIDE]!;
-          const z = data[src * STRIDE + 2]!;
-          minX = Math.min(minX, x);
-          maxX = Math.max(maxX, x);
-          minZ = Math.min(minZ, z);
-          maxZ = Math.max(maxZ, z);
-        });
-        const ga = new InstancedBufferAttribute(cg, 1);
-        const pa = new InstancedBufferAttribute(cg.slice(), 1);
-        // Shared instance buffer: the near and the mid level draw the same trees.
-        const inter = new InstancedInterleavedBuffer(cd, STRIDE);
-        const near = this.instancedMesh(c, form, 0, inter, ga, pa, list.length);
-        const mid = this.instancedMesh(c, form, 1, inter, ga, pa, list.length);
-        // Crowns reach out of the trunks' box by up to about 15 m.
-        const box = new Box3(
-          new Vector3(minX - 15, 0, minZ - 15),
-          new Vector3(maxX + 15, 0, maxZ + 15),
-        );
-        bytes += cd.byteLength + cg.byteLength * 2;
-        cells[cellIndex] = { index, ground: ga, groundPrev: pa, near, mid, box };
-      });
+    // One instance buffer for both levels of the part.
+    const inter = new InstancedInterleavedBuffer(data, STRIDE);
+    const far = this.instancedMesh(form, 2, inter, groundAttr, prevAttr, count, c.draw);
+    c.group.add(far);
+    let mid: Mesh | undefined;
+    if (withMid) {
+      mid = this.instancedMesh(form, 1, inter, groundAttr, prevAttr, count, c.draw);
+      c.group.add(mid);
     }
-    return {
-      count,
-      data,
-      ground: groundAttr,
-      groundPrev: prevAttr,
-      far,
-      cells: cells.filter(Boolean),
-      bytes,
-    };
+    // Crowns reach out of the trunks' box by up to about 15 m.
+    const box = new Box3(
+      new Vector3(set.minX - 15, 0, set.minZ - 15),
+      new Vector3(set.maxX + 15, 0, set.maxZ + 15),
+    );
+    return { form, data, count, ground: groundAttr, groundPrev: prevAttr, mid, far, box };
   }
 
   private instancedMesh(
-    c: Chunk,
     form: Form,
     lod: Lod,
-    data: Float32Array | InstancedInterleavedBuffer,
+    inter: InstancedInterleavedBuffer,
     ground: InstancedBufferAttribute,
     prev: InstancedBufferAttribute,
     count: number,
+    draw: ChunkUniforms,
   ): Mesh {
     const base = this.base[form]![lod]!;
     const g = new InstancedBufferGeometry();
     g.setIndex(base.index);
     for (const name of ['position', 'normal', 'part', 'ao'])
       g.setAttribute(name, base.getAttribute(name));
-    const inter =
-      data instanceof InstancedInterleavedBuffer
-        ? data
-        : new InstancedInterleavedBuffer(data, STRIDE);
     g.setAttribute('iPos', new InterleavedBufferAttribute(inter, 4, 0));
     g.setAttribute('iShape', new InterleavedBufferAttribute(inter, 4, 4));
     g.setAttribute('iPhoto', new InterleavedBufferAttribute(inter, 4, 8));
     g.setAttribute('iGround', ground);
     g.setAttribute('iGroundPrev', prev);
     g.instanceCount = count;
-    const mesh = new Mesh(g, c.materials[form * 3 + lod]!);
+    const mesh = new Mesh(g, this.materials[form]![lod]!);
+    mesh.userData.trees = draw;
     mesh.frustumCulled = false;
     mesh.matrixAutoUpdate = false;
     mesh.castShadow = false;
     mesh.receiveShadow = true;
     mesh.visible = false;
     mesh.name = `${form === Form.Conifer ? 'conifer' : 'broadleaf'} lod${lod}`;
-    c.group.add(mesh);
     return mesh;
   }
 
-  /** Chooses what is drawn: chunks and cells in view, how many trees of each far chunk. */
+  /**
+   * Chooses what is drawn: chunks and cells in view, how many trees of each by rank, and the
+   * near trees around the camera.
+   */
   private select(dt: number) {
     const p = this.preset;
     // The farthest any tree switches (its jitter pulls it closer), plus a margin.
     const reach = (1 + LOD_BAND) / (1 - LOD_JITTER / 2) + 0.03;
     const nearR = this.uniforms.near.value * reach;
     const midR = this.uniforms.mid.value * reach;
+    // The nearest any tree leaves the mid level.
+    const midIn = (this.uniforms.mid.value * (1 - LOD_BAND)) / (1 + LOD_JITTER / 2) - 20;
     let instances = 0;
     let draws = 0;
     for (const c of this.chunks.values()) {
       if (c.blend < 1) {
         c.blend = Math.min(1, c.blend + dt / SEAT_GLIDE);
+        if (c.distance3 < nearR * 2) this.nearDirty = true;
       }
-      for (const m of c.materials) {
-        m.groundBlend = c.blend;
-        m.farFrom = c.level >= 1 ? 1 : 0;
-      }
-      if (!c.forms) continue;
+      c.draw.blend = c.blend;
+      c.draw.farFrom = c.level >= 1 ? 1 : 0;
+      if (!c.parts) continue;
       this.camLocal.copy(this.cam).applyMatrix4(c.inverse);
       const yLo = c.minY - 40;
       const yHi = c.maxY + 60;
-      this.box.min.set(-c.halfX - 15, yLo, -c.halfZ - 15);
-      this.box.max.set(c.halfX + 15, yHi, c.halfZ + 15);
-      const d = this.box.distanceToPoint(this.camLocal);
-      this.box.applyMatrix4(c.group.matrix);
-      const inView = c.wanted && d < p.fadeEnd && this.frustum.intersectsBox(this.box);
-      const keep = keepAt(d, p);
-      for (const f of c.forms) {
-        const n = inView ? upperBoundRank(f.data, f.count, keep * 1.05) : 0;
-        f.far.visible = n > 0;
-        (f.far.geometry as InstancedBufferGeometry).instanceCount = n;
-        if (n > 0) {
-          instances += n;
-          draws++;
+      for (const part of c.parts) {
+        this.box.min.set(part.box.min.x, yLo, part.box.min.z);
+        this.box.max.set(part.box.max.x, yHi, part.box.max.z);
+        const d = this.box.distanceToPoint(this.camLocal);
+        // A cell entirely inside the mid range needs no far level.
+        const reachFar = farthest(this.box, this.camLocal) >= midIn;
+        let inView = c.wanted && d < p.fadeEnd;
+        if (inView) {
+          this.box.applyMatrix4(c.group.matrix);
+          inView = this.frustum.intersectsBox(this.box);
         }
-        for (const cell of f.cells) {
-          let near = false;
-          let mid = false;
-          if (inView && d < midR) {
-            this.box.min.set(cell.box.min.x, yLo, cell.box.min.z);
-            this.box.max.set(cell.box.max.x, yHi, cell.box.max.z);
-            const dc = this.box.distanceToPoint(this.camLocal);
-            if (dc < midR) {
-              this.box.applyMatrix4(c.group.matrix);
-              if (this.frustum.intersectsBox(this.box)) {
-                mid = true;
-                near = dc < nearR;
-              }
-            }
-          }
-          cell.mid.visible = mid;
-          cell.near.visible = near;
-          const k = cell.index.length;
-          if (mid) {
-            draws++;
-            instances += k;
-          }
-          if (near) draws++;
+        const mid = inView && !!part.mid && d < midR;
+        if (part.mid) part.mid.visible = mid;
+        const n =
+          inView && (!part.mid || reachFar)
+            ? upperBoundRank(part.data, part.count, keepAt(d, p) * 1.05)
+            : 0;
+        part.far.visible = n > 0;
+        (part.far.geometry as InstancedBufferGeometry).instanceCount = n;
+        if (mid) {
+          draws++;
+          instances += part.count;
+        }
+        if (n > 0) {
+          draws++;
+          instances += n;
         }
       }
     }
-    this.drawn = { instances, draws };
+    const near = this.near.update(
+      this.chunks.values(),
+      this.cam,
+      this.dir,
+      this.frustum,
+      nearR,
+      this.nearDirty,
+    );
+    this.nearDirty = false;
+    draws += near.draws;
+    this.drawn = { instances, draws, near: near.count };
   }
 
-  private disposeForms(c: Chunk) {
-    if (!c.forms) return;
-    for (const f of c.forms) {
-      const meshes = [f.far, ...f.cells.flatMap((cell) => [cell.near, cell.mid])];
-      for (const m of meshes) {
+  private disposeParts(c: Chunk) {
+    if (!c.parts) return;
+    for (const part of c.parts)
+      for (const m of [part.far, part.mid]) {
+        if (!m) continue;
         c.group.remove(m);
         m.geometry.dispose();
       }
-    }
-    c.forms = undefined;
+    c.parts = undefined;
+    this.nearDirty = true;
   }
 
   private free(c: Chunk) {
     this.cancel(c);
-    this.disposeForms(c);
-    for (const m of c.materials) m.dispose();
+    this.disposeParts(c);
     this.object.remove(c.group);
     this.chunks.delete(c.id);
     this.counters.evicted++;
@@ -750,12 +740,10 @@ export class TreeLayer implements WorldLayer {
     for (const c of this.chunks.values()) {
       if (c.pending) pendingUploads++;
       if (c.probe) seating++;
-      if (!c.forms) continue;
+      if (!c.parts) continue;
       ready++;
-      for (const f of c.forms) {
-        instances += f.count;
-        gpuBytes += f.bytes;
-      }
+      for (const part of c.parts) instances += part.count;
+      gpuBytes += c.bytes;
       if (c.stats) {
         singles += c.stats.singles;
         if (c.stats.photo) photoChunks++;
@@ -763,6 +751,7 @@ export class TreeLayer implements WorldLayer {
         c.stats.species.forEach((n, s) => (species[s] = (species[s] ?? 0) + n));
       }
     }
+    gpuBytes += this.near.bytes;
     // The shared meshes are small; count them once.
     for (const byLod of this.base)
       for (const g of byLod)
@@ -772,7 +761,8 @@ export class TreeLayer implements WorldLayer {
       chunks: this.chunks.size,
       chunksReady: ready,
       instances,
-      instancesDrawn: this.drawn.instances,
+      instancesDrawn: this.drawn.instances + this.drawn.near,
+      nearInstances: this.drawn.near,
       draws: this.drawn.draws,
       queued: this.pool.queued,
       inFlight: this.pool.inFlight,
@@ -781,6 +771,8 @@ export class TreeLayer implements WorldLayer {
       gpuBytes,
       ...this.counters,
       probeMs: this.probeMs,
+      updateMs: this.updateMs,
+      updateMaxMs: this.updateMaxMs,
       loading: this.isLoading,
       species,
       singles,
@@ -793,5 +785,15 @@ export class TreeLayer implements WorldLayer {
     this.pool.dispose();
     for (const c of [...this.chunks.values()]) this.free(c);
     for (const byLod of this.base) for (const g of byLod) g.dispose();
+    for (const byLod of this.materials) for (const m of byLod) m.dispose();
+    this.near.dispose();
   }
+}
+
+/** Distance from p to the farthest corner of the box. */
+function farthest(b: Box3, p: Vector3) {
+  const dx = Math.max(Math.abs(p.x - b.min.x), Math.abs(p.x - b.max.x));
+  const dy = Math.max(Math.abs(p.y - b.min.y), Math.abs(p.y - b.max.y));
+  const dz = Math.max(Math.abs(p.z - b.min.z), Math.abs(p.z - b.max.z));
+  return Math.hypot(dx, dy, dz);
 }

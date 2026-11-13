@@ -3,12 +3,13 @@
  * its post chain, wired like src/app/App.ts. Served at /flightsimulator/demo/trees.html.
  *
  * URL switches:
- *   view=belpberg|edge|kandersteg|treeline|high|top|fly   camera preset (default belpberg)
+ *   view=belpberg|edge|kandersteg|treeline|high|top|airport|fly   camera preset
  *   season=spring|summer|autumn|winter                  (default summer; also sets the date)
  *   night=1                                             late evening instead of afternoon
  *   t=2026-06-21T14:00Z                                 explicit time (UTC)
  *   device=mobile   webgl=1   trees=0 (hide the trees)   clean=1 (no text)
  *   speed=60        metres per second for view=fly
+ *   still=1         no sway (pixel comparisons)
  *
  * window.__demo exposes stats and a bench for tools/world/trees-shots.mjs.
  */
@@ -51,6 +52,8 @@ const VIEWS: Record<string, View> = {
   high: { lon: 7.47, lat: 46.9, h: 1000, agl: true, heading: 140, pitch: -25 },
   // Straight down from 450 m: does the forest edge match the photo?
   top: { lon: 7.5045, lat: 46.877, h: 450, agl: true, heading: 0, pitch: -89.9 },
+  // 40 m over runway 14 of Bern-Belp: no trees on the runway, the woods around it.
+  airport: { lon: 7.4935, lat: 46.9175, h: 40, agl: true, heading: 135, pitch: -8 },
   // Flying at 150 m over the Mittelland towards the Gürbetal.
   fly: { lon: 7.44, lat: 46.9, h: 150, agl: true, heading: 150, pitch: -6 },
 };
@@ -147,8 +150,10 @@ const resize = () => {
 new ResizeObserver(resize).observe(canvas);
 resize();
 
-function rebase() {
-  frame = new LocalFrame(geo.lon, geo.lat, 0);
+function rebase(east = 0, north = 0) {
+  const lat = geo.lat + north / 111_200;
+  const lon = geo.lon + east / (111_200 * Math.cos((geo.lat * Math.PI) / 180));
+  frame = new LocalFrame(lon, lat, 0);
   world.setFrame(frame);
   sky.setLocation(geo.lon, geo.lat);
 }
@@ -161,7 +166,8 @@ const nightFactor = (el: number) => {
   return t * t * (3 - 2 * t);
 };
 function step(dt: number) {
-  appTime += dt;
+  // ?still=1 freezes everything that moves by itself (sway), for pixel comparisons.
+  if (!q.has('still')) appTime += dt;
   if (fly) {
     const hr = (heading * Math.PI) / 180;
     const m = speed * dt;
@@ -226,6 +232,8 @@ const stats = {
     return (performance.now() - t0) / n;
   },
   setVisible: (v: boolean) => (trees.visible = v),
+  /** Moves the render origin by (east, north) metres; the camera keeps its place on Earth. */
+  rebase: (east: number, north: number) => rebase(east, north),
   probe: () => {
     const b = renderer.backend as unknown as { device?: GPUDevice; gl?: unknown };
     return { device: !!b.device, gl: !!b.gl };

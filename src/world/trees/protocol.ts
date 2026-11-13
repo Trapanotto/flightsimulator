@@ -23,12 +23,25 @@ export interface ChunkJob {
  */
 export const STRIDE = 12;
 
+/** The trees of one cell (CELLS x CELLS per chunk), for its near and mid meshes. */
+export interface CellData {
+  /** STRIDE floats per tree. */
+  data: Float32Array;
+  /** Position of each tree in the form's rank-sorted list (ground heights are copied by it). */
+  index: Uint32Array;
+  /** Extent of the trunks in the chunk frame, metres. */
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
 export interface FormData {
   /** STRIDE floats per tree, sorted by rank. */
   data: Float32Array;
-  /** Cell (0 .. CELLS² - 1) of each tree. */
-  cells: Uint8Array;
   count: number;
+  /** Per cell, only for chunks with all their trees (level 1); empty cells are left out. */
+  cells: CellData[];
 }
 
 export interface ChunkOutput {

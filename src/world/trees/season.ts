@@ -59,7 +59,7 @@ const AUTUMN: Partial<Record<Species, readonly [RGB, RGB]>> = {
 };
 
 /** Bare twigs and branches seen as a mass: grey-brown. */
-const TWIGS: RGB = [0.075, 0.062, 0.05];
+const TWIGS: RGB = [0.1, 0.085, 0.072];
 
 /** Floats per species in a palette: colour A (rgb), bareness, colour B (rgb), spare. */
 export const PALETTE_STRIDE = 8;

@@ -3,9 +3,11 @@
 //   npx vite --port 5211 --strictPort
 //   node tools/world/trees-shots.mjs [--out=.scratch/trees] [--only=a,b] [--port=5211] [--bench=1]
 // Writes <name>.png and <name>.json (stats) per scene.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import pixelmatch from 'pixelmatch';
 import { chromium } from 'playwright-core';
+import { PNG } from 'pngjs';
 
 const arg = (name, fallback) =>
   process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3) ?? fallback;
@@ -27,6 +29,7 @@ const SCENES = [
   { name: 'high', query: 'view=high', ...DESKTOP },
   { name: 'top', query: 'view=top', ...DESKTOP },
   { name: 'top-notrees', query: 'view=top&trees=0', ...DESKTOP },
+  { name: 'airport', query: 'view=airport', ...DESKTOP },
   { name: 'edge-spring', query: 'view=edge&season=spring', ...DESKTOP },
   { name: 'edge-autumn', query: 'view=edge&season=autumn', ...DESKTOP },
   { name: 'edge-winter', query: 'view=edge&season=winter', ...DESKTOP },
@@ -39,6 +42,9 @@ const SCENES = [
   { name: 'belpberg-mobile', query: 'view=belpberg&device=mobile', ...PHONE },
   { name: 'edge-mobile', query: 'view=edge&device=mobile', ...PHONE },
   { name: 'fly', query: 'view=fly', flySeconds: 30, ...DESKTOP },
+  // Moving the render origin must not move a single tree: compared pixel by pixel.
+  { name: 'rebase', query: 'view=edge&still=1', rebase: true, ...DESKTOP },
+  { name: 'rebase-notrees', query: 'view=edge&still=1&trees=0', rebase: true, ...DESKTOP },
 ];
 
 async function launch() {
@@ -88,9 +94,22 @@ try {
     await page.waitForTimeout(1000);
     const file = path.join(outDir, `${scene.name}.png`);
     await page.screenshot({ path: file });
+    let rebaseDiff;
+    if (scene.rebase) {
+      // 3 km east and 2 km north: the picture must stay the same.
+      await page.evaluate(() => window.__demo.rebase(3000, 2000));
+      await page.waitForTimeout(1000);
+      const after = path.join(outDir, `${scene.name}-after.png`);
+      await page.screenshot({ path: after });
+      const a = PNG.sync.read(readFileSync(file));
+      const b = PNG.sync.read(readFileSync(after));
+      rebaseDiff =
+        pixelmatch(a.data, b.data, null, a.width, a.height, { threshold: 0.1 }) /
+        (a.width * a.height);
+    }
     const stats = await page.evaluate(() => {
       const d = window.__demo;
-      return { ...d, bench: undefined, setVisible: undefined };
+      return { ...d, bench: undefined, setVisible: undefined, rebase: undefined };
     });
     let benchMs;
     if (bench) {
@@ -101,7 +120,7 @@ try {
     }
     writeFileSync(
       path.join(outDir, `${scene.name}.json`),
-      JSON.stringify({ loadSeconds, benchMs, stats, errors }, null, 2),
+      JSON.stringify({ loadSeconds, benchMs, rebaseDiff, stats, errors }, null, 2),
     );
     const t = stats.trees;
     console.log(

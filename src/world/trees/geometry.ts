@@ -322,7 +322,8 @@ export function broadleafMesh(o: BroadleafOptions): TreeMesh {
         Math.cos(a) * rr * dist,
         cy + yy * dist * hy,
         Math.sin(a) * rr * dist,
-        (0.36 + 0.1 * rnd()) * (yy > 0.6 ? 1.1 : 1),
+        // Fewer clumps are bigger, so the crown stays closed.
+        (0.36 + 0.1 * rnd()) * (yy > 0.6 ? 1.1 : 1) * Math.min(1.45, Math.pow(14 / shell, 0.4)),
       ]);
     }
   }
@@ -372,8 +373,8 @@ export function broadleafMesh(o: BroadleafOptions): TreeMesh {
       3,
       [0, cb - 0.04, 0],
       [Math.cos(a) * r, cy + (rnd() * 0.6 + 0.1) * hy, Math.sin(a) * r],
-      0.07,
-      0.02,
+      0.045,
+      0.012,
       2,
       0.5,
       0.8,
@@ -403,8 +404,8 @@ export function buildTreeMeshes(lite: boolean): TreeMeshes {
     broadleaf: [
       broadleafMesh(
         lite
-          ? { lumps: 8, detail: 0, trunkSides: 5, limbs: 3 }
-          : { lumps: 15, detail: 1, trunkSides: 6, limbs: 5 },
+          ? { lumps: 7, detail: 1, trunkSides: 5, limbs: 4 }
+          : { lumps: 15, detail: 1, trunkSides: 6, limbs: 7 },
       ),
       broadleafMesh({ lumps: 6, detail: 0, trunkSides: 3, limbs: 0, seed: 4 }),
       broadleafMesh({ lumps: 1, detail: 0, trunkSides: 0, limbs: 0, seed: 6 }),

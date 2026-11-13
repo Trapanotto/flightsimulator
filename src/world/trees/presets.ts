@@ -33,6 +33,8 @@ export interface TreePreset {
   heightGrid: number;
   /** Chunks kept (drawn plus cached). */
   maxChunks: number;
+  /** Trees per form drawn with the full mesh at most (the near set). */
+  nearCapacity: number;
 }
 
 export const TREE_PRESETS: Record<DeviceClass, TreePreset> = {
@@ -52,6 +54,7 @@ export const TREE_PRESETS: Record<DeviceClass, TreePreset> = {
     seatBudgetMs: 2.5,
     heightGrid: 97,
     maxChunks: 64,
+    nearCapacity: 8000,
   },
   mobile: {
     share: 0.5,
@@ -69,13 +72,14 @@ export const TREE_PRESETS: Record<DeviceClass, TreePreset> = {
     seatBudgetMs: 1.5,
     heightGrid: 65,
     maxChunks: 22,
+    nearCapacity: 2500,
   },
 };
 
 /** Exponent of the thinning beyond thinStart: the share of trees falls as (thinStart/d)^p. */
 export const THIN_POWER = 1.2;
 /** Width of the cross-fade between two levels of detail, as a share of the switch distance. */
-export const LOD_BAND = 0.035;
+export const LOD_BAND = 0.015;
 /**
  * Spread of the switch distances between trees (share of the distance): each tree changes its
  * level at its own distance, so there is no ring where a whole forest changes at once.

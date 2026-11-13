@@ -22,6 +22,7 @@ import {
 import { CELLS, CHUNK_ZOOM, SCATTER_GRID, type ChunkKey } from './chunks';
 import { photoToAlbedo, srgbToLinear } from './photo';
 import {
+  type CellData,
   type ChunkJob,
   type ChunkOutput,
   type FormData,
@@ -384,7 +385,7 @@ async function build(job: ChunkJob, signal: AbortSignal): Promise<ChunkOutput | 
   const forms = order.map((list): FormData => {
     list.sort((a, b) => s.rank[a]! - s.rank[b]!);
     const data = new Float32Array(list.length * STRIDE);
-    const cells = new Uint8Array(list.length);
+    const cellOf = new Uint8Array(list.length);
     list.forEach((i, n) => {
       vectorTilePointToLonLat(tileKey, extent, s.u[i]!, s.v[i]!, ll);
       frame.fromGeodetic(ll.lon, ll.lat, 0, p);
@@ -404,9 +405,37 @@ async function build(job: ChunkJob, signal: AbortSignal): Promise<ChunkOutput | 
       data[o + 11] = Math.min(31, Math.floor(s.edge[i]!)) * 4 + Math.min(3.99, s.bright[i]!);
       const cx = Math.min(CELLS - 1, Math.floor((s.u[i]! / extent) * CELLS));
       const cy = Math.min(CELLS - 1, Math.floor((s.v[i]! / extent) * CELLS));
-      cells[n] = cy * CELLS + cx;
+      cellOf[n] = cy * CELLS + cx;
       species[s.species[i]!]!++;
     });
+    // The near and mid meshes draw per cell: split here, off the main thread.
+    const cells: CellData[] = [];
+    if (job.keep >= job.share) {
+      const lists: number[][] = Array.from({ length: CELLS * CELLS }, () => []);
+      for (let n = 0; n < list.length; n++) lists[cellOf[n]!]!.push(n);
+      for (const members of lists) {
+        if (members.length === 0) continue;
+        const cd = new Float32Array(members.length * STRIDE);
+        const cell: CellData = {
+          data: cd,
+          index: Uint32Array.from(members),
+          minX: Infinity,
+          maxX: -Infinity,
+          minZ: Infinity,
+          maxZ: -Infinity,
+        };
+        members.forEach((src, k) => {
+          cd.set(data.subarray(src * STRIDE, (src + 1) * STRIDE), k * STRIDE);
+          const x = data[src * STRIDE]!;
+          const z = data[src * STRIDE + 2]!;
+          cell.minX = Math.min(cell.minX, x);
+          cell.maxX = Math.max(cell.maxX, x);
+          cell.minZ = Math.min(cell.minZ, z);
+          cell.maxZ = Math.max(cell.maxZ, z);
+        });
+        cells.push(cell);
+      }
+    }
     return { data, cells, count: list.length };
   });
 
@@ -445,7 +474,10 @@ self.onmessage = async (e: MessageEvent<TreeWorkerRequest>) => {
     if (!result) reply = { id: msg.id, ok: false, reason: 'empty' };
     else {
       reply = { id: msg.id, ok: true, result };
-      for (const f of result.forms) transfer.push(f.data.buffer, f.cells.buffer);
+      for (const f of result.forms) {
+        transfer.push(f.data.buffer);
+        for (const c of f.cells) transfer.push(c.data.buffer, c.index.buffer);
+      }
     }
   } catch (err) {
     const cancelled = controller.signal.aborted || err instanceof Cancelled;
