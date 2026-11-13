@@ -10,6 +10,7 @@ import {
   decodeQuantizedMesh,
   fillTemplate,
   geoTileBounds,
+  mercatorLat,
   mercatorTileRange,
   planMercatorWarp,
   vectorTilePointToLonLat,
@@ -23,6 +24,7 @@ import {
   type WorkerRequest,
   type WorkerResponse,
 } from './protocol';
+import { meanWidth } from './polygon';
 import { buildTileGeometry } from './tileGeometry';
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -35,6 +37,7 @@ const FALLBACK_COLOR = '#56603f';
 class Absent extends Error {}
 
 const jobs = new Map<number, AbortController>();
+const EARTH_CIRCUMFERENCE = 40_075_017;
 
 /** fetch with retries for passing failures (network, 429, 5xx); 4xx fail at once. */
 async function fetchRetry(url: string, signal: AbortSignal, retries = 3): Promise<Response> {
@@ -161,13 +164,27 @@ interface MaskRule {
   layer: string;
   match: (props: Record<string, unknown>) => boolean;
   color: string;
+  /** Polygons narrower than this (metres, mean width) are skipped. */
+  minWidth?: number;
 }
+
+/**
+ * Rivers narrower than this stay part of the photo: streams and canals are often under trees
+ * or only a few pixels wide, and a water surface there reads as a dark line from the air.
+ */
+const MIN_RIVER_WIDTH = 15;
 
 const MASK_RULES: MaskRule[] = [
   {
     layer: 'water',
-    match: (p) => p.class === 'lake' || p.class === 'river',
+    match: (p) => p.class === 'lake',
     color: 'rgb(255,0,0)',
+  },
+  {
+    layer: 'water',
+    match: (p) => p.class === 'river',
+    color: 'rgb(255,0,0)',
+    minWidth: MIN_RIVER_WIDTH,
   },
   {
     layer: 'landcover',
@@ -199,13 +216,18 @@ function drawLayer(
   const sx = size / (b.east - b.west);
   const sy = size / (b.north - b.south);
   const ll = { lon: 0, lat: 0 };
+  const midLat = mercatorLat(tile.y + 0.5, tile.z);
+  const metresPerUnit =
+    (EARTH_CIRCUMFERENCE * Math.cos((midLat * Math.PI) / 180)) / 2 ** tile.z / layer.extent;
   ctx.fillStyle = rule.color;
   for (let i = 0; i < layer.length; i++) {
     const f = layer.feature(i);
     if (f.type !== 3 || !rule.match(f.properties)) continue;
+    const rings = f.loadGeometry();
+    if (rule.minWidth && meanWidth(rings) * metresPerUnit < rule.minWidth) continue;
     // One path per feature with even-odd filling, so islands stay land.
     ctx.beginPath();
-    for (const ring of f.loadGeometry()) {
+    for (const ring of rings) {
       for (let k = 0; k < ring.length; k++) {
         const pt = ring[k]!;
         vectorTilePointToLonLat(tile, layer.extent, pt.x, pt.y, ll);

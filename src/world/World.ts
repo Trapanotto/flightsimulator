@@ -198,7 +198,8 @@ export class World {
         this.init().catch((err: unknown) => console.warn('world: terrain unavailable', err));
       return;
     }
-    camera.updateMatrixWorld();
+    // Parents too: a cockpit or chase camera hangs below the aircraft.
+    camera.updateWorldMatrix(true, false);
     const frame = this.frame;
     const pos = camera.getWorldPosition(this.v);
     const ecef = frame.toEcef(pos, { x: 0, y: 0, z: 0 });
