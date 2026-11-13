@@ -86,6 +86,23 @@ export class LocalFrame {
     this.south = { x: sp * cl, y: sp * sl, z: -cp };
   }
 
+  /** The origin in ECEF metres. */
+  originEcef<T extends Vec3Like>(out: T): T {
+    out.x = this.o.x;
+    out.y = this.o.y;
+    out.z = this.o.z;
+    return out;
+  }
+
+  /** Local direction -> ECEF direction (no translation). */
+  dirToEcef<T extends Vec3Like>(d: Vec3Like, out: T): T {
+    const { x, y, z } = d;
+    out.x = x * this.east.x + y * this.up.x + z * this.south.x;
+    out.y = x * this.east.y + y * this.up.y + z * this.south.y;
+    out.z = x * this.east.z + y * this.up.z + z * this.south.z;
+    return out;
+  }
+
   /** ECEF point -> local coordinates. */
   toLocal<T extends Vec3Like>(ecef: Vec3Like, out: T): T {
     const dx = ecef.x - this.o.x;

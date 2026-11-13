@@ -18,7 +18,9 @@
     "check": "npm run typecheck && npm run lint && npm test"
   },
   "dependencies": {
+    "@mapbox/vector-tile": "^3.0.0",
     "@preact/signals": "^2.11.4",
+    "pbf": "^5.1.2",
     "preact": "^11.2.0",
     "three": "^0.186.1"
   },
