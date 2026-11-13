@@ -2,11 +2,13 @@ import {
   ACESFilmicToneMapping,
   PCFShadowMap,
   PerspectiveCamera,
+  RenderPipeline,
   Scene,
   Vector2,
   Vector3,
   WebGPURenderer,
 } from 'three/webgpu';
+import { pass } from 'three/tsl';
 import { type AircraftVisual, createReferenceMarker, loadAircraftVisual } from '@aircraft';
 import { AudioEngine } from '@audio';
 import {
@@ -25,7 +27,7 @@ import {
   type Telemetry,
   createAircraft,
 } from '@sim';
-import { Sky, type Weather } from '@sky';
+import { Sky, WEATHER_PRESETS } from '@sky';
 import { type FlightPlan, game, mountUi, settings, status, touchInput } from '@ui';
 import { World } from '@world';
 import { AIRPORTS, findAirport, runwayStart } from './airports';
@@ -43,49 +45,6 @@ const HOME = { icao: 'LSZB', runway: '32' };
 const REBASE_DISTANCE = 3000;
 const KT = 0.514444;
 
-const WEATHER: Record<Exclude<FlightPlan['weather'], 'live'>, Weather> = {
-  clear: {
-    cloudCover: 0,
-    cloudBase: 2600,
-    cloudTop: 3400,
-    visibility: 80_000,
-    windFromDeg: 250,
-    windSpeed: 2,
-    precipitation: 0,
-    temperature: 15,
-  },
-  fair: {
-    cloudCover: 0.3,
-    cloudBase: 2200,
-    cloudTop: 3400,
-    visibility: 50_000,
-    windFromDeg: 250,
-    windSpeed: 4,
-    precipitation: 0,
-    temperature: 15,
-  },
-  cloudy: {
-    cloudCover: 0.6,
-    cloudBase: 1800,
-    cloudTop: 3400,
-    visibility: 30_000,
-    windFromDeg: 240,
-    windSpeed: 6,
-    precipitation: 0,
-    temperature: 13,
-  },
-  overcast: {
-    cloudCover: 0.95,
-    cloudBase: 1500,
-    cloudTop: 2600,
-    visibility: 15_000,
-    windFromDeg: 230,
-    windSpeed: 5,
-    precipitation: 0,
-    temperature: 11,
-  },
-};
-
 /** What tests and the screenshot tool can reach from the page (`window.__app`). */
 export interface AppDebug {
   renderer: WebGPURenderer;
@@ -101,6 +60,7 @@ export interface AppDebug {
   /** Smoothed frame time in ms and the worst frame of the last half second. */
   frameMs: number;
   worstMs: number;
+  assist: RudderAssist;
 }
 
 declare global {
@@ -139,7 +99,9 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   // ---- renderer ----
   const renderer = new WebGPURenderer({
     canvas,
-    antialias: profile.antialias,
+    // The scene is drawn into the post-processing chain; multisampling there would give
+    // silhouette pixels the wrong haze.
+    antialias: false,
     powerPreference: 'high-performance',
     forceWebGL: query.has('webgl'),
     // The view reaches from the instrument panel (0.1 m) to the Alps (200 km): only a
@@ -152,7 +114,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     : 'WebGL 2';
   status.renderer.value = backend;
   renderer.toneMapping = ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.9;
+  // The sky bakes its exposure into everything it lights; this stays a brightness setting.
+  renderer.toneMappingExposure = 1;
   renderer.shadowMap.enabled = profile.shadowMapSize > 0;
   renderer.shadowMap.type = PCFShadowMap;
 
@@ -170,10 +133,22 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       ? new Date(fixedTime)
       : new Date();
   const timeIsFixed = shot || !!fixedTime;
-  const sky = new Sky(startDate, homeStart.lon, homeStart.lat);
+  const sky = new Sky(startDate, homeStart.lon, homeStart.lat, profile.sky);
+  /** A fixed frame: the clouds are anchored to it, so they stay over the land. */
+  const anchor = new LocalFrame(homeStart.lon, homeStart.lat, 0);
   const world = new World(frame, profile.world);
   const env = new WorldEnvironment(world, () => frame);
   scene.add(sky.object, world.object);
+  scene.environment = sky.environment;
+
+  // Scene, then the air and the clouds in front of it; tone mapping comes last.
+  const scenePass = pass(scene, camera);
+  const pipeline = new RenderPipeline(renderer);
+  pipeline.outputNode = sky.post(
+    scenePass.getTextureNode('output'),
+    scenePass.getTextureNode('depth'),
+    camera,
+  );
 
   if (profile.shadowMapSize > 0) {
     const s = sky.sun.shadow;
@@ -216,6 +191,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   // ---- state ----
   const rig = new CameraRig();
   rig.attach(canvas);
+  rig.autoOrbit = !shot;
   const local = new Vector3();
   rig.groundY = (x, z) => {
     const g = frame.toGeodetic(local.set(x, 0, z));
@@ -294,7 +270,9 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       sky.setTime(typeof time === 'number' ? dateAtSwissHour(new Date(), time) : new Date());
     }
     // Live weather follows with the sky package; until then it is a fair day.
-    const weather = WEATHER[p && p.weather !== 'live' ? p.weather : 'fair'];
+    // Screenshot tests need a sky that looks the same every time: no drifting clouds.
+    const weather =
+      WEATHER_PRESETS[shot ? 'clear' : p && p.weather !== 'live' ? p.weather : 'fair'];
     sky.setWeather(weather);
     game.weather.value = weather;
     env.air_ = {
@@ -473,15 +451,9 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     world,
     frameMs: 0,
     worstMs: 0,
+    assist,
   };
   window.__app = debug;
-  (debug as unknown as { assist: RudderAssist }).assist = assist;
-  (debug as unknown as { probe: () => object }).probe = () => ({
-    zoom: groundZoom,
-    gh: +groundHeight.toFixed(2),
-    off: +env.heightOffset.toFixed(3),
-    loading: world.loading,
-  });
 
   prepare(null);
 
@@ -567,16 +539,33 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       }
     }
 
-    world.update(camera);
-    sky.update(camera);
-    // The shadow map covers the aircraft and the ground around it.
-    sky.sun.target.position.copy(visual.object.position);
-    sky.sun.position.copy(visual.object.position).addScaledVector(sky.state.sunDirection, 200);
+    if (pending && !flight) {
+      // Nothing to look at yet: wait at the start point, so its terrain loads in full detail.
+      const h = (world.groundHeight(pending.lon, pending.lat) ?? 600) + (pending.altitude ? 0 : 6);
+      frame.fromGeodetic(pending.lon, pending.lat, pending.altitude ?? h, camera.position);
+      const b = (pending.start.headingDeg * Math.PI) / 180;
+      local.copy(camera.position);
+      local.x += Math.sin(b) * 100;
+      local.z -= Math.cos(b) * 100;
+      camera.lookAt(local);
+    }
 
-    renderer.render(scene, camera);
+    world.update(camera);
+    const camGeo = frame.toGeodetic(camera.position, geo);
+    anchor.fromGeodetic(frame.origin.lon, frame.origin.lat, 0, local);
+    sky.update(camera, {
+      dt,
+      altitude: ellipsoidToSeaLevel(camGeo.lon, camGeo.lat, camGeo.h),
+      origin: { x: local.x, z: local.z },
+    });
+    // The shadow map covers the aircraft and the ground around it (the moon lights at night).
+    sky.sun.target.position.copy(visual.object.position);
+    sky.sun.position.copy(visual.object.position).addScaledVector(sky.state.lightDirection, 200);
+
+    pipeline.render();
 
     debug.frames++;
-    if (!debug.ready && flight && debug.frames > 5) debug.ready = true;
+    if (!debug.ready && flight && debug.frames > 5 && (!shot || !world.loading)) debug.ready = true;
     fpsFrames++;
     fpsTime += dt;
     worst = Math.max(worst, frameMs);

@@ -24,11 +24,10 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { loadAircraftVisual } from '@aircraft';
 import type { ControlInput, Telemetry } from '@sim';
 
-declare global {
-  interface Window {
-    __demo?: { ready: boolean; backend: string; telemetry: Telemetry; ac?: unknown };
-  }
-}
+// No global declaration: every demo page has its own shape of __demo.
+const demoWindow = window as unknown as {
+  __demo?: { ready: boolean; backend: string; telemetry: Telemetry; ac?: unknown };
+};
 
 const q = new URLSearchParams(location.search);
 const view = q.get('view') ?? 'front-left';
@@ -326,7 +325,7 @@ if (shot) {
   telemetry.time = 24.02;
   ac.update(0, telemetry, controls);
 }
-window.__demo = { ready: false, backend, telemetry, ac } as typeof window.__demo;
+demoWindow.__demo = { ready: false, backend, telemetry, ac } as typeof demoWindow.__demo;
 const info = document.getElementById('info')!;
 info.textContent = `${backend} · state ${stateName} · view ${view}`;
 let frames = 0;
@@ -334,5 +333,5 @@ renderer.setAnimationLoop(() => {
   if (!shot) step();
   controlsOrbit?.update();
   renderer.render(scene, camera);
-  if (++frames === 5) window.__demo!.ready = true;
+  if (++frames === 5) demoWindow.__demo!.ready = true;
 });

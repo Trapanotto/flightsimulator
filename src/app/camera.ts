@@ -19,6 +19,8 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
  */
 export class CameraRig {
   mode: CameraMode = 'menu';
+  /** The menu camera circles the aircraft slowly (off for screenshot tests). */
+  autoOrbit = true;
   /** Look offsets from dragging, radians. */
   private yaw = 0;
   private pitch = 0;
@@ -96,7 +98,7 @@ export class CameraRig {
     let elevation: number;
     let distance = view.chaseDistance * this.zoom;
     if (this.mode === 'menu') {
-      if (this.sinceInput > 6) this.menuAngle += dt * 0.05;
+      if (this.autoOrbit && this.sinceInput > 6) this.menuAngle += dt * 0.05;
       around += this.menuAngle + Math.PI * 0.75;
       elevation = clamp(0.16 + this.pitch, 0.03, 1.4);
       distance *= 0.85;

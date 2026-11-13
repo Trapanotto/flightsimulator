@@ -49,13 +49,10 @@ interface DemoDebug {
   error?: string;
   measure?: (frames: number) => Promise<number>;
 }
-declare global {
-  interface Window {
-    __demo?: DemoDebug;
-  }
-}
+// No global declaration: every demo page has its own shape of __demo.
+const demoWindow = window as unknown as { __demo?: DemoDebug };
 const debug: DemoDebug = { ready: false, frames: 0, backend: '' };
-window.__demo = debug;
+demoWindow.__demo = debug;
 window.addEventListener('error', (e) => (debug.error = String(e.message)));
 
 /** Height of the curved ground below a point at horizontal distance d (render y). */

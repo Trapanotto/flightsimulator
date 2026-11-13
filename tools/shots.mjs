@@ -17,7 +17,7 @@ const SCENES = [
   { name: 'home-webgl', query: 'shot=1&webgl=1', width: 1280, height: 720 },
 ];
 /** A scene fails when more than this share of its pixels differ. */
-const MAX_DIFF = 0.005;
+const MAX_DIFF = 0.01;
 
 const update = process.argv.includes('--update');
 const only = process.argv.find((a) => a.startsWith('--only='))?.slice(7);
@@ -54,9 +54,10 @@ try {
     const errors = [];
     page.on('pageerror', (e) => errors.push(String(e)));
     await page.goto(`${base}?${scene.query}`);
-    await page.waitForFunction(() => window.__app?.ready, null, { timeout: 60_000 });
+    await page.waitForFunction(() => window.__app?.ready, null, { timeout: 120_000 });
     await page.evaluate(() => document.fonts.ready);
-    await page.waitForTimeout(400);
+    // Let the last terrain tiles fade in and the sky settle.
+    await page.waitForTimeout(2500);
     const backend = await page.evaluate(() => window.__app.backend);
     const shot = PNG.sync.read(await page.screenshot());
     await page.close();

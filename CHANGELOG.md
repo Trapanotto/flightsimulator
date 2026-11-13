@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.0.0-alpha.1 – Phase 1: Kostprobe Bern–Thunersee (2026-11-13)
+
+Der erste fliegbare Stand des Neuaufbaus.
+
+- **Flugmodell Cessna 172S** aus Flächenstücken gerechnet, mit Motor, Propeller und Fahrwerk;
+  alle geprüften Handbuchwerte (Überziehen, Startstrecke, Steigrate, Reiseflug, Gleitzahl,
+  Landestrecke) innerhalb von 5 %.
+- **Echtes Gelände** der Schweiz von swisstopo, nachgeladen nach Entfernung, mit Bodendetail
+  in der Nähe, Seen und Flüssen als Wasser und exakter Höhe unter den Rädern.
+- **Himmel** physikalisch gerechnet von Mittag bis Nacht, Dunst über die Distanz,
+  volumetrische Wolken mit Schatten, vier Wetterlagen, Mond und Sterne.
+- **Cessna 172S** als neues 3D-Modell mit beweglichen Rudern, Klappen und Propeller, Lichtern
+  und einem Cockpit, dessen Instrumente die echten Werte zeigen.
+- **Menü**: Hauptmenü über der Live-Szene, Flugplanung mit Schweizerkarte, Tageszeit und
+  Wetter, Briefing, Fluganzeigen, Pause, Einstellungen, Touch-Steuerung für das Handy.
+- **Steuerung**: Tastatur, Gamepad und Touch; eine Seitenruder-Hilfe hält die Maschine am
+  Boden gerade und im Flug sauber, solange man das Seitenruder nicht selbst bedient.
+- Aussen- und Cockpitansicht, sechs Startflugplätze, Start auf der Piste oder in der Luft.
+
+Noch nicht enthalten: Ton, Bäume und Gebäude, Pistenmarkierungen, Live-Wetter, bedienbare
+Schalter im Cockpit.
+
 ## 1.0.0-alpha.0 – Neuaufbau, Phase 0: Fundament (2026-11-13)
 
 Der Simulator wird von Grund auf neu gebaut ([Konzept](docs/KONZEPT.md)). Der bisherige Code
