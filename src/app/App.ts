@@ -14,6 +14,7 @@ import {
   ecefToGeodetic,
   ellipsoidToSeaLevel,
   geodeticToEcef,
+  geoidUndulation,
   seaLevelToEllipsoid,
 } from '@geo';
 import {
@@ -141,6 +142,9 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     antialias: profile.antialias,
     powerPreference: 'high-performance',
     forceWebGL: query.has('webgl'),
+    // The view reaches from the instrument panel (0.1 m) to the Alps (200 km): only a
+    // reversed depth buffer keeps that precise.
+    reversedDepthBuffer: true,
   });
   await renderer.init();
   const backend = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend
@@ -153,7 +157,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   renderer.shadowMap.type = PCFShadowMap;
 
   const scene = new Scene();
-  const camera = new PerspectiveCamera(55, 1, 0.5, profile.world.viewDistance * 1.5);
+  const camera = new PerspectiveCamera(55, 1, 0.1, profile.world.viewDistance * 1.5);
 
   // ---- world, sky, simulation environment ----
   const homeAirport = findAirport(HOME.icao)!;
@@ -192,7 +196,11 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     if (visualId === id) return;
     visualId = id;
     try {
-      const next = await loadAircraftVisual(id);
+      const next = await loadAircraftVisual(id, {
+        quality: profile.device === 'mobile' ? 'low' : 'high',
+      });
+      // The altimeter shows height above sea level; the simulation works above the ellipsoid.
+      next.setAltimeterOffset(-geoidUndulation(frame.origin.lon, frame.origin.lat));
       next.object.visible = visual.object.visible;
       scene.remove(visual.object);
       visual.dispose();
