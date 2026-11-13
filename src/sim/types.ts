@@ -52,6 +52,11 @@ export interface ControlInput {
   pitchTrim: number;
   /** One entry per engine: 0 idle cut-off .. 1 full rich (piston engines). */
   mixture: number[];
+  /**
+   * One entry per engine: the starter is engaged while true (held like the key). Optional
+   * so existing callers stay valid; without it a stopped engine only restarts by windmilling.
+   */
+  starter?: boolean[];
 }
 
 /** The air at one point. */
