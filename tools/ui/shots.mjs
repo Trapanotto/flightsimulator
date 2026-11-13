@@ -115,7 +115,7 @@ for (const s of scenes) {
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
   await page.goto(s.url);
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(1000);
   await page.screenshot({ path: path.join(outDir, `${s.name}.png`) });
   if (errors.length) console.log(`${s.name}: ${errors.join(' | ')}`);
   await context.close();

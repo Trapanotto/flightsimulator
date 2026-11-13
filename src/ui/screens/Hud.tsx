@@ -321,12 +321,13 @@ export function Hud() {
   const crashed = useComputed(() => game.telemetry.value?.crashed);
   const viewLabel = t(cockpit ? 'hud.view.cockpit' : 'hud.view.outside');
 
-  // Keep focus off the flight buttons: Space or Enter on a focused button would trigger it
-  // while the pilot uses the keyboard to fly.
+  // Keep focus off the flight buttons, also when the pause dialog hands focus back: Space or
+  // Enter on a focused button would trigger it while the pilot flies with the keyboard.
   useEffect(() => {
+    if (paused) return;
     if (document.activeElement instanceof HTMLElement && document.activeElement.closest('.ui'))
       document.activeElement.blur();
-  }, []);
+  }, [paused]);
 
   return (
     <div

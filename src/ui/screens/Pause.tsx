@@ -4,7 +4,7 @@ import { game } from '../api';
 import { IconExit, IconPlay, IconRestart, IconSettings } from '../components/icons';
 import { arrowNav, useDialog } from '../focus';
 import { t } from '../i18n';
-import { actions, nav } from '../nav';
+import { actions, nav, showTouch } from '../nav';
 
 function flownTime(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
@@ -79,7 +79,7 @@ export function PauseMenu() {
             {t('pause.exit')}
           </button>
         </div>
-        <p class="pause-hint">{t('pause.hint')}</p>
+        {!showTouch.value && <p class="pause-hint">{t('pause.hint')}</p>}
       </div>
     </div>
   );

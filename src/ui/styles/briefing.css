@@ -334,8 +334,8 @@
   gap: var(--s-2);
   margin-top: auto;
   margin-inline: calc(-1 * var(--s-4));
-  padding: var(--s-3) var(--s-4) var(--safe-b);
-  background: linear-gradient(0deg, rgb(5 8 13 / 0.96) 60%, rgb(5 8 13 / 0));
+  padding: var(--s-6) var(--s-4) var(--safe-b);
+  background: linear-gradient(0deg, rgb(5 8 13 / 0.97) 55%, rgb(5 8 13 / 0));
 }
 
 .briefing-progress > * {
@@ -389,8 +389,11 @@
     font-size: var(--fs-4);
   }
   .touch-hints {
-    gap: 6px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px var(--s-3);
     font-size: var(--fs-1);
+    line-height: 1.3;
   }
   .briefing-tip {
     font-size: var(--fs-2);
@@ -404,5 +407,11 @@
   }
   .briefing-map .swissmap svg {
     max-height: 180px;
+  }
+  .brief-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .brief-fact--wide {
+    grid-column: auto;
   }
 }

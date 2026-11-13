@@ -66,6 +66,8 @@ function MenuItem(props: {
   soon?: boolean;
   onClick?: () => void;
   autofocus?: boolean;
+  /** Position in the list, for the staggered entrance. */
+  index: number;
 }) {
   // A "soon" entry is not a dead button: it says when it is chosen that it comes later.
   const told = useSignal(false);
@@ -80,6 +82,7 @@ function MenuItem(props: {
       class={`menu-item${props.primary ? ' is-primary' : ''}${props.soon ? ' is-soon' : ''}`}
       aria-disabled={props.soon ? 'true' : undefined}
       data-autofocus={props.autofocus ? '' : undefined}
+      style={{ '--i': props.index }}
       onClick={() => (props.soon ? (told.value = true) : props.onClick?.())}
     >
       <span class="menu-item-icon">{props.icon}</span>
@@ -110,11 +113,12 @@ function MainMenu() {
   return (
     <nav
       ref={ref}
-      class="menu-list enter"
+      class="menu-list"
       aria-label={t('menu.label')}
       onKeyDown={(e) => arrowNav(e, ref.current, '.menu-item', 'vertical')}
     >
       <MenuItem
+        index={0}
         primary
         autofocus
         label={t('menu.fly')}
@@ -122,10 +126,29 @@ function MainMenu() {
         icon={<IconPlane size={22} />}
         onClick={() => (nav.page.value = 'setup')}
       />
-      <MenuItem soon label={t('menu.hangar')} sub={t('menu.hangar.sub')} icon={<IconHangar />} />
-      <MenuItem soon label={t('menu.school')} sub={t('menu.school.sub')} icon={<IconSchool />} />
-      <MenuItem soon label={t('menu.logbook')} sub={t('menu.logbook.sub')} icon={<IconLogbook />} />
       <MenuItem
+        index={1}
+        soon
+        label={t('menu.hangar')}
+        sub={t('menu.hangar.sub')}
+        icon={<IconHangar />}
+      />
+      <MenuItem
+        index={2}
+        soon
+        label={t('menu.school')}
+        sub={t('menu.school.sub')}
+        icon={<IconSchool />}
+      />
+      <MenuItem
+        index={3}
+        soon
+        label={t('menu.logbook')}
+        sub={t('menu.logbook.sub')}
+        icon={<IconLogbook />}
+      />
+      <MenuItem
+        index={4}
         label={t('menu.settings')}
         sub={t('menu.settings.sub')}
         icon={<IconSettings />}

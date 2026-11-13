@@ -198,6 +198,44 @@ await check('touch: two thumbs, stick returns to centre, throttle stays', async 
   await context.close();
 });
 
+// --- The HUD updates in place: text changes, but no nodes are re-created --------------------
+await check('HUD: 20 updates a second without re-rendering', async () => {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  await page.goto(`${base}?screen=flight&lang=en`);
+  await page.waitForSelector('.hud');
+  await page.waitForTimeout(300);
+  const counts = await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const c = { text: 0, nodes: 0, updates: 0 };
+        const stop = window.__demo.game.telemetry.subscribe(() => c.updates++);
+        // Keep the fake aircraft moving so the numbers change.
+        window.__demo.sim.throttle = 1;
+        new MutationObserver((list) => {
+          for (const m of list) {
+            if (m.type === 'characterData') c.text++;
+            else if (m.type === 'childList' && !m.target.closest?.('.notice, .warnings')) c.nodes++;
+          }
+        }).observe(document.querySelector('.hud'), {
+          subtree: true,
+          childList: true,
+          characterData: true,
+        });
+        setTimeout(() => {
+          stop();
+          resolve(c);
+        }, 1500);
+      }),
+  );
+  assert.ok(counts.updates >= 25, `telemetry updates: ${counts.updates}`);
+  assert.ok(counts.text > 10, `text updated in place: ${counts.text}`);
+  assert.equal(counts.nodes, 0, 'no element was re-created');
+  results.push(
+    `     (${counts.updates} telemetry updates, ${counts.text} text changes, ${counts.nodes} node changes)`,
+  );
+  await page.close();
+});
+
 // --- No horizontal overflow at any size ------------------------------------------------------
 await check('no horizontal scrolling at any size or screen', async () => {
   const sizes = [

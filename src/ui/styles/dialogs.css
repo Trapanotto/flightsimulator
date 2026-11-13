@@ -244,11 +244,13 @@
   .modal-layer {
     padding: 0;
   }
+  /* Full screen on phones: opaque, nothing of the menu behind should compete. */
   .settings {
     width: 100%;
     height: 100%;
     border-radius: 0;
     border: 0;
+    background: #0a0e16;
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
       env(safe-area-inset-left);
   }

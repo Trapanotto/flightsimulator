@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AircraftInfo } from '../src/sim/types';
 import type { AirportOption } from '../src/ui/api';
 import { settings } from '../src/ui/api';
+import { ALL_MESSAGES, isMessageKey, lang, t } from '../src/ui/i18n';
 import {
   MINUS,
   convertAltitude,
@@ -350,5 +351,22 @@ describe('sun for the time slider', () => {
     const winter = sunTimes(new Date('2026-12-21T12:00:00Z'), 46.95, 7.44)!;
     expect(Math.abs(winter.sunrise - (8 + 13 / 60))).toBeLessThan(0.1);
     expect(Math.abs(winter.sunset - (16 + 44 / 60))).toBeLessThan(0.1);
+  });
+});
+
+describe('texts', () => {
+  it('writes German the Swiss way, without the sharp s', () => {
+    for (const [key, text] of Object.entries(ALL_MESSAGES.de)) expect(text, key).not.toMatch(/ß/);
+  });
+
+  it('fills placeholders and knows its keys', () => {
+    lang.value = 'en';
+    expect(t('aircraft.engine.many', { n: 2 })).toBe('2 engines');
+    expect(t('briefing.runway', { rwy: '14' })).toBe('Runway 14');
+    lang.value = 'de';
+    expect(t('briefing.runway', { rwy: '14' })).toBe('Piste 14');
+    expect(isMessageKey('msg.gearDown')).toBe(true);
+    expect(isMessageKey('toString')).toBe(false);
+    expect(isMessageKey('Gear down')).toBe(false);
   });
 });

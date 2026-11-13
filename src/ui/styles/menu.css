@@ -204,6 +204,9 @@
 
 .menu-item {
   position: relative;
+  /* backwards, not both: once in, hover and focus own the transform again. */
+  animation: ui-enter var(--t-slow) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 45ms);
   display: flex;
   align-items: center;
   gap: var(--s-4);
@@ -389,7 +392,6 @@
 /* Short screens (phones in landscape): smaller wordmark, entries without subtitles. */
 @media (max-height: 560px) {
   .menu-col {
-    position: static;
     padding-top: calc(var(--safe-t) + 4px);
     width: min(380px, 100%);
   }
@@ -430,8 +432,9 @@
   .menu-item.is-primary .menu-item-label {
     font-size: var(--fs-6);
   }
+  /* Fixed: out of the column, to the free top-right corner of the screen. */
   .menu-foot {
-    position: absolute;
+    position: fixed;
     right: var(--safe-r);
     top: var(--safe-t);
     padding: 0;

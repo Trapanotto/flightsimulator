@@ -33,6 +33,7 @@ function General() {
       <Field label={t('settings.quality')} id="set-quality" aside={null}>
         <Segmented
           label={t('settings.quality')}
+          class="seg--wrap"
           value={settings.quality.value}
           onChange={(v) => (settings.quality.value = v)}
           options={(['auto', 'low', 'medium', 'high'] as const).map((q) => ({

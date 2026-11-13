@@ -25,11 +25,13 @@
   opacity: 0.7;
 }
 
+/* A small dark tab: captions stay legible over bright snow. */
 .touch-caption {
-  display: block;
-  margin-bottom: 6px;
-  text-align: center;
-  text-shadow: 0 1px 4px rgb(0 0 0 / 0.8);
+  display: table;
+  margin: 0 auto 6px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: rgb(9 13 20 / 0.55);
   color: var(--c-ink-2);
 }
 
