@@ -128,6 +128,40 @@ describe('stall', () => {
   });
 });
 
+describe('spin', () => {
+  it('autorotates with pro-spin controls and recovers with opposite rudder and forward yoke', () => {
+    const f = airborne(2500, 65);
+    const { ac } = f;
+    const t = ac.telemetry;
+    ac.controls.throttle[0] = 0;
+    fly(f, 14, () => {
+      ac.controls.pitch = Math.min(1, t.time / 6);
+      ac.controls.yaw = t.time > 7 ? 1 : 0;
+    });
+    // Established: stalled and rotating fast to the right.
+    expect(t.alpha / DEG).toBeGreaterThan(18);
+    expect(ac.state.angularVelocity.z / DEG).toBeGreaterThan(40);
+    ac.controls.yaw = -1;
+    ac.controls.pitch = -0.3;
+    fly(f, 3);
+    expect(Math.abs(ac.state.angularVelocity.z) / DEG).toBeLessThan(10);
+    expect(t.alpha / DEG).toBeLessThan(10);
+    expect(t.crashed).toBeUndefined();
+  });
+});
+
+describe('ground effect', () => {
+  it('needs less power and less angle of attack just above the runway', () => {
+    const high = airborne(150, 60);
+    // Wheels half a metre above the ground: the high wing is about 2.5 m up.
+    const low = airborne(1.75, 60);
+    expect(low.ac.telemetry.agl).toBeGreaterThan(0.3);
+    expect(low.ac.telemetry.agl).toBeLessThan(0.8);
+    expect(low.ac.controls.throttle[0]!).toBeLessThan(high.ac.controls.throttle[0]! - 0.03);
+    expect(low.ac.telemetry.alpha).toBeLessThan(high.ac.telemetry.alpha - 0.25 * DEG);
+  });
+});
+
 describe('ground handling', () => {
   it('stays put with the parking brake at idle, on level and on sloped ground', () => {
     for (const slope of [

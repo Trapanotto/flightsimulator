@@ -408,9 +408,6 @@ export class FlightModel implements SimAircraft {
       thrust += tq;
       torque += qq;
       if (accumulate) {
-        // Thrust along x at the quadrant, and the blade drag of this quadrant as a force
-        // against the blade motion: the parts that do not cancel are the propeller's normal
-        // force and P-factor moments.
         // Thrust acts at the quadrant (its asymmetry is the P-factor moment); the blade drag
         // goes into the shaft as torque, and only what does not cancel between quadrants,
         // the propeller's normal force, reaches the airframe, at the hub.

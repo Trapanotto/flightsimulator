@@ -119,7 +119,8 @@ export function serviceCeiling() {
       const rate = (ac.telemetry.altitude - last) / 60 / FPM;
       const mid = (ac.telemetry.altitude + last) / 2 / FT;
       if (rate < 100) {
-        ceiling = previous.alt + ((previous.rate - 100) / (previous.rate - rate)) * (mid - previous.alt);
+        ceiling =
+          previous.alt + ((previous.rate - 100) / (previous.rate - rate)) * (mid - previous.alt);
         return true;
       }
       previous = { alt: mid, rate };
