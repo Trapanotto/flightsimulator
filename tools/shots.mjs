@@ -13,6 +13,8 @@ import { createServer } from 'vite';
 const SCENES = [
   { name: 'home-desktop', query: 'shot=1', width: 1280, height: 720 },
   { name: 'home-mobile', query: 'shot=1&device=mobile', width: 390, height: 844 },
+  // The fallback for browsers without WebGPU has to keep working.
+  { name: 'home-webgl', query: 'shot=1&webgl=1', width: 1280, height: 720 },
 ];
 /** A scene fails when more than this share of its pixels differ. */
 const MAX_DIFF = 0.005;
