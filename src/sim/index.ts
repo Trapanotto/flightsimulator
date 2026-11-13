@@ -3,11 +3,16 @@
  * runs in Node for tests. Depends on no other package.
  */
 export type {
+  AircraftId,
+  AircraftInfo,
   AircraftState,
   AirSample,
   ControlInput,
+  EngineTelemetry,
   Environment,
   GroundSample,
+  InitialCondition,
+  Telemetry,
   Quat,
   SimAircraft,
   Surface,
@@ -15,3 +20,4 @@ export type {
 } from './types';
 export { FixedStep, SIM_DT, SIM_HZ } from './fixedStep';
 export { isa, type IsaSample } from './atmosphere';
+export { AIRCRAFT, createAircraft, neutralControls } from './aircraft';

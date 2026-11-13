@@ -6,7 +6,7 @@ import {
   MeshStandardNodeMaterial,
   type Object3D,
 } from 'three/webgpu';
-import type { AircraftState, ControlInput } from '@sim';
+import type { AircraftId, ControlInput, Telemetry } from '@sim';
 
 /**
  * What the app needs from an aircraft on screen. The model's own frame is three's: x left,
@@ -14,9 +14,27 @@ import type { AircraftState, ControlInput } from '@sim';
  */
 export interface AircraftVisual {
   readonly object: Object3D;
-  /** Per frame: moving parts, lights, displays. */
-  update(dt: number, state: AircraftState, controls: ControlInput): void;
+  /** Camera placement, in the model's frame (metres). */
+  readonly view: {
+    /** The pilot's eye point. */
+    eye: { x: number; y: number; z: number };
+    /** Outside camera: distance behind and height above the aircraft. */
+    chaseDistance: number;
+    chaseHeight: number;
+  };
+  /**
+   * Per frame: moving parts (control surfaces, propeller, gear, flaps), lights and the cockpit
+   * instruments, all from the telemetry. `controls` moves yoke, pedals and levers.
+   */
+  update(dt: number, telemetry: Telemetry, controls: ControlInput): void;
+  /** The camera sits in the cockpit: show the interior at full detail, hide what would clip. */
+  setCockpitView(inside: boolean): void;
   dispose(): void;
+}
+
+/** Loads the model of a type. Rejects if its files cannot be loaded. */
+export function loadAircraftVisual(id: AircraftId): Promise<AircraftVisual> {
+  return Promise.reject(new Error(`loadAircraftVisual('${id}'): the models arrive in phase 1`));
 }
 
 /**
@@ -43,7 +61,9 @@ export function createReferenceMarker(): AircraftVisual {
   }
   return {
     object,
+    view: { eye: { x: 0, y: 1, z: 1 }, chaseDistance: 22, chaseHeight: 6 },
     update() {},
+    setCockpitView() {},
     dispose() {
       object.traverse((o) => {
         if (o instanceof Mesh) o.geometry.dispose();

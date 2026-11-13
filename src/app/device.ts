@@ -1,4 +1,5 @@
-import type { WorldQuality } from '@world';
+import { SKY_QUALITY, type SkyQuality } from '@sky';
+import { WORLD_QUALITY, type WorldQuality } from '@world';
 
 export type DeviceClass = 'desktop' | 'mobile';
 
@@ -15,6 +16,7 @@ export interface DeviceProfile {
   /** Shadow map size in texels, 0 = no shadows. */
   shadowMapSize: number;
   world: WorldQuality;
+  sky: SkyQuality;
 }
 
 export const PROFILES: Record<DeviceClass, DeviceProfile> = {
@@ -23,14 +25,16 @@ export const PROFILES: Record<DeviceClass, DeviceProfile> = {
     maxPixelRatio: 2,
     antialias: true,
     shadowMapSize: 2048,
-    world: { viewDistance: 150_000 },
+    world: WORLD_QUALITY.desktop,
+    sky: SKY_QUALITY.desktop,
   },
   mobile: {
     device: 'mobile',
     maxPixelRatio: 1.5,
     antialias: true,
     shadowMapSize: 1024,
-    world: { viewDistance: 80_000 },
+    world: WORLD_QUALITY.mobile,
+    sky: SKY_QUALITY.mobile,
   },
 };
 

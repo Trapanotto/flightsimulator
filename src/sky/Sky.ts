@@ -9,6 +9,8 @@ import {
   SphereGeometry,
   Vector3,
   type Camera,
+  type Node,
+  type Texture,
 } from 'three/webgpu';
 import {
   dot,
@@ -35,6 +37,35 @@ export interface SkyState {
   /** Degrees from north, clockwise. */
   sunAzimuth: number;
 }
+
+/** The weather the sky shows. The app also feeds wind and visibility to the simulation. */
+export interface Weather {
+  /** Share of the sky covered by cumulus, 0..1. */
+  cloudCover: number;
+  /** Base and top of the cumulus layer, metres above sea level. */
+  cloudBase: number;
+  cloudTop: number;
+  /** Horizontal visibility at the ground, metres. */
+  visibility: number;
+  /** Surface wind: direction it comes from (degrees true) and speed (m/s). */
+  windFromDeg: number;
+  windSpeed: number;
+  /** 0 dry .. 1 heavy rain (snow below freezing). */
+  precipitation: number;
+  /** Air temperature at sea level, degrees Celsius. */
+  temperature: number;
+}
+
+/** How much the sky may cost; presets per device class are exported as SKY_QUALITY. */
+export interface SkyQuality {
+  /** Ray-marched clouds: steps per ray, 0 = no volumetric clouds. */
+  cloudSteps: number;
+}
+
+export const SKY_QUALITY: Record<'desktop' | 'mobile', SkyQuality> = {
+  desktop: { cloudSteps: 64 },
+  mobile: { cloudSteps: 24 },
+};
 
 /**
  * Sky, sun light and ambient light.
@@ -110,6 +141,23 @@ export class Sky {
     this.sun.color.copy(this.uSunColor.value);
     this.sun.intensity = 3.2 * Math.min(1, Math.max(0, (elevation + 1) / 8));
     this.ambient.intensity = 0.08 + 0.9 * day;
+  }
+
+  /**
+   * Image-based light for the scene (assign to `scene.environment`), or null if the sky lights
+   * the scene with its own lights only.
+   */
+  readonly environment: Texture | null = null;
+
+  setWeather(_weather: Weather) {}
+
+  /**
+   * The air between the camera and what was drawn: takes the rendered scene (colour and depth
+   * nodes of the scene pass) and returns it with aerial perspective and clouds. The app puts
+   * this into its post-processing chain right after the scene pass.
+   */
+  post(color: Node, _depth: Node, _camera: Camera): Node {
+    return color;
   }
 
   /** Per frame: the dome and the sun light follow the camera. */

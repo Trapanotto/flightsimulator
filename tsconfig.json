@@ -28,5 +28,5 @@
       "@app": ["./src/app/index.ts"]
     }
   },
-  "include": ["src", "tests", "vite.config.ts"]
+  "include": ["src", "tests", "demo", "vite.config.ts"]
 }
