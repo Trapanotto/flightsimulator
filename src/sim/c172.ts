@@ -46,7 +46,7 @@ const TAIL: AirfoilData = {
 
 // Wing: rectangular centre section to 2.5 m from the centre line, tapered to the tip.
 const WING_Z = -0.85;
-const WING_X = 0.08;
+const WING_X = 0.15;
 const DIHEDRAL = 1.73 * DEG;
 const ROOT_CHORD = 1.63;
 const TIP_CHORD = 1.13;
@@ -213,7 +213,7 @@ export const C172: AircraftDefinition = {
   downwashFactor: 1.05,
   tailArm: 4.7,
   stallWarning: { strip: stallHorn, alpha: 10.5 * DEG },
-  wingRoot: { strength: 0.6, radius: 0.6 },
+  wingRoot: { strength: 2.0, radius: 0.6 },
   fuselage: {
     dragArea: 0.42,
     dragPoint: v(0.3, 0, 0.35),
@@ -231,10 +231,12 @@ export const C172: AircraftDefinition = {
     position: v(1.95, 0, -0.15),
     swirlFactor: 0.3,
     ct: [
-      [0, 0.102],
-      [0.2, 0.1],
-      [0.4, 0.091],
-      [0.6, 0.071],
+      // Blades partly stalled standing still: static thrust is not the maximum.
+      [0, 0.084],
+      [0.2, 0.086],
+      [0.4, 0.088],
+      [0.5, 0.083],
+      [0.6, 0.0715],
       [0.7, 0.056],
       [0.8, 0.043],
       [0.9, 0.029],
@@ -270,7 +272,7 @@ export const C172: AircraftDefinition = {
     volumetricEfficiency: 0.85,
     idleManifold: 0.22,
     frictionTorque: 46,
-    frictionPerRadS: 0.07,
+    frictionPerRadS: 0.16,
     pumpingTorque: 40,
     inertia: 2.4,
     fullRichRatio: 1.25,
@@ -290,10 +292,10 @@ export const C172: AircraftDefinition = {
     flapRate: (30 * DEG) / 9,
     surfaceRate: 4,
     holdLimitPressure: 3200,
-    aileronRigging: 0,
-    rudderRigging: 0,
+    aileronRigging: -0.003,
+    rudderRigging: 0.04,
     stallShift: 0.25,
-    flapDrag: 0.7,
+    flapDrag: 0.45,
   },
   wheels: [
     {

@@ -122,7 +122,10 @@ export function updateSeparation(
   let lag = foil.lagChords;
   if (target > f) {
     const a = wrapAngle(alphaSeparation);
-    goal = staticSeparation(foil, a + (a >= 0 ? foil.reattachMargin : -foil.reattachMargin));
+    // The margin grows with the depth of the stall: light trailing-edge separation comes and
+    // goes with the angle, a fully broken-down flow needs the angle well back to reattach.
+    const margin = foil.reattachMargin * (1 - f) * (1 - f);
+    goal = staticSeparation(foil, a + (a >= 0 ? margin : -margin));
     lag *= 2;
     if (goal <= f) return f;
   }

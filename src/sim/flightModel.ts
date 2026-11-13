@@ -65,8 +65,8 @@ const Z_AXIS: Vec3 = { x: 0, y: 0, z: 1 };
 
 /** Tyre friction (dry, fully wet) and rolling resistance per surface. */
 const SURFACES: Record<Surface, { dry: number; wet: number; rolling: number }> = {
-  asphalt: { dry: 0.8, wet: 0.5, rolling: 0.015 },
-  concrete: { dry: 0.8, wet: 0.55, rolling: 0.015 },
+  asphalt: { dry: 0.8, wet: 0.5, rolling: 0.025 },
+  concrete: { dry: 0.8, wet: 0.55, rolling: 0.025 },
   grass: { dry: 0.5, wet: 0.3, rolling: 0.05 },
   gravel: { dry: 0.55, wet: 0.45, rolling: 0.04 },
   snow: { dry: 0.25, wet: 0.15, rolling: 0.07 },
@@ -802,7 +802,10 @@ export class FlightModel implements SimAircraft {
     const rolling = surf.rolling * (1 + plane.wetness);
     const c = this.controls;
     const pedal = wheel.brake === 'left' ? c.brakeLeft : wheel.brake === 'right' ? c.brakeRight : 0;
-    const brake = (c.parkingBrake ? 1 : clamp(pedal, 0, 1)) * (wheel.brakeForce ?? 0);
+    // Brake pads hold a standing wheel harder than they slow a turning one (static friction
+    // of the pads): the brakes hold a full-power run-up but still let a landing roll out.
+    const stiction = 1 + 0.5 * (1 - smoothstep(0.05, 0.5, Math.abs(vLong)));
+    const brake = (c.parkingBrake ? 1 : clamp(pedal, 0, 1)) * (wheel.brakeForce ?? 0) * stiction;
 
     // Tyre as a bristle: a spring that holds the aircraft still on a slope or against idle
     // thrust, and that relaxes over a rolling length so a rolling tyre grips by slip angle.
@@ -1173,6 +1176,10 @@ export class FlightModel implements SimAircraft {
     this.orient(env, groundPoint, start.headingDeg, pitch, g.normal);
     // Height of the centre above the plane: the compressed main wheel bottom touches it.
     const heightCg = zMain * Math.cos(pitch) - xMain * Math.sin(pitch);
+    // Report the static strut compressions until the first step computes them.
+    wheels.forEach((w, i) => {
+      this.compression[i] = (w === nose ? noseLoad : mainLoad) / w.spring;
+    });
     addScaled(s.position, groundPoint, g.normal, heightCg);
     set(s.velocity, 0, 0, 0);
     set(s.angularVelocity, 0, 0, 0);

@@ -130,7 +130,9 @@ export class PistonEngine {
     const absOmega = Math.abs(this.omega);
     let friction = d.frictionTorque + d.frictionPerRadS * absOmega;
     // Friction opposes rotation and fades to zero at standstill, so it never turns the shaft.
-    friction *= Math.min(1, absOmega / 5) * Math.sign(this.omega || 1);
+    // A running engine's friction fades near standstill so it never turns the shaft back; a
+    // stopped one holds the propeller against a light windmilling torque.
+    friction *= (this.running ? Math.min(1, absOmega / 5) : 1) * Math.sign(this.omega || 1);
     let torque = -friction;
     // Pumping against a closed throttle: what makes idle a near-zero-thrust setting.
     if (this.running)

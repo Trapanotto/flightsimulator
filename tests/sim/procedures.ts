@@ -107,6 +107,7 @@ export function serviceCeiling() {
   let last = ac.telemetry.altitude;
   let ceiling = 0;
   let timer = 0;
+  let previous = { alt: 0, rate: 1000 };
   fly(f, 3600, (dt) => {
     const altFt = ac.telemetry.altitude / FT;
     const vy = 74 - (altFt / 1000) * 0.6;
@@ -114,13 +115,16 @@ export function serviceCeiling() {
     if (altFt > 3000) leaner.step(dt);
     timer += dt;
     if (timer >= 60) {
+      // Rate over the last minute, credited to the middle of that minute.
       const rate = (ac.telemetry.altitude - last) / 60 / FPM;
-      last = ac.telemetry.altitude;
-      timer = 0;
+      const mid = (ac.telemetry.altitude + last) / 2 / FT;
       if (rate < 100) {
-        ceiling = altFt;
+        ceiling = previous.alt + ((previous.rate - 100) / (previous.rate - rate)) * (mid - previous.alt);
         return true;
       }
+      previous = { alt: mid, rate };
+      last = ac.telemetry.altitude;
+      timer = 0;
     }
     return false;
   });
@@ -189,9 +193,15 @@ export function staticRpm() {
  * Short-field take-off as in the handbook: flaps 10, full throttle on the brakes, release,
  * lift off at 51 KIAS, climb at 57 KIAS to 50 ft. Returns ground roll and total distance (ft).
  */
-export function takeoff(options: { crosswindKt?: number; surface?: 'asphalt' | 'grass' } = {}) {
+export function takeoff(
+  options: {
+    crosswindKt?: number;
+    surface?: 'asphalt' | 'grass';
+    slope?: { gradient: number; downhillDeg: number };
+  } = {},
+) {
   const wind = options.crosswindKt ? { fromDeg: 90, speed: options.crosswindKt * KT } : undefined;
-  const f = onGround({ wind, surface: options.surface });
+  const f = onGround({ wind, surface: options.surface, slope: options.slope });
   const { ac } = f;
   const t = ac.telemetry;
   const c = ac.controls;
@@ -204,9 +214,10 @@ export function takeoff(options: { crosswindKt?: number; surface?: 'asphalt' | '
   c.brakeLeft = 0;
   c.brakeRight = 0;
   const attitude = new AttitudePilot(ac);
-  const climb = new Pid(0.012, 0.002, 0, 0.3);
+  const climb = new Pid(0.03, 0.01, 0, 0.3);
   const ground0 = t.altitude;
   let liftOff: number | undefined;
+  let liftOffKias = 0;
   let total: number | undefined;
   let maxDeviation = 0;
   let maxBank = 0;
@@ -220,16 +231,18 @@ export function takeoff(options: { crosswindKt?: number; surface?: 'asphalt' | '
     if (phase === 'roll') {
       c.pitch = 0;
       attitude.bankTo(0, dt);
-      if (t.ias / KT >= 51) phase = 'rotate';
+      if (t.ias / KT >= 47) phase = 'rotate';
     } else if (phase === 'rotate') {
-      attitude.pitchTo(9 * DEG, dt);
+      attitude.pitchTo(12 * DEG, dt);
       attitude.bankTo(0, dt);
       if (!t.onGround) {
         phase = 'climb';
         liftOff = horizontalDistance(f, start, ac.state.position);
+        liftOffKias = t.ias / KT;
       }
     } else {
-      const theta = 9 * DEG + climb.update(t.ias / KT - 57, dt);
+      // Keep the lift-off attitude while accelerating to 57 KIAS, then hold 57 with pitch.
+      const theta = 8 * DEG + climb.update(t.ias / KT - 57, dt);
       attitude.pitchTo(theta, dt);
       attitude.bankTo(clamp(-0.002 * across, -0.1, 0.1), dt);
       maxBank = Math.max(maxBank, Math.abs(t.bank));
@@ -242,6 +255,7 @@ export function takeoff(options: { crosswindKt?: number; surface?: 'asphalt' | '
   });
   return {
     groundRollFt: (liftOff ?? NaN) / FT,
+    liftOffKias,
     totalFt: (total ?? NaN) / FT,
     maxHeadingDeviation: maxDeviation,
     maxBankDeg: maxBank / DEG,
