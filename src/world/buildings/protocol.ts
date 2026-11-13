@@ -1,6 +1,7 @@
 import type { TileKey } from '@geo';
 import type { CellGrid } from './grid';
 import type { MeshData } from './mesh';
+import type { FootprintLod } from './presets';
 
 /** Messages between the building layer and its workers. */
 export type BuildingJob =
@@ -8,15 +9,14 @@ export type BuildingJob =
       kind: 'footprints';
       url: string;
       key: TileKey;
-      lod: 0 | 1;
+      lod: FootprintLod;
       elevation: number[];
       grid: CellGrid;
     }
   | { kind: 'cell'; url: string; cell: number; grid: CellGrid };
 
 export type WorkerRequest =
-  | { type: 'job'; id: number; job: BuildingJob }
-  | { type: 'cancel'; id: number };
+  { type: 'job'; id: number; job: BuildingJob } | { type: 'cancel'; id: number };
 
 export interface JobOutput {
   mesh: MeshData;

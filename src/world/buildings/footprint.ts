@@ -53,7 +53,7 @@ export function cleanRing(r: Ring, eps = 0.05): Ring {
   while (pts.length >= 4 && Math.hypot(pts[0]! - pts.at(-2)!, pts[1]! - pts.at(-1)!) < eps)
     pts.length -= 2;
   // Collinear points, repeated until none is left (removing one can expose the next).
-  for (let changed = true; changed && pts.length >= 8; ) {
+  for (let changed = true; changed && pts.length >= 8;) {
     changed = false;
     const m = pts.length / 2;
     const keep: Ring = [];
@@ -150,7 +150,7 @@ export function clipRingToRect(
       const da = inside(ax, az);
       const db = inside(bx, bz);
       if (da >= 0) out.push(ax, az);
-      if ((da >= 0) !== (db >= 0)) {
+      if (da >= 0 !== db >= 0) {
         const t = da / (da - db);
         out.push(ax + (bx - ax) * t, az + (bz - az) * t);
       }

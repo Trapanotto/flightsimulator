@@ -4,7 +4,13 @@ import dracoWasmUrl from 'three/examples/jsm/libs/draco/gltf/draco_decoder.wasm?
 import { parseB3dm } from './b3dm';
 import { type DracoModule, createDraco } from './draco';
 import { buildFootprintTile } from './extrude';
-import { type BuildingJob, type JobOutput, type WorkerRequest, type WorkerResponse, transferables } from './protocol';
+import {
+  type BuildingJob,
+  type JobOutput,
+  type WorkerRequest,
+  type WorkerResponse,
+  transferables,
+} from './protocol';
 import { buildDetailTile } from './tile3d';
 
 /**

@@ -25,7 +25,11 @@ interface DracoAttribute {
 }
 
 interface DracoDecoder {
-  DecodeArrayToMesh(data: Int8Array, length: number, mesh: DracoMesh): {
+  DecodeArrayToMesh(
+    data: Int8Array,
+    length: number,
+    mesh: DracoMesh,
+  ): {
     ok(): boolean;
     error_msg(): string;
   };

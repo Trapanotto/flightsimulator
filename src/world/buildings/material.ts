@@ -11,6 +11,10 @@ import {
 } from 'three/webgpu';
 import {
   abs,
+  ceil,
+  clamp,
+  exp2,
+  log2,
   attribute,
   cameraPosition,
   cross,
@@ -82,7 +86,7 @@ export class BuildingMaterials {
     /** Lowest cell x/y of the fade mask window. */
     maskOrigin: uniform(new Vector2(-1e4, -1e4)),
     /** Window luminance scale (relative to the sky's units, before exposure). */
-    lightLevel: uniform(2.2e-3),
+    lightLevel: uniform(4e-6),
   };
   /** Fade of the swissBUILDINGS3D cells around the camera: footprints step aside there. */
   readonly mask: DataTexture;
@@ -230,22 +234,38 @@ export class BuildingMaterials {
     const roughness = mix(mix(float(0.85), float(0.12), windowMask), float(0.7), roofness);
 
     // Night: a varied share of the windows lit, mostly warm, some cool, steady.
-    const wx = floor(cu);
-    const wy = floor(cv);
-    const ws = seed.mul(977);
+    // Windows smaller than a pixel would average into an evenly glowing wall; instead they
+    // merge into blocks of 2, 4, 8 ... windows (same share lit, same mean light) that stay
+    // about a pixel wide, so a town far away is a field of points.
+    const level = clamp(ceil(log2(max(wu, wv).mul(1.6))), 0, 4);
+    const k = exp2(level);
+    const bu = cu.div(k);
+    const bv = cv.div(k);
+    const fbu = fract(bu);
+    const fbv = fract(bv);
+    const bwu = wu.div(k);
+    const bwv = wv.div(k);
+    const lightBox = smoothstep(uMin.sub(bwu), uMin.add(bwu), fbu)
+      .mul(float(1).sub(smoothstep(uMax.sub(bwu), uMax.add(bwu), fbu)))
+      .mul(smoothstep(float(0.3).sub(bwv), float(0.3).add(bwv), fbv))
+      .mul(float(1).sub(smoothstep(float(0.78).sub(bwv), float(0.78).add(bwv), fbv)));
+    const wx = floor(bu);
+    const wy = floor(bv);
+    const ws = seed.mul(977).add(level.mul(31.7));
     const h1 = hash(wx.mul(12.9898).add(wy.mul(78.233)).add(ws));
     const h2 = hash(wx.mul(39.346).add(wy.mul(11.135)).add(ws.mul(1.7)));
-    const share = hash(seed.mul(331)).mul(0.5).add(0.15);
+    // Between a tenth and a third of the windows are lit, varying by building.
+    const share = hash(seed.mul(331)).mul(0.25).add(0.08);
     const lit = step(h1, u.night.mul(share).mul(1.15));
     const warm = vec3(1.0, 0.6, 0.28);
     const cool = vec3(0.7, 0.8, 1.0);
     const tint = mix(warm, cool, step(0.86, h2)).mul(h2.mul(0.6).add(0.55));
-    // Far away the windows average out; lift them so a town still reads as lights.
+    // Far away (beyond what the blocks can hold) a town still has to read as lights.
     const dist = length(positionView);
-    const far = smoothstep(800, 9000, dist).mul(2.5).add(1);
-    const sharpLit = tint.mul(lit).mul(sharp);
-    const meanLit = mix(warm, cool, 0.1).mul(u.night.mul(share).mul(0.85)).mul(coverage);
-    const glow = mix(meanLit, sharpLit, detail)
+    const far = smoothstep(3000, 15000, dist).mul(0.8).add(1);
+    const glow = tint
+      .mul(lit)
+      .mul(lightBox)
       .mul(onWall)
       .mul(select(isKind(KIND.church), float(0.4), float(1)));
     const emissive = glow.mul(u.lightLevel).mul(u.exposure).mul(far);

@@ -59,7 +59,8 @@ export function planBuilding(f: FootprintFacts): BuildingPlan {
   const urban = f.density > 600;
   const W = f.box.halfWidth;
   const L = f.box.halfLength;
-  let height = f.height !== undefined && f.height > 0.5 ? f.height : estimateHeight(f.area, f.density);
+  let height =
+    f.height !== undefined && f.height > 0.5 ? f.height : estimateHeight(f.area, f.density);
   const rect = f.fill > 0.86 && !f.holes;
 
   if (f.cls === 'roof')
@@ -250,7 +251,11 @@ export function colours(kind: number, seed: number, alpine: boolean): { roof: Rg
   const j = 0.92 + 0.16 * r(7);
   return {
     roof: linearRgb(roof[0] * j, roof[1] * j, roof[2] * j),
-    wall: linearRgb(Math.min(255, wall[0] * j), Math.min(255, wall[1] * j), Math.min(255, wall[2] * j)),
+    wall: linearRgb(
+      Math.min(255, wall[0] * j),
+      Math.min(255, wall[1] * j),
+      Math.min(255, wall[2] * j),
+    ),
   };
 }
 

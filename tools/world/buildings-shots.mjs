@@ -23,22 +23,22 @@ const DESKTOP = { width: 1280, height: 720 };
 const PHONE = { width: 390, height: 844 };
 const SCENES = [
   { name: 'bern', query: 'view=bern', ...DESKTOP },
-  { name: 'bern-night', query: 'view=bern&hour=22.5', ...DESKTOP },
+  { name: 'bern-night', query: 'view=bern&hour=23.5', ...DESKTOP },
   { name: 'bern-golden', query: 'view=bern&hour=20.6', ...DESKTOP },
   { name: 'belp', query: 'view=belp', ...DESKTOP },
   { name: 'zurich', query: 'view=zurich', ...DESKTOP },
-  { name: 'zurich-night', query: 'view=zurich&hour=23', ...DESKTOP },
+  { name: 'zurich-night', query: 'view=zurich&hour=23.5', ...DESKTOP },
   { name: 'emmental', query: 'view=emmental', ...DESKTOP },
   { name: 'grindelwald', query: 'view=grindelwald', ...DESKTOP },
   { name: 'grindelwald-winter', query: 'view=grindelwald&season=winter&hour=12', ...DESKTOP },
   { name: 'street', query: 'view=street', ...DESKTOP },
   { name: 'far', query: 'view=far', ...DESKTOP },
-  { name: 'far-night', query: 'view=far&hour=23', ...DESKTOP },
+  { name: 'far-night', query: 'view=far&hour=23.5', ...DESKTOP },
   { name: 'fly', query: 'view=fly', flySeconds: 25, ...DESKTOP },
   { name: 'bern-webgl', query: 'view=bern&webgl=1', ...DESKTOP },
-  { name: 'street-webgl-night', query: 'view=street&webgl=1&hour=22.5', ...DESKTOP },
+  { name: 'street-webgl-night', query: 'view=street&webgl=1&hour=23.5', ...DESKTOP },
   { name: 'bern-mobile', query: 'view=bern&device=mobile', ...PHONE },
-  { name: 'zurich-mobile-night', query: 'view=zurich&device=mobile&hour=23', ...PHONE },
+  { name: 'zurich-mobile-night', query: 'view=zurich&device=mobile&hour=23.5', ...PHONE },
 ];
 
 async function launch() {
@@ -106,7 +106,9 @@ try {
       `${scene.name}: ${stats.backend} loaded ${loadSeconds.toFixed(1)} s, ${b.buildings} buildings, ` +
         `${b.cells} cells, ${b.footprintTiles} footprint tiles, ${(b.triangles / 1e6).toFixed(2)} M tris, ` +
         `${(b.downloaded / 2 ** 20).toFixed(1)} MB, draw calls ${stats.drawCalls}` +
-        (bench ? `, frame ${bench.withBuildingsMs.toFixed(2)} / ${bench.withoutBuildingsMs.toFixed(2)} ms` : '') +
+        (bench
+          ? `, frame ${bench.withBuildingsMs.toFixed(2)} / ${bench.withoutBuildingsMs.toFixed(2)} ms`
+          : '') +
         (errors.length ? `\n  ${errors.slice(0, 5).join('\n  ')}` : ''),
     );
     await page.close();

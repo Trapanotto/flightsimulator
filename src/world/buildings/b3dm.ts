@@ -25,7 +25,12 @@ export interface GltfJson {
     type: string;
     normalized?: boolean;
   }>;
-  bufferViews: Array<{ buffer: number; byteOffset?: number; byteLength: number; byteStride?: number }>;
+  bufferViews: Array<{
+    buffer: number;
+    byteOffset?: number;
+    byteLength: number;
+    byteStride?: number;
+  }>;
   extensionsUsed?: string[];
 }
 

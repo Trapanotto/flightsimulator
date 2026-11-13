@@ -12,8 +12,7 @@ export function kindOf(objektart: unknown, flatRoof: boolean, area: number, alpi
   if (/Sakral|Kirch|Kapelle|Kloster/i.test(t)) return KIND.church;
   if (/Offen|Flugdach|gedeckt/i.test(t)) return KIND.canopy;
   if (/Treibhaus/i.test(t)) return KIND.greenhouse;
-  if (/Mauer|Tank|Silo|Schacht|Bruecke|Brücke|Kuehl|Kühl|Ruine/i.test(t))
-    return KIND.structure;
+  if (/Mauer|Tank|Silo|Schacht|Bruecke|Brücke|Kuehl|Kühl|Ruine/i.test(t)) return KIND.structure;
   if (/Hochhaus/i.test(t) || (flatRoof && area > 250)) return KIND.flat;
   if (alpine) return KIND.chalet;
   return KIND.house;
@@ -131,7 +130,8 @@ export function buildDetailTile(
     // The terrain point is a sea-level height; written in the data's convention (as if it
     // were ellipsoidal) it lands in the same frame as the vertices.
     const terrain = num(bt.GELAENDEPUNKT?.[k]);
-    const groundY = terrain !== undefined ? frame.fromGeodetic(geo.lon, geo.lat, terrain, q).y : s.y0;
+    const groundY =
+      terrain !== undefined ? frame.fromGeodetic(geo.lon, geo.lat, terrain, q).y : s.y0;
     const roofMax = num(bt.DACH_MAX?.[k]);
     const roofMin = num(bt.DACH_MIN?.[k]);
     const flat = roofMax !== undefined && roofMin !== undefined && roofMax - roofMin < 1;

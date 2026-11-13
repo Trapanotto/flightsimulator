@@ -101,9 +101,12 @@ if (query.has('clean')) document.body.classList.add('clean');
 const season = (query.get('season') ?? 'summer') as Season;
 const hour = Number(query.get('hour') ?? 10.5);
 // Summer: 21 June; winter: 15 January (CET, UTC+1); spring and autumn near the equinoxes.
-const day = { summer: '2026-06-21', winter: '2026-01-15', spring: '2026-04-15', autumn: '2026-10-10' }[
-  season
-];
+const day = {
+  summer: '2026-06-21',
+  winter: '2026-01-15',
+  spring: '2026-04-15',
+  autumn: '2026-10-10',
+}[season];
 const utcOffset = season === 'winter' ? 1 : 2;
 const date = new Date(`${day}T00:00:00Z`);
 date.setUTCMinutes(Math.round((hour - utcOffset) * 60));
@@ -168,7 +171,11 @@ if (shadows) {
 }
 
 // ---- camera ----
-const camGeo = { lon: view.lon, lat: view.lat, h: seaLevelToEllipsoid(view.lon, view.lat, 600) + view.agl };
+const camGeo = {
+  lon: view.lon,
+  lat: view.lat,
+  h: seaLevelToEllipsoid(view.lon, view.lat, 600) + view.agl,
+};
 let seated = false;
 const lookTarget = new Vector3();
 const placeCamera = () => {
@@ -203,7 +210,10 @@ function rebase() {
 }
 
 async function adapterName(): Promise<string> {
-  const b = renderer.backend as unknown as { adapter?: { info?: GPUAdapterInfo }; gl?: WebGL2RenderingContext };
+  const b = renderer.backend as unknown as {
+    adapter?: { info?: GPUAdapterInfo };
+    gl?: WebGL2RenderingContext;
+  };
   if (b.adapter?.info) {
     const i = b.adapter.info;
     return [i.vendor, i.architecture, i.description].filter(Boolean).join(' ');
@@ -237,7 +247,12 @@ const stats: DemoStats = {
 };
 (window as unknown as { __demo: DemoStats }).__demo = stats;
 // For poking around from the console or a test script.
-(window as unknown as { __debug: unknown }).__debug = { scene, camera, world, getFrame: () => frame };
+(window as unknown as { __debug: unknown }).__debug = {
+  scene,
+  camera,
+  world,
+  getFrame: () => frame,
+};
 
 let appTime = 0;
 function step(dt: number) {
@@ -266,7 +281,9 @@ function step(dt: number) {
   }
   placeCamera();
   appTime += dt;
-  const night = query.has('night') ? Number(query.get('night')) : nightFactor(sky.state.sunElevation);
+  const night = query.has('night')
+    ? Number(query.get('night'))
+    : nightFactor(sky.state.sunElevation);
   world.setConditions({
     night,
     exposure: sky.state.exposure,
@@ -328,7 +345,8 @@ renderer.setAnimationLoop((now: number) => {
   cpuAcc += cpu;
   samples++;
   if (stats.frames > 30) stats.cpuMaxMs = Math.max(stats.cpuMaxMs, cpu);
-  if (cpu > 12 && stats.hitches.length < 40) stats.hitches.push([stats.frames, Math.round(cpu * 10) / 10]);
+  if (cpu > 12 && stats.hitches.length < 40)
+    stats.hitches.push([stats.frames, Math.round(cpu * 10) / 10]);
   if (samples >= 30) {
     stats.frameMs = frameAcc / samples;
     stats.cpuMs = cpuAcc / samples;
@@ -336,7 +354,8 @@ renderer.setAnimationLoop((now: number) => {
   }
   stats.loading = world.loading;
   stats.progress = world.progress;
-  if (!stats.loading && stats.loadedAt < 0 && seated) stats.loadedAt = (performance.now() - t0) / 1000;
+  if (!stats.loading && stats.loadedAt < 0 && seated)
+    stats.loadedAt = (performance.now() - t0) / 1000;
   if (stats.loading) stats.loadedAt = -1;
   const bs = (buildingGroup.userData.stats as () => Record<string, number>)();
   stats.buildings = bs;

@@ -96,7 +96,10 @@ export class MeshBuilder {
   private readonly pos = new Grow(new Float32Array(3 * 4096), (n) => new Float32Array(n));
   private readonly meta = new Grow(new Uint16Array(2 * 4096), (n) => new Uint16Array(n));
   private readonly idx = new Grow(new Uint32Array(3 * 4096), (n) => new Uint32Array(n));
-  private readonly bld = new Grow(new Float32Array(BUILDING_FLOATS * 256), (n) => new Float32Array(n));
+  private readonly bld = new Grow(
+    new Float32Array(BUILDING_FLOATS * 256),
+    (n) => new Float32Array(n),
+  );
   private building = -1;
   /** Vertices of the current building by quantised position: corners are shared. */
   private shared = new Map<string, number>();

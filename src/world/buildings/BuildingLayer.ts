@@ -33,13 +33,9 @@ import {
   viewDistance,
 } from './grid';
 import { GroundGrid } from './groundGrid';
-import {
-  BuildingMaterials,
-  BuildingMesh,
-  MASK_SIZE,
-} from './material';
+import { BuildingMaterials, BuildingMesh, MASK_SIZE } from './material';
 import { BuildingWorkers, type JobHandle, type JobResult } from './pool';
-import { BUILDING_PRESETS, type BuildingPreset } from './presets';
+import { BUILDING_PRESETS, type BuildingPreset, type FootprintLod, footprintLod } from './presets';
 import type { BuildingJob, JobOutput } from './protocol';
 
 /** swissBUILDINGS3D 3.0 as 3D Tiles; the dated release folder comes from this tileset.json. */
@@ -52,7 +48,7 @@ interface Tile {
   id: string;
   key?: TileKey;
   cell?: number;
-  lod: 0 | 1;
+  lod: FootprintLod;
   bounds: GeoBounds;
   frame: LocalFrame;
   distance: number;
@@ -159,6 +155,9 @@ export class BuildingLayer implements WorldLayer {
     this.preset = { ...BUILDING_PRESETS[device], ...preset };
   }
 
+  /** Footprint range now: further at night, when the lit windows of distant towns show. */
+  private range = 0;
+
   get loading(): boolean {
     return this.wantedPending > 0;
   }
@@ -194,6 +193,7 @@ export class BuildingLayer implements WorldLayer {
       for (const t of this.allTiles()) t.ground?.invalidate();
     }
 
+    this.range = c.night > 0.5 ? this.preset.nightRange : this.preset.footprintRange;
     this.selectFootprints(ctx);
     this.selectCells();
     this.upload(ctx);
@@ -207,12 +207,12 @@ export class BuildingLayer implements WorldLayer {
 
   private selectFootprints(ctx: LayerContext) {
     const p = this.preset;
-    const wanted = tilesInRange(this.view, FOOTPRINT_ZOOM, p.footprintRange);
+    const wanted = tilesInRange(this.view, FOOTPRINT_ZOOM, this.range);
     const seen = new Set<string>();
     for (const w of wanted) {
       const id = `${w.key.x}/${w.key.y}`;
       seen.add(id);
-      const lod: 0 | 1 = w.distance < p.footprintDetailRange ? 0 : 1;
+      const lod = footprintLod(w.distance, undefined, p);
       let t = this.footprints.get(id);
       if (!t) {
         t = this.newTile('footprints', id, mercatorTileBounds(w.key), lod, w.key);
@@ -222,10 +222,9 @@ export class BuildingLayer implements WorldLayer {
       t.distance = w.distance;
       t.handle?.setPriority(w.distance);
       // A different level of detail is built next to the shown one and crossfaded.
-      const keepLod =
-        t.lod === 0 ? w.distance < p.footprintDetailRange * 1.3 : w.distance > p.footprintDetailRange * 0.85;
-      if (t.state === 'shown' && !keepLod && !t.successor) {
-        t.successor = this.newTile('footprints', id, t.bounds, t.lod === 0 ? 1 : 0, w.key);
+      const next = footprintLod(w.distance, t.lod, p);
+      if (t.state === 'shown' && next !== t.lod && !t.successor) {
+        t.successor = this.newTile('footprints', id, t.bounds, next, w.key);
         this.request(t.successor, ctx);
       }
       if (t.successor) t.successor.distance = w.distance;
@@ -234,7 +233,7 @@ export class BuildingLayer implements WorldLayer {
     for (const [id, t] of this.footprints) {
       if (seen.has(id)) continue;
       t.distance = viewDistance(this.view, t.bounds);
-      if (shouldEvict(t.distance, p.footprintRange)) {
+      if (shouldEvict(t.distance, this.range)) {
         this.drop(t);
         this.footprints.delete(id);
         this.knownCells.delete(id);
@@ -296,7 +295,7 @@ export class BuildingLayer implements WorldLayer {
     kind: Tile['kind'],
     id: string,
     bounds: GeoBounds,
-    lod: 0 | 1,
+    lod: FootprintLod,
     key?: TileKey,
   ): Tile {
     return {
@@ -411,7 +410,7 @@ export class BuildingLayer implements WorldLayer {
     this.uploads.sort((a, b) => a.distance - b.distance);
     let count = 0;
     let bytes = 0;
-    for (let i = 0; i < this.uploads.length; ) {
+    for (let i = 0; i < this.uploads.length;) {
       if (count >= this.preset.uploadsPerFrame || bytes >= this.preset.uploadBytesPerFrame) break;
       const t = this.uploads[i]!;
       if (!this.isLive(t) || !t.output) {
@@ -618,7 +617,7 @@ export class BuildingLayer implements WorldLayer {
   private countPending() {
     let n = 0;
     for (const t of this.footprints.values())
-      if (t.distance < this.preset.footprintRange && (t.state === 'queued' || t.state === 'built')) n++;
+      if (t.distance < this.range && (t.state === 'queued' || t.state === 'built')) n++;
     for (const w of this.wantedCells) {
       const t = this.cellTiles.get(w.key);
       if (t && (t.state === 'queued' || t.state === 'built')) n++;
