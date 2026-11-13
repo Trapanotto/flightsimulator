@@ -11,6 +11,9 @@ export type StartPlace =
 /** The weather choices of the flight setup. */
 export type WeatherChoice = 'live' | 'clear' | 'fair' | 'cloudy' | 'overcast';
 
+/** The season of the landscape: the calendar's, or a chosen one. */
+export type SeasonChoice = 'now' | 'spring' | 'summer' | 'autumn' | 'winter';
+
 /** What the pilot chose in the menu. */
 export interface FlightPlan {
   aircraft: AircraftId;
@@ -19,6 +22,8 @@ export interface FlightPlan {
   time: 'now' | number;
   /** 'live' for the real weather, or the name of a preset. */
   weather: WeatherChoice;
+  /** Snow line, autumn colours, bare winter woods. Default 'now'. */
+  season?: SeasonChoice;
   /**
    * The airport the flight belongs to (ICAO), also for an air start. Added in phase 1 so the
    * briefing and the app can name the place without searching by coordinates. Optional for

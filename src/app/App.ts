@@ -226,7 +226,6 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   let groundHeight = 0;
   let plan: FlightPlan | null = null;
   /** The season the landscape is shown in: the calendar's, until a flight chooses one. */
-  // eslint-disable-next-line prefer-const -- the flight plan will set it
   let season: Season = seasonOf(startDate);
 
   const say = (key: string) => {
@@ -273,6 +272,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     // Back to the menu: the loading screen covers the change of place.
     if (!p) game.screen.value = 'loading';
     plan = p;
+    season = !p?.season || p.season === 'now' ? seasonOf(new Date()) : p.season;
     const icao = p?.airport ?? (p?.start.kind === 'runway' ? p.start.airport : undefined);
     const airport = (icao && findAirport(icao)) || homeAirport;
     const since = performance.now();

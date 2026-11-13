@@ -207,6 +207,7 @@ describe('flight plan', () => {
       start: { kind: 'runway', airport: 'LSZB', runway: '14' },
       time: 'now',
       weather: 'live',
+      season: 'now',
       airport: 'LSZB',
     });
   });

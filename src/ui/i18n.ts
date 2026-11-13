@@ -68,6 +68,13 @@ const de = {
   'weather.cloudy': 'Bewölkt',
   'weather.overcast': 'Bedeckt',
 
+  'setup.season': 'Jahreszeit',
+  'season.now': 'Aktuell',
+  'season.spring': 'Frühling',
+  'season.summer': 'Sommer',
+  'season.autumn': 'Herbst',
+  'season.winter': 'Winter',
+
   'aircraft.vs0': 'Überziehen',
   'aircraft.vs0.sub': 'mit Landeklappen',
   'aircraft.vne': 'Höchstfahrt',
@@ -292,6 +299,13 @@ const en: Record<MessageKey, string> = {
   'weather.fair': 'Fair',
   'weather.cloudy': 'Cloudy',
   'weather.overcast': 'Overcast',
+
+  'setup.season': 'Season',
+  'season.now': 'Current',
+  'season.spring': 'Spring',
+  'season.summer': 'Summer',
+  'season.autumn': 'Autumn',
+  'season.winter': 'Winter',
 
   'aircraft.vs0': 'Stall',
   'aircraft.vs0.sub': 'landing flaps',

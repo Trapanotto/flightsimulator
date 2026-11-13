@@ -1,6 +1,14 @@
 import type { AircraftId, AircraftInfo } from '@sim';
-import type { AirportOption, FlightPlan, WeatherChoice } from './api';
+import type { AirportOption, FlightPlan, SeasonChoice, WeatherChoice } from './api';
 import { runwayHeading } from './format';
+
+export const SEASON_CHOICES: readonly SeasonChoice[] = [
+  'now',
+  'spring',
+  'summer',
+  'autumn',
+  'winter',
+];
 
 export const WEATHER_CHOICES: readonly WeatherChoice[] = [
   'live',
@@ -26,6 +34,7 @@ export interface SetupDraft {
   aircraft: AircraftId | '';
   time: 'now' | number;
   weather: WeatherChoice;
+  season: SeasonChoice;
 }
 
 export const DRAFT_KEY = 'tfs.setup';
@@ -46,6 +55,7 @@ export function defaultDraft(
     aircraft: aircraft[0]?.id ?? '',
     time: 'now',
     weather: 'live',
+    season: 'now',
   };
 }
 
@@ -94,6 +104,9 @@ export function sanitizeDraft(
     weather: WEATHER_CHOICES.includes(o.weather as WeatherChoice)
       ? (o.weather as WeatherChoice)
       : d.weather,
+    season: SEASON_CHOICES.includes(o.season as SeasonChoice)
+      ? (o.season as SeasonChoice)
+      : d.season,
   };
 }
 
@@ -136,6 +149,7 @@ export function draftToPlan(
     start,
     time: draft.time,
     weather: draft.weather,
+    season: draft.season,
     airport: airport.icao,
   };
 }

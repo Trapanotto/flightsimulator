@@ -1,7 +1,7 @@
 import { useSignal } from '@preact/signals';
 import { AIRCRAFT, type AircraftInfo } from '@sim';
 import { useEffect, useMemo, useRef } from 'preact/hooks';
-import { type AirportOption, type WeatherChoice, game, settings } from '../api';
+import { type AirportOption, type SeasonChoice, type WeatherChoice, game, settings } from '../api';
 import { Field, Segmented, Slider } from '../components/controls';
 import {
   IconBack,
@@ -31,6 +31,7 @@ import {
   AIR_START_HEIGHTS,
   DRAFT_KEY,
   type SetupDraft,
+  SEASON_CHOICES,
   WEATHER_CHOICES,
   draftToPlan,
   planProblem,
@@ -442,6 +443,15 @@ export function FlightSetup() {
                 label: t(`weather.${w}`),
                 icon: WEATHER_ICON[w](),
               }))}
+            />
+          </Field>
+
+          <Field label={t('setup.season')} id="setup-season">
+            <Segmented<SeasonChoice>
+              label={t('setup.season')}
+              value={d.season}
+              onChange={(v) => set({ season: v })}
+              options={SEASON_CHOICES.map((v) => ({ value: v, label: t(`season.${v}`) }))}
             />
           </Field>
         </div>
