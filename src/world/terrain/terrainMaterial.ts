@@ -13,6 +13,7 @@ import {
   Vector2,
 } from 'three/webgpu';
 import {
+  abs,
   attribute,
   cameraPosition,
   cameraViewMatrix,
@@ -39,6 +40,7 @@ import {
   vec4,
 } from 'three/tsl';
 import { NOISE_SIZE, NOISE_SLOPE_SCALE, buildNoiseTexels } from './noise';
+import { MASK_B_RUNWAY } from './protocol';
 
 /**
  * Detail patterns repeat every DETAIL_PERIOD metres. The render origin moves (floating origin),
@@ -67,7 +69,7 @@ export class TerrainNodeMaterial extends MeshStandardNodeMaterial {
  * sun of the flight day already shaded every slope. The photo is therefore mapped to albedo
  * with a soft compressive curve on luminance (dark and mid tones gain about 2.5x, snow stays
  * below 0.9) and the darkest baked shadows are lifted a little, so our own lighting does not
- * shade them a second time into black. Hue is kept; saturation gets a slight boost.
+ * shade them a second time into black. Hue and saturation are kept.
  */
 export class TerrainMaterials {
   readonly uniforms = {
@@ -78,7 +80,7 @@ export class TerrainMaterials {
     /** Albedo of deep water, linear. */
     waterColor: uniform(new Color(0.012, 0.035, 0.04)),
     albedoGain: uniform(2.6),
-    shadowLift: uniform(0.55),
+    shadowLift: uniform(0.7),
     /** Distance (m) where the detail is fully faded in, and where it is gone. */
     detailNear: uniform(120),
     detailFar: uniform(1400),
@@ -136,9 +138,9 @@ export class TerrainMaterials {
     const deep = float(1)
       .sub(smoothstep(0.004, 0.03, lum))
       .mul(u.shadowLift);
-    const lifted = mix(mapped, max(mapped, 0.045), deep);
+    const lifted = mix(mapped, max(mapped, 0.06), deep);
     const scaled = photo.mul(lifted.div(max(lum, 1e-4)));
-    const photoAlbedo = min(mix(vec3(lifted), scaled, 1.08), vec3(0.92));
+    const photoAlbedo = min(scaled, vec3(0.92));
 
     // ---- What the ground is (weights), from the photo, the land-cover mask and the shape ----
     const maxC = max(photo.r, max(photo.g, photo.b));
@@ -191,40 +193,63 @@ export class TerrainMaterials {
     let nWorld = nGeo;
     let roughness = mix(float(0.92), float(0.55), snow).sub(rock.mul(0.1));
     if (this.look.detail) {
+      // Paved runways from the land-cover mask: smooth, fine-grained, no bumps.
+      const paved = smoothstep(0.05, 0.02, abs(mask.b.sub(MASK_B_RUNWAY / 255))).mul(land);
+      const soft = float(1).sub(paved);
       const fade = float(1)
         .sub(smoothstep(u.detailNear, u.detailFar, dist))
         .mul(land)
         .toVar();
+      // The finest layers only matter within a few dozen metres; further out they average out
+      // in the mipmaps anyway, so they fade early and cost nothing visible.
+      const closeFade = float(1)
+        .sub(smoothstep(15, 180, dist))
+        .mul(fade);
       const big = sample(64);
       const mid = sample(8);
       const fine = sample(2);
-      const v = (s: ReturnType<typeof sample>) => s.r.sub(0.5);
-      // Albedo variation per class: meadows are patchy, forest canopy is clumpy with dark gaps,
-      // rock is grainy, fields fine-grained, snow nearly uniform.
+      const micro = sample(0.5);
+      // Centred and stretched to about -0.3..0.3 for typical values of the fractal noise.
+      const v = (s: ReturnType<typeof sample>) => s.r.sub(0.5).mul(2.5);
+      // Albedo variation per class: meadows are patchy and grainy, forest canopy is clumpy with
+      // dark gaps, rock is grainy, fields fine-grained, snow nearly uniform, asphalt speckled.
       const variation = grass
-        .mul(v(big).mul(0.5).add(v(mid).mul(0.35)).add(v(fine).mul(0.3)))
+        .mul(v(big).mul(0.45).add(v(mid).mul(0.35)).add(v(fine).mul(0.3)))
         .add(field.mul(v(mid).mul(0.25).add(v(fine).mul(0.35))))
         .add(forest.mul(big.a.sub(0.5).mul(0.6).add(v(mid).mul(0.9))))
         .add(rock.mul(v(mid).mul(0.6).add(v(fine).mul(0.5))))
-        .add(snow.mul(v(big).mul(0.12)));
-      albedo = albedo.mul(variation.mul(fade).add(1));
+        .add(snow.mul(v(big).mul(0.12)))
+        .mul(soft)
+        .add(paved.mul(v(big).mul(0.12)))
+        .mul(fade);
+      const grain = grass
+        .add(field)
+        .mul(0.55)
+        .add(rock.mul(0.4))
+        .add(paved.mul(0.25))
+        .add(snow.mul(0.08))
+        .mul(v(micro))
+        .mul(closeFade);
+      albedo = albedo.mul(variation.add(grain).add(1));
+      // Meadows shift between fresh and dry green in patches.
+      const tint = mix(vec3(1.06, 1.0, 0.82), vec3(0.9, 1.02, 0.95), big.a);
+      albedo = albedo.mul(mix(vec3(1), tint, grass.mul(fade)));
       const dh = slopeOf(mid, 8, 1)
-        .mul(
-          grass
-            .mul(0.08)
-            .add(field.mul(0.05))
-            .add(forest.mul(1.2))
-            .add(rock.mul(0.9))
-            .add(snow.mul(0.15)),
-        )
+        .mul(grass.mul(0.08).add(field.mul(0.05)).add(forest.mul(1.2)).add(rock.mul(0.9)))
         .add(
           slopeOf(fine, 2, 1).mul(
-            grass.mul(0.03).add(field.mul(0.03)).add(rock.mul(0.18)).add(forest.mul(0.1)),
+            grass.mul(0.04).add(field.mul(0.04)).add(rock.mul(0.18)).add(forest.mul(0.1)),
           ),
         )
-        .mul(fade);
+        .mul(soft)
+        .mul(fade)
+        .add(
+          slopeOf(micro, 0.5, 1)
+            .mul(grass.add(field).mul(0.012).add(rock.mul(0.03)))
+            .mul(closeFade),
+        );
       nWorld = normalize(nWorld.sub(vec3(dh.x, 0, dh.y)));
-      roughness = roughness.add(forest.mul(0.05));
+      roughness = roughness.add(forest.mul(0.05)).sub(paved.mul(0.1));
     }
 
     // ---- Water ----

@@ -22,6 +22,8 @@ const SCENES = [
   { name: 'thun', query: 'view=thun', ...DESKTOP },
   { name: 'lake', query: 'view=lake', ...DESKTOP },
   { name: 'low', query: 'view=low', ...DESKTOP },
+  { name: 'shore', query: 'view=shore', ...DESKTOP },
+  { name: 'glint', query: 'view=glint&sun=130,14', ...DESKTOP },
   { name: 'alps', query: 'view=alps', ...DESKTOP },
   { name: 'runway', query: 'view=runway', ...DESKTOP },
   { name: 'top', query: 'view=top', ...DESKTOP },
@@ -31,6 +33,9 @@ const SCENES = [
   { name: 'low-mobile', query: 'view=low&device=mobile', ...PHONE },
   // Moving the render origin must not move the picture: compared pixel by pixel below.
   { name: 'rebase', query: 'view=lake', rebase: true, ...DESKTOP },
+  // Flying at 120 m/s for 20 s: streaming, cancellation and the floating origin under way.
+  { name: 'fly', query: 'view=belp&fly=1', flySeconds: 20, ...DESKTOP },
+  { name: 'thun-1440p', query: 'view=thun', width: 2560, height: 1440 },
 ];
 const extra = arg('query', '');
 
@@ -70,6 +75,7 @@ try {
     );
     await page.waitForFunction(() => window.__demo?.ready, null, { timeout: 60_000 });
     // Done = nothing missing for a second (the view may need a few rounds of refinement).
+    if (scene.flySeconds) await page.waitForTimeout(scene.flySeconds * 1000);
     await page
       .waitForFunction(
         () => {
@@ -86,8 +92,9 @@ try {
     await page.waitForTimeout(1500);
     const stats = await page.evaluate(() => {
       const d = window.__demo;
-      return { ...d, rebase: undefined, ground: undefined };
+      return { ...d, rebase: undefined, ground: undefined, bench: undefined };
     });
+    const benchMs = await page.evaluate(() => window.__demo.bench(60));
     const file = path.join(outDir, `${scene.name}.png`);
     await page.screenshot({ path: file });
     if (scene.rebase) {
@@ -102,13 +109,13 @@ try {
     }));
     writeFileSync(
       path.join(outDir, `${scene.name}.json`),
-      JSON.stringify({ loadSeconds, stats, ground, errors }, null, 2),
+      JSON.stringify({ loadSeconds, benchMs, stats, ground, errors }, null, 2),
     );
     const w = stats.world;
     console.log(
       `${scene.name}: ${stats.backend} load ${loadSeconds.toFixed(1)} s, tiles ${w.tilesDrawn}/${w.tilesLoaded} z${w.maxZoom}, ` +
         `draws ${stats.drawCalls}, tris ${(stats.triangles / 1e6).toFixed(2)} M, ` +
-        `gpu ~${(w.gpuBytes / 2 ** 20).toFixed(0)} MB, frame ${stats.frameMs.toFixed(1)} ms, cpu ${stats.cpuMs.toFixed(1)} ms` +
+        `gpu ~${(w.gpuBytes / 2 ** 20).toFixed(0)} MB, cpu max ${stats.cpuMaxMs.toFixed(1)} ms, cancelled ${w.cancelled}, frame ${stats.frameMs.toFixed(1)} ms, cpu ${stats.cpuMs.toFixed(1)} ms, bench ${benchMs.toFixed(2)} ms/frame` +
         (stats.gpuMs != null ? `, gpu ${stats.gpuMs.toFixed(1)} ms` : '') +
         (errors.length ? `\n  ${errors.slice(0, 5).join('\n  ')}` : ''),
     );

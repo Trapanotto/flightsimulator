@@ -43,7 +43,11 @@ const VIEWS: Record<string, View> = {
   // Over Lake Thun's north shore, looking south-east to Eiger, Mönch and Jungfrau.
   thun: { lon: 7.64, lat: 46.74, h: 1500, look: { lon: 7.98, lat: 46.56, h: 3600 } },
   // 120 m over the lake near Spiez, looking north-east along the shore.
-  low: { lon: 7.69, lat: 46.69, h: 120, agl: true, look: { lon: 7.75, lat: 46.72, h: 560 } },
+  shore: { lon: 7.69, lat: 46.69, h: 120, agl: true, look: { lon: 7.75, lat: 46.72, h: 560 } },
+  // 60 m over fields and forest in the Aare valley near Kiesen, looking south-east.
+  low: { lon: 7.585, lat: 46.815, h: 60, agl: true, look: { lon: 7.6, lat: 46.805, h: 540 } },
+  // Over the lake towards the sun (south-east in the morning): glint on the water.
+  glint: { lon: 7.64, lat: 46.74, h: 900, look: { lon: 7.72, lat: 46.69, h: 560 } },
   // High over the Niesen, looking east into the Bernese Alps.
   alps: { lon: 7.6, lat: 46.62, h: 4200, look: { lon: 7.95, lat: 46.56, h: 3000 } },
   // On runway 14 of Bern-Belp, 2 m above the asphalt, looking along it (south-east).
@@ -74,10 +78,17 @@ declare global {
       /** Mean frame interval and mean CPU time of update + render submission, ms. */
       frameMs: number;
       cpuMs: number;
+      /** Worst CPU time of a frame since the page started (uploads, hitches), ms. */
+      cpuMaxMs: number;
+      /** Frames whose CPU time exceeded 8 ms: [frame, ms, tiles uploaded so far]. */
+      hitches: Array<[number, number, number]>;
       gpuMs: number | null;
       /** Moves the render origin by (east, north) metres without moving the camera. */
       rebase: (east: number, north: number) => void;
       ground: (lon: number, lat: number) => unknown;
+      /** Renders n frames back to back and waits for the GPU: ms per frame (GPU-bound cost). */
+      bench: (n: number) => Promise<number>;
+      adapter: string;
     };
   }
 }
@@ -183,6 +194,40 @@ function rebase(east: number, north: number) {
   camera.updateMatrixWorld();
 }
 
+/** GPU name, for performance notes. */
+async function adapterName(): Promise<string> {
+  const b = renderer.backend as unknown as {
+    adapter?: { info?: GPUAdapterInfo };
+    gl?: WebGL2RenderingContext;
+  };
+  if (b.adapter?.info) {
+    const i = b.adapter.info;
+    return [i.vendor, i.architecture, i.description].filter(Boolean).join(' ');
+  }
+  const gl = b.gl;
+  const ext = gl?.getExtension('WEBGL_debug_renderer_info');
+  return gl && ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : 'unknown';
+}
+
+async function bench(n: number): Promise<number> {
+  const b = renderer.backend as unknown as {
+    device?: GPUDevice;
+    gl?: WebGL2RenderingContext;
+  };
+  const finish = async () => {
+    if (b.device) await b.device.queue.onSubmittedWorkDone();
+    else if (b.gl) b.gl.readPixels(0, 0, 1, 1, b.gl.RGBA, b.gl.UNSIGNED_BYTE, new Uint8Array(4));
+  };
+  await finish();
+  const t0 = performance.now();
+  for (let i = 0; i < n; i++) {
+    world.update(camera);
+    renderer.render(scene, camera);
+  }
+  await finish();
+  return (performance.now() - t0) / n;
+}
+
 const fly = query.has('fly');
 let last = performance.now();
 let frames = 0;
@@ -201,9 +246,13 @@ const stats = {
   triangles: 0,
   frameMs: 0,
   cpuMs: 0,
+  cpuMaxMs: 0,
+  hitches: [] as Array<[number, number, number]>,
   gpuMs: gpuMs as number | null,
   rebase,
   ground: (lon: number, lat: number) => world.ground(lon, lat),
+  bench,
+  adapter: await adapterName(),
 };
 window.__demo = stats;
 
@@ -235,6 +284,9 @@ renderer.setAnimationLoop((now: number) => {
   if (frames > 5) stats.ready = true;
   frameAcc += dt * 1000;
   cpuAcc += cpu;
+  if (frames > 10) stats.cpuMaxMs = Math.max(stats.cpuMaxMs, cpu);
+  if (cpu > 8 && stats.hitches.length < 40)
+    stats.hitches.push([frames, Math.round(cpu * 10) / 10, stats.world.uploaded]);
   samples++;
   if (samples >= 30) {
     stats.frameMs = frameAcc / samples;
