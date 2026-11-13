@@ -1,0 +1,408 @@
+/* Briefing: shown while the world of the chosen flight streams in. */
+
+.briefing {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+}
+
+/* Mostly opaque: the scene behind may still be half built. */
+.briefing-backdrop {
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(90% 70% at 85% 100%, rgb(40 70 110 / 0.5), transparent 65%),
+    linear-gradient(180deg, rgb(7 11 18 / 0.86), rgb(5 8 13 / 0.96));
+}
+
+.briefing-inner {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+  min-height: 100%;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: calc(var(--safe-t) + clamp(8px, 6vh, 72px)) calc(var(--safe-r) + var(--gutter) - 16px) 0
+    calc(var(--safe-l) + var(--gutter) - 16px);
+}
+
+.briefing-kicker {
+  color: var(--c-accent);
+}
+
+.briefing-title {
+  margin-top: var(--s-1);
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: clamp(2rem, 3.6vw + 0.6rem, 3.75rem);
+  line-height: 1;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.briefing-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) var(--s-4);
+  margin-top: var(--s-3);
+  color: var(--c-ink-2);
+}
+
+.briefing-icao {
+  padding: 2px 8px;
+  border: 1px solid var(--c-accent);
+  border-radius: var(--r-1);
+  color: var(--c-accent);
+  font-family: var(--f-display);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.briefing-start {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.briefing-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: var(--s-7);
+  align-items: start;
+}
+
+.briefing-left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+  min-width: 0;
+}
+
+.briefing-right {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  min-width: 0;
+  animation-delay: 80ms;
+}
+
+.briefing-map {
+  max-width: 520px;
+}
+
+.briefing-map .swissmap {
+  padding: 0;
+}
+
+.briefing-map .swissmap svg {
+  max-height: 34vh;
+}
+
+.brief-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-4) var(--s-5);
+  border-radius: var(--r-3);
+  box-shadow: none;
+}
+
+.brief-facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: var(--s-4) var(--s-5);
+  margin: 0;
+}
+
+.brief-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.brief-fact dt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.brief-fact dd {
+  margin: 0;
+}
+
+.brief-fact--wide {
+  grid-column: 1 / -1;
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--c-line);
+}
+
+.brief-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.brief-big {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: var(--fs-6);
+  line-height: 1.05;
+}
+
+.brief-big.num {
+  font-family: var(--f-text);
+  font-weight: 600;
+  font-size: var(--fs-5);
+}
+
+.brief-dim {
+  color: var(--c-ink-3);
+  font-weight: 400;
+  font-size: var(--fs-2);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-3) var(--s-4);
+  margin: var(--s-2) 0 0;
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--c-line);
+}
+
+.fact dt {
+  margin-bottom: 2px;
+}
+
+.fact dd {
+  margin: 0;
+  font-weight: 500;
+}
+
+/* Key reference (also used in the settings) ----------------------------------------------- */
+
+.key-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+
+.key-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  min-height: 40px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--c-line);
+}
+
+.key-row:last-child {
+  border-bottom: 0;
+}
+
+.key-row dt {
+  color: var(--c-ink-2);
+  font-size: var(--fs-2);
+}
+
+.key-row dd {
+  margin: 0;
+}
+
+.key-combo {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+}
+
+.key-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.key-or {
+  margin: 0 4px 0 2px;
+  color: var(--c-ink-4);
+  font-size: var(--fs-1);
+}
+
+.key-list--compact .key-row {
+  min-height: 34px;
+}
+
+/* Touch hints ------------------------------------------------------------------------------ */
+
+.touch-hints {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--c-ink-2);
+  font-size: var(--fs-2);
+}
+
+.touch-hints li {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.hint-glyph {
+  flex: none;
+  position: relative;
+  width: 32px;
+  height: 32px;
+  border: 1.5px solid var(--c-ink-3);
+  border-radius: 50%;
+}
+
+.hint-glyph--stick::after {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  background: var(--c-ink);
+}
+
+.hint-glyph--lever {
+  width: 16px;
+  margin: 0 8px;
+  border-radius: 8px;
+}
+
+.hint-glyph--lever::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 8px;
+  height: 8px;
+  border-radius: 3px;
+  background: var(--c-ink);
+}
+
+.hint-glyph--rudder {
+  height: 14px;
+  margin: 9px 0;
+  border-radius: 7px;
+}
+
+.hint-glyph--rudder::after {
+  content: '';
+  position: absolute;
+  left: 11px;
+  top: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c-ink);
+}
+
+.hint-glyph--buttons {
+  border-radius: 8px;
+  background:
+    linear-gradient(var(--c-ink-3), var(--c-ink-3)) center / 1.5px 100% no-repeat,
+    linear-gradient(var(--c-ink-3), var(--c-ink-3)) center / 100% 1.5px no-repeat;
+}
+
+.briefing-tip {
+  max-width: 72ch;
+  color: var(--c-ink-2);
+  font-size: var(--fs-3);
+  padding-left: var(--s-3);
+  border-left: 2px solid var(--c-brand);
+}
+
+/* Sticky: on short screens the briefing scrolls, the progress stays in view. */
+.briefing-progress {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-top: auto;
+  margin-inline: calc(-1 * var(--s-4));
+  padding: var(--s-3) var(--s-4) var(--safe-b);
+  background: linear-gradient(0deg, rgb(5 8 13 / 0.96) 60%, rgb(5 8 13 / 0));
+}
+
+.briefing-progress > * {
+  width: min(520px, 100%);
+}
+
+@media (max-width: 1100px) {
+  .briefing-main {
+    gap: var(--s-5);
+  }
+}
+
+@media (max-height: 560px) {
+  .briefing-inner {
+    gap: var(--s-3);
+    padding-top: calc(var(--safe-t) + 4px);
+  }
+  .briefing-main {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    gap: var(--s-4);
+  }
+  .briefing-left {
+    gap: var(--s-3);
+  }
+  .briefing-title {
+    font-size: 1.75rem;
+  }
+  .briefing-sub {
+    margin-top: var(--s-2);
+  }
+  .briefing-map .swissmap svg {
+    max-height: 110px;
+  }
+  .briefing-right {
+    gap: var(--s-2);
+  }
+  .brief-card {
+    padding: var(--s-3);
+    gap: 4px;
+  }
+  .brief-facts {
+    gap: var(--s-2) var(--s-4);
+  }
+  .brief-fact--wide {
+    padding-top: var(--s-2);
+  }
+  .brief-big {
+    font-size: var(--fs-4);
+  }
+  .brief-big.num {
+    font-size: var(--fs-4);
+  }
+  .touch-hints {
+    gap: 6px;
+    font-size: var(--fs-1);
+  }
+  .briefing-tip {
+    font-size: var(--fs-2);
+  }
+}
+
+@media (max-width: 700px) {
+  .briefing-main {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s-4);
+  }
+  .briefing-map .swissmap svg {
+    max-height: 180px;
+  }
+}
