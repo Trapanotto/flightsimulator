@@ -24,6 +24,7 @@ import {
   imageryZoomFor,
   tileId,
 } from '@geo';
+import { tileToRenderMatrix } from './placement';
 import type { TileOutput } from './protocol';
 import { Quadtree, type TileNode, type TileProvider, type ViewState } from './Quadtree';
 import type { TerrainMaterials, TerrainNodeMaterial } from './terrainMaterial';
@@ -291,31 +292,9 @@ export class TerrainStreamer implements TileProvider<TileData> {
     this.tree.markReady(node, g.minHeight, g.maxHeight);
   }
 
-  private readonly tmpA = { x: 0, y: 0, z: 0 };
-  private readonly tmpB = { x: 0, y: 0, z: 0 };
-
   /** Model matrix: the tile frame's axes and origin expressed in the render frame. */
   private place(d: TileData) {
-    const a = this.tmpA;
-    const b = this.tmpB;
-    const e = d.mesh.matrix.elements;
-    const axes = [
-      { x: 1, y: 0, z: 0 },
-      { x: 0, y: 1, z: 0 },
-      { x: 0, y: 0, z: 1 },
-    ];
-    axes.forEach((axis, col) => {
-      this.frame.dirToLocal(d.frame.dirToEcef(axis, a), b);
-      e[col * 4] = b.x;
-      e[col * 4 + 1] = b.y;
-      e[col * 4 + 2] = b.z;
-      e[col * 4 + 3] = 0;
-    });
-    this.frame.toLocal(d.frame.originEcef(a), b);
-    e[12] = b.x;
-    e[13] = b.y;
-    e[14] = b.z;
-    e[15] = 1;
+    tileToRenderMatrix(d.frame, this.frame, d.mesh.matrix.elements);
     d.mesh.matrixWorldNeedsUpdate = true;
   }
 
