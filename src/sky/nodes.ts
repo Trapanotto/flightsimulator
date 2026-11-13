@@ -40,7 +40,7 @@ export const ATMOSPHERE_HEIGHT = TOP - R;
 const H_TOP = Math.sqrt(TOP * TOP - R * R);
 
 export const TRANSMITTANCE_SIZE = [256, 64] as const;
-export const MULTI_SCATTERING_SIZE = 32;
+export const MULTI_SCATTERING_SIZE = 64;
 export const SKY_VIEW_SIZE = [192, 108] as const;
 /** Aerial perspective atlas: azimuth x elevation per slice, slices side by side. */
 export const AP_AZIMUTH = 32;

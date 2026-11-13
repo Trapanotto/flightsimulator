@@ -48,7 +48,7 @@ export const LUMA: Vec3 = [0.2126, 0.7152, 0.0722];
 export function mieDensityFromVisibility(visibilityM: number): number {
   const extinction = 3912 / Math.max(visibilityM, 500);
   const mie = extinction - RAYLEIGH_SCATTERING[1];
-  return Math.min(Math.max(mie / MIE_EXTINCTION, 0.3), 60);
+  return Math.min(Math.max(mie / MIE_EXTINCTION, 0.3), 1000);
 }
 
 /** Air density relative to sea level at height h (km) for the three constituents. */
@@ -197,7 +197,7 @@ export function horizontalIlluminance(
  * night; a moonlit landscape must stay readable). 1 would make every hour equally bright.
  */
 export const ADAPTATION_DAY = 0.65;
-export const ADAPTATION_NIGHT = 0.9;
+export const ADAPTATION_NIGHT = 0.95;
 /** Illuminance (lux) where the two regimes meet: deep in civil twilight. */
 export const ADAPTATION_KNEE = 200;
 /** Calibrates the image brightness at noon (middle grey of a sunlit field about 0.18). */
@@ -217,6 +217,9 @@ export function exposureFor(horizontalLux: number, sunElevationDeg = 90): number
     e >= knee
       ? ADAPTATION_DAY * Math.log(e)
       : ADAPTATION_DAY * Math.log(knee) + ADAPTATION_NIGHT * Math.log(e / knee);
-  const twilight = 1 + 2 * Math.exp(-(((sunElevationDeg + 5) / 3.5) ** 2));
+  // Rises from sunset to the middle of civil twilight and stays: a correction that fell
+  // again later would brighten the dusk.
+  const t = Math.min(Math.max((1 - sunElevationDeg) / 6, 0), 1);
+  const twilight = 1 + 2 * t * t * (3 - 2 * t);
   return EXPOSURE_KEY / Math.exp(adaptedLog) / twilight;
 }

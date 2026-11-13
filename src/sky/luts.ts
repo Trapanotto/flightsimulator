@@ -35,6 +35,7 @@ import {
   exp,
   float,
   floor,
+  log,
   max,
   min,
   select,
@@ -74,8 +75,12 @@ import {
 } from './nodes';
 
 const H_TOP = Math.sqrt(TOP * TOP - R * R);
-/** The multiple-scattering table is stored times this (its values are small). */
-const MS_SCALE = 100;
+/**
+ * The multiple-scattering table is stored as a logarithm: in twilight its values fall by
+ * orders of magnitude within one texel, and linear filtering of that drew a bright band
+ * across the dusk sky. Filtering the logarithm interpolates geometrically.
+ */
+const MS_FLOOR = 1e-30;
 type TextureSampler = ReturnType<typeof texture>;
 
 function target(width: number, height: number): RenderTarget {
@@ -142,7 +147,7 @@ export class AtmosphereLuts {
   }
 
   sampleMultiScattering(lut: TextureSampler, h: F, mu: F): V3 {
-    return rgb(lut.sample(multiScatteringUV(h, mu)).level(float(0))).mul(1 / MS_SCALE);
+    return exp(rgb(lut.sample(multiScatteringUV(h, mu)).level(float(0))));
   }
 
   /**
@@ -353,7 +358,7 @@ export class AtmosphereLuts {
           fms.addAssign(f.div(n * n));
         });
       });
-      return vec4(L2.div(max(vec3(1).sub(fms), vec3(1e-3))).mul(MS_SCALE), 1);
+      return vec4(log(max(L2.div(max(vec3(1).sub(fms), vec3(1e-3))), vec3(MS_FLOOR))), 1);
     })();
   }
 
