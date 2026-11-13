@@ -514,9 +514,12 @@ switch (screenParam) {
     break;
 }
 
-declare global {
-  interface Window {
-    __demo: unknown;
-  }
-}
-window.__demo = { game, touchInput, settings, nav, sim, AIRCRAFT };
+// No global declaration: every demo page has its own shape of __demo.
+(window as unknown as { __demo: unknown }).__demo = {
+  game,
+  touchInput,
+  settings,
+  nav,
+  sim,
+  AIRCRAFT,
+};

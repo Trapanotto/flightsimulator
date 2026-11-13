@@ -67,34 +67,31 @@ const VIEWS: Record<string, View> = {
   lake: { lon: 7.66, lat: 46.73, h: 1150, look: { lon: 7.66, lat: 46.66, h: 900 } },
 };
 
-declare global {
-  interface Window {
-    __demo?: {
-      ready: boolean;
-      frames: number;
-      backend: string;
-      loading: boolean;
-      progress: number;
-      world: WorldStats;
-      drawCalls: number;
-      triangles: number;
-      /** Mean frame interval and mean CPU time of update + render submission, ms. */
-      frameMs: number;
-      cpuMs: number;
-      /** Worst CPU time of a frame since the page started (uploads, hitches), ms. */
-      cpuMaxMs: number;
-      /** Frames whose CPU time exceeded 8 ms: [frame, ms, tiles uploaded so far, world.update ms]. */
-      hitches: Array<[number, number, number, number]>;
-      gpuMs: number | null;
-      /** Moves the render origin by (east, north) metres without moving the camera. */
-      rebase: (east: number, north: number) => void;
-      ground: (lon: number, lat: number) => unknown;
-      /** Renders n frames back to back and waits for the GPU: ms per frame (GPU-bound cost). */
-      bench: (n: number) => Promise<number>;
-      adapter: string;
-    };
-  }
-}
+// No global declaration: every demo page has its own shape of __demo.
+type DemoStats = {
+  ready: boolean;
+  frames: number;
+  backend: string;
+  loading: boolean;
+  progress: number;
+  world: WorldStats;
+  drawCalls: number;
+  triangles: number;
+  /** Mean frame interval and mean CPU time of update + render submission, ms. */
+  frameMs: number;
+  cpuMs: number;
+  /** Worst CPU time of a frame since the page started (uploads, hitches), ms. */
+  cpuMaxMs: number;
+  /** Frames whose CPU time exceeded 8 ms: [frame, ms, tiles uploaded so far, world.update ms]. */
+  hitches: Array<[number, number, number, number]>;
+  gpuMs: number | null;
+  /** Moves the render origin by (east, north) metres without moving the camera. */
+  rebase: (east: number, north: number) => void;
+  ground: (lon: number, lat: number) => unknown;
+  /** Renders n frames back to back and waits for the GPU: ms per frame (GPU-bound cost). */
+  bench: (n: number) => Promise<number>;
+  adapter: string;
+};
 
 const query = new URLSearchParams(location.search);
 const view = VIEWS[query.get('view') ?? 'belp'] ?? VIEWS.belp!;
@@ -309,7 +306,7 @@ const stats = {
   bench,
   adapter: await adapterName(),
 };
-window.__demo = stats;
+(window as unknown as { __demo: DemoStats }).__demo = stats;
 
 renderer.setAnimationLoop((now: number) => {
   const dt = Math.min((now - last) / 1000, 0.1);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AIRPORTS, bearingDeg, findAirport, offsetPoint, runwayStart } from '../src/app/airports';
-import { GEOID_HEIGHT, WorldEnvironment } from '../src/app/environment';
+import { WorldEnvironment } from '../src/app/environment';
 import { type InputEvents, PilotInput } from '../src/app/input';
 import { emptyState, lerpState, stateToRenderPose } from '../src/app/pose';
 import { LocalFrame, geodeticToEcef } from '../src/geo';
@@ -129,7 +129,6 @@ describe('WorldEnvironment', () => {
     const air = env.air(p, { wind: v(), density: 0, temperature: 0, pressure: 0 });
     // 1560 m above the ellipsoid is about 1510 m above sea level.
     expect(air.pressure).toBeCloseTo(84_400, -3);
-    expect(GEOID_HEIGHT).toBeGreaterThan(45);
     expect(Math.hypot(air.wind.x, air.wind.y, air.wind.z)).toBe(0);
     // A west wind (from 270) moves the air east.
     env.air_ = { windFromDeg: 270, windSpeed: 10, isaDeviation: 0, wetness: 0 };
@@ -244,10 +243,35 @@ describe('PilotInput', () => {
     expect(out.pitch).toBe(0.5);
     expect(out.roll).toBe(-0.25);
     expect(out.brakeLeft).toBe(1);
+    // Touch adds to the other devices; its lever sets the throttle when it is moved.
     const touch = { pitch: -1, roll: null, yaw: null, throttle: 0.8, brake: false };
     input.update(1 / 60, () => false, pad, touch, noEvents(), { invertPitch: false }, out);
-    expect(out.pitch).toBe(-1);
+    expect(out.pitch).toBe(-0.5);
     expect(out.roll).toBe(-0.25);
     expect(out.throttle[0]).toBe(0.8);
+    // The lever rests at 0.8 while the keys move the throttle on from there.
+    for (let i = 0; i < 60; i++)
+      input.update(
+        1 / 60,
+        (c) => c === 'PageDown',
+        null,
+        touch,
+        noEvents(),
+        { invertPitch: false },
+        out,
+      );
+    expect(out.throttle[0]).toBeLessThan(0.5);
+    // Inverting applies to keys and gamepad; the touch stick arrives already inverted.
+    const inverted = neutralControls(1);
+    new PilotInput().update(
+      1 / 60,
+      () => false,
+      null,
+      touch,
+      noEvents(),
+      { invertPitch: true },
+      inverted,
+    );
+    expect(inverted.pitch).toBe(-1);
   });
 });

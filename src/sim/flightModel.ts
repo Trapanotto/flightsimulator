@@ -856,7 +856,7 @@ export class FlightModel implements SimAircraft {
       this.contactTouching[i] = 1;
       if (rate > cp.crashSpeed || cp.crashSpeed === 0) this.crash(cp.reason);
     }
-    if (depth > 0.3) this.crash(cp.reason);
+    if (depth > (cp.maxDepth ?? 0.3)) this.crash(cp.reason);
     const normal = Math.max(0, 200_000 * depth + 20_000 * rate);
     // Scraping: Coulomb friction against the sliding velocity.
     const f = this.t3;

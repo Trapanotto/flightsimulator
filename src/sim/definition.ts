@@ -59,6 +59,8 @@ export interface ContactPoint {
   position: Vec3;
   /** Impact speed along the ground normal (m/s) that destroys the aircraft. */
   crashSpeed: number;
+  /** How deep the point may be pressed into the ground before the aircraft counts as wrecked (default 0.3 m). */
+  maxDepth?: number;
   /** Reason code reported when it does. */
   reason: string;
 }

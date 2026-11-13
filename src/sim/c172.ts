@@ -332,7 +332,9 @@ export const C172: AircraftDefinition = {
     { name: 'propeller', position: v(1.95, 0, 0.815), crashSpeed: 0, reason: 'propeller' },
     { name: 'left-wingtip', position: v(0, -5.5, -1.02), crashSpeed: 0, reason: 'wing' },
     { name: 'right-wingtip', position: v(0, 5.5, -1.02), crashSpeed: 0, reason: 'wing' },
-    { name: 'tail', position: v(-4.2, 0, 0.25), crashSpeed: 3, reason: 'tail' },
+    // A tail strike from over-rotating scrapes the tie-down ring; it only wrecks the aircraft
+    // when it hits hard.
+    { name: 'tail', position: v(-4.2, 0, 0.25), crashSpeed: 6, maxDepth: 0.8, reason: 'tail' },
     { name: 'belly', position: v(0.3, 0, 0.62), crashSpeed: 2, reason: 'ground' },
     { name: 'fin-top', position: v(-5.3, 0, -1.6), crashSpeed: 0, reason: 'ground' },
   ],

@@ -1,14 +1,7 @@
-import { type Geodetic, type LocalFrame, ecefToGeodetic, upAt } from '@geo';
+import { type Geodetic, type LocalFrame, ecefToGeodetic, ellipsoidToSeaLevel, upAt } from '@geo';
 import { type AirSample, type Environment, type GroundSample, type Vec3, isa } from '@sim';
 
 const RAD = Math.PI / 180;
-
-/**
- * Height of the geoid (sea level) above the ellipsoid in Switzerland, metres. It varies from
- * about 46 m to 53 m across the country; one value is close enough until the real model is
- * needed for instrument approaches.
- */
-export const GEOID_HEIGHT = 49.5;
 
 /** What the environment needs from the world: the ground at a place, in render space. */
 export interface GroundSource {
@@ -41,6 +34,12 @@ export interface AirState {
  */
 export class WorldEnvironment implements Environment {
   air_: AirState = { windFromDeg: 240, windSpeed: 0, isaDeviation: 0, wetness: 0 };
+  /**
+   * Added to every ground height, metres. When finer terrain arrives the ground under the
+   * wheels moves; the app puts the difference here and lets it fade, so the aircraft is
+   * lowered or raised gently instead of being dropped or kicked.
+   */
+  heightOffset = 0;
   private readonly g: Geodetic = { lon: 0, lat: 0, h: 0 };
 
   constructor(
@@ -72,7 +71,8 @@ export class WorldEnvironment implements Environment {
 
   air(position: Vec3, out: AirSample): AirSample {
     const g = ecefToGeodetic(position, this.g);
-    const a = isa(g.h - GEOID_HEIGHT, this.air_.isaDeviation);
+    // The standard atmosphere is defined over sea level, positions are over the ellipsoid.
+    const a = isa(ellipsoidToSeaLevel(g.lon, g.lat, g.h), this.air_.isaDeviation);
     out.density = a.density;
     out.temperature = a.temperature;
     out.pressure = a.pressure;
@@ -107,7 +107,7 @@ export class WorldEnvironment implements Environment {
     const cp = Math.cos(o.lat * RAD);
     const { x, y, z } = s.normal;
     return {
-      height: s.height,
+      height: s.height + this.heightOffset,
       normal: {
         x: x * -sl + y * cp * cl + z * sp * cl,
         y: x * cl + y * cp * sl + z * sp * sl,

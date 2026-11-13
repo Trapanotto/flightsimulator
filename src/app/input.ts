@@ -71,6 +71,7 @@ export class PilotInput {
   private throttle = 0;
   private flapNotch = 0;
   private gearDown = true;
+  private lastTouchThrottle: number | null = null;
 
   /** Yoke travel per second while a key is held, and when centring. */
   private static readonly DEFLECT = 1.8;
@@ -86,6 +87,7 @@ export class PilotInput {
       0,
     );
     this.gearDown = gearDown;
+    this.lastTouchThrottle = null;
   }
 
   /**
@@ -125,17 +127,23 @@ export class PilotInput {
       throttleDelta += pad.throttleUp - pad.throttleDown;
       brake ||= pad.brake;
     }
+    if (options.invertPitch) pitch = -pitch;
     this.throttle = clamp(
       this.throttle + clamp(throttleDelta, -1, 1) * PilotInput.THROTTLE_RATE * dt,
       0,
       1,
     );
     if (touch) {
-      if (touch.pitch !== null) pitch = touch.pitch;
-      if (touch.roll !== null) roll = touch.roll;
-      if (touch.yaw !== null) yaw = touch.yaw;
-      // The on-screen lever is absolute: it sets the throttle while it is held.
-      if (touch.throttle !== null) this.throttle = clamp(touch.throttle, 0, 1);
+      // On-screen sticks add to the other devices (their pitch is already inverted if the
+      // player asked for that).
+      pitch += touch.pitch ?? 0;
+      roll += touch.roll ?? 0;
+      yaw += touch.yaw ?? 0;
+      // The on-screen lever stays where it was put: it sets the throttle when it moves, and
+      // keys carry on from there.
+      if (touch.throttle !== null && touch.throttle !== this.lastTouchThrottle)
+        this.throttle = clamp(touch.throttle, 0, 1);
+      this.lastTouchThrottle = touch.throttle;
       brake ||= touch.brake;
     }
 
@@ -146,7 +154,7 @@ export class PilotInput {
     );
     if (events.gearToggle % 2 === 1) this.gearDown = !this.gearDown;
 
-    out.pitch = clamp(options.invertPitch ? -pitch : pitch, -1, 1);
+    out.pitch = clamp(pitch, -1, 1);
     out.roll = clamp(roll, -1, 1);
     out.yaw = clamp(yaw, -1, 1);
     for (let i = 0; i < out.throttle.length; i++) out.throttle[i] = this.throttle;
@@ -197,6 +205,8 @@ export class Keyboard {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable))
         return;
+      // The interface may have handled the key already (Esc closing a dialog).
+      if (e.defaultPrevented) return;
       if (!e.repeat) {
         this.held.add(e.code);
         this.onPress?.(e.code);

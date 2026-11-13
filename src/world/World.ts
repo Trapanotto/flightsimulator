@@ -83,6 +83,11 @@ export interface GroundInfo {
   normal: { x: number; y: number; z: number };
   /** What is there: decides wheel friction and whether a landing is survivable. */
   surface: 'asphalt' | 'concrete' | 'grass' | 'gravel' | 'snow' | 'water' | 'terrain';
+  /**
+   * Zoom level of the tile the answer comes from. Coarse tiles can be tens of metres off;
+   * the height is only good for putting wheels on once this is near the quality's maxZoom.
+   */
+  zoom: number;
 }
 
 /** Numbers for the demo page and performance reports. */
@@ -272,7 +277,7 @@ export class World {
             : cls >= MASK_B_GLACIER - 24
               ? 'snow'
               : 'terrain';
-    return { height: hit.height, normal, surface };
+    return { height: hit.height, normal, surface, zoom: node.key.z };
   }
 
   private query(lon: number, lat: number): SurfaceHit | undefined {
