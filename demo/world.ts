@@ -83,8 +83,8 @@ declare global {
       cpuMs: number;
       /** Worst CPU time of a frame since the page started (uploads, hitches), ms. */
       cpuMaxMs: number;
-      /** Frames whose CPU time exceeded 8 ms: [frame, ms, tiles uploaded so far]. */
-      hitches: Array<[number, number, number]>;
+      /** Frames whose CPU time exceeded 8 ms: [frame, ms, tiles uploaded so far, world.update ms]. */
+      hitches: Array<[number, number, number, number]>;
       gpuMs: number | null;
       /** Moves the render origin by (east, north) metres without moving the camera. */
       rebase: (east: number, north: number) => void;
@@ -302,7 +302,7 @@ const stats = {
   frameMs: 0,
   cpuMs: 0,
   cpuMaxMs: 0,
-  hitches: [] as Array<[number, number, number]>,
+  hitches: [] as Array<[number, number, number, number]>,
   gpuMs: gpuMs as number | null,
   rebase,
   ground: (lon: number, lat: number) => world.ground(lon, lat),
@@ -339,7 +339,9 @@ renderer.setAnimationLoop((now: number) => {
     sun.target.position.copy(block.position);
     sun.position.copy(block.position).addScaledVector(sunDir, 200);
   }
+  const tu = performance.now();
   world.update(camera);
+  const updateMs = performance.now() - tu;
   renderer.render(scene, camera);
   const cpu = performance.now() - t0;
 
@@ -350,7 +352,12 @@ renderer.setAnimationLoop((now: number) => {
   cpuAcc += cpu;
   if (frames > 10) stats.cpuMaxMs = Math.max(stats.cpuMaxMs, cpu);
   if (cpu > 8 && stats.hitches.length < 40)
-    stats.hitches.push([frames, Math.round(cpu * 10) / 10, stats.world.uploaded]);
+    stats.hitches.push([
+      frames,
+      Math.round(cpu * 10) / 10,
+      stats.world.uploaded,
+      Math.round(updateMs * 10) / 10,
+    ]);
   samples++;
   if (samples >= 30) {
     stats.frameMs = frameAcc / samples;

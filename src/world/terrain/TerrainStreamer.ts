@@ -53,6 +53,30 @@ const ROOT_RANGE = { x0: 263, x1: 271, y0: 192, y1: 196 };
 /** A download failing this often (not 403/404) is given up for the session. */
 const MAX_ERRORS = 3;
 
+/** Sampling of the orthophoto: sRGB, mipmapped, anisotropic. */
+export function tileImageTexture(t: Texture, anisotropy: number): Texture {
+  t.colorSpace = SRGBColorSpace;
+  t.flipY = false;
+  t.anisotropy = anisotropy;
+  t.generateMipmaps = true;
+  t.minFilter = LinearMipmapLinearFilter;
+  t.magFilter = LinearFilter;
+  t.needsUpdate = true;
+  return t;
+}
+
+/** The land-cover mask as a texture: linear data, mipmapped. */
+export function tileMaskTexture(data: Uint8Array, size: number): DataTexture {
+  const t = new DataTexture(data, size, size, RGBAFormat, UnsignedByteType);
+  t.colorSpace = NoColorSpace;
+  t.flipY = false;
+  t.generateMipmaps = true;
+  t.minFilter = LinearMipmapLinearFilter;
+  t.magFilter = LinearFilter;
+  t.needsUpdate = true;
+  return t;
+}
+
 /** A loaded tile: what the GPU draws and what height queries read. */
 export interface TileData {
   mesh: Mesh;
@@ -233,30 +257,11 @@ export class TerrainStreamer implements TileProvider<TileData> {
     geometry.setAttribute('elevation', new BufferAttribute(g.elevations, 1));
     geometry.setIndex(new BufferAttribute(g.indices, 1));
 
-    const image = new Texture(out.image);
-    image.colorSpace = SRGBColorSpace;
-    image.flipY = false;
-    image.anisotropy = this.settings.anisotropy;
-    image.generateMipmaps = true;
-    image.minFilter = LinearMipmapLinearFilter;
-    image.magFilter = LinearFilter;
-    image.needsUpdate = true;
+    const image = tileImageTexture(new Texture(out.image), this.settings.anisotropy);
     // The GPU keeps its own copy; free the decoded bitmap once it is uploaded.
     image.onUpdate = () => out.image.close();
 
-    const mask = new DataTexture(
-      out.mask,
-      out.maskSize,
-      out.maskSize,
-      RGBAFormat,
-      UnsignedByteType,
-    );
-    mask.colorSpace = NoColorSpace;
-    mask.flipY = false;
-    mask.generateMipmaps = true;
-    mask.minFilter = LinearMipmapLinearFilter;
-    mask.magFilter = LinearFilter;
-    mask.needsUpdate = true;
+    const mask = tileMaskTexture(out.mask, out.maskSize);
 
     const mesh = new Mesh(geometry, this.materials.create(image, mask));
     mesh.name = tileId(node.key);
