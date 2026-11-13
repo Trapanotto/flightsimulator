@@ -247,6 +247,42 @@ async function bench(n: number): Promise<number> {
   return (performance.now() - t0) / n;
 }
 
+/**
+ * ?marks=1: labels on known summits (heights above sea level from swisstopo), to check that the
+ * mountains stand where they belong.
+ */
+const PEAKS = [
+  { name: 'Niesen', lon: 7.6513, lat: 46.6453, h: 2362 },
+  { name: 'Stockhorn', lon: 7.5383, lat: 46.6939, h: 2190 },
+  { name: 'Eiger', lon: 8.0053, lat: 46.5776, h: 3967 },
+  { name: 'Mönch', lon: 7.9975, lat: 46.5585, h: 4107 },
+  { name: 'Jungfrau', lon: 7.9625, lat: 46.5367, h: 4158 },
+  { name: 'Gurten', lon: 7.4397, lat: 46.9188, h: 858 },
+];
+const marks = query.has('marks')
+  ? PEAKS.map((p) => {
+      const el = document.createElement('div');
+      el.textContent = p.name;
+      el.style.cssText =
+        'position:fixed;font:11px sans-serif;color:#fff;background:#c00;padding:0 3px;' +
+        'transform:translate(-50%,-100%);pointer-events:none;white-space:nowrap';
+      document.body.appendChild(el);
+      return { p, el };
+    })
+  : [];
+function placeMarks() {
+  const v = new Vector3();
+  for (const { p, el } of marks) {
+    frame.fromGeodetic(p.lon, p.lat, seaLevelToEllipsoid(p.lon, p.lat, p.h), v);
+    const ahead = v.clone().sub(camera.position).dot(camera.getWorldDirection(new Vector3())) > 0;
+    v.project(camera);
+    const visible = ahead && Math.abs(v.x) < 1 && Math.abs(v.y) < 1;
+    el.style.display = visible ? 'block' : 'none';
+    el.style.left = `${((v.x + 1) / 2) * canvas.clientWidth}px`;
+    el.style.top = `${((1 - v.y) / 2) * canvas.clientHeight}px`;
+  }
+}
+
 const fly = query.has('fly');
 let last = performance.now();
 let frames = 0;
@@ -330,6 +366,7 @@ renderer.setAnimationLoop((now: number) => {
   stats.world = world.stats();
   stats.drawCalls = renderer.info.render.drawCalls;
   stats.triangles = renderer.info.render.triangles;
+  if (marks.length) placeMarks();
   if (frames % 10 === 0) {
     const s = stats.world;
     hud.textContent =

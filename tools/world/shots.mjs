@@ -25,6 +25,8 @@ const SCENES = [
   { name: 'shore', query: 'view=shore', ...DESKTOP },
   { name: 'glint', query: 'view=glint&sun=130,14', ...DESKTOP },
   { name: 'alps', query: 'view=alps', ...DESKTOP },
+  { name: 'thun-marks', query: 'view=thun&marks=1', ...DESKTOP },
+  { name: 'lake-marks', query: 'view=lake&marks=1', ...DESKTOP },
   { name: 'runway', query: 'view=runway', ...DESKTOP },
   { name: 'top', query: 'view=top', ...DESKTOP },
   { name: 'shadow', query: 'view=runway&shadow=1', ...DESKTOP },
