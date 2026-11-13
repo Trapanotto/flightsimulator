@@ -23,6 +23,11 @@ export interface PadState {
 
 export interface InputOptions {
   invertPitch: boolean;
+  /**
+   * How far a held key moves the yoke, 0..1 (default 1). A key is all or nothing, and full
+   * yoke at cruise speed breaks the aircraft: the app lowers this as the airspeed rises.
+   */
+  keyAuthority?: number;
 }
 
 /** One-shot commands since the last frame. */
@@ -109,8 +114,10 @@ export class PilotInput {
 
     const keyAxis = (current: number, target: number) =>
       approach(current, target, (target === 0 ? PilotInput.CENTRE : PilotInput.DEFLECT) * dt);
-    this.pitch = keyAxis(this.pitch, axis(KEYS.pitchDown, KEYS.pitchUp));
-    this.roll = keyAxis(this.roll, axis(KEYS.rollLeft, KEYS.rollRight));
+    const authority = options.keyAuthority ?? 1;
+    this.pitch = keyAxis(this.pitch, axis(KEYS.pitchDown, KEYS.pitchUp) * authority);
+    // Rolling is far less critical than pitching; it keeps more of its travel.
+    this.roll = keyAxis(this.roll, axis(KEYS.rollLeft, KEYS.rollRight) * (0.5 + 0.5 * authority));
     this.yaw = keyAxis(this.yaw, axis(KEYS.yawLeft, KEYS.yawRight));
 
     let pitch = this.pitch;
@@ -220,4 +227,14 @@ export class Keyboard {
   }
 
   readonly down = (code: string) => this.held.has(code);
+}
+
+/**
+ * Yoke travel for held keys at an indicated airspeed (m/s): all of it up to the approach
+ * speed, a third of it at twice the stall speed and beyond.
+ */
+export function keyAuthorityAt(ias: number, stallSpeed: number): number {
+  const lo = 1.2 * stallSpeed;
+  const hi = 2.2 * stallSpeed;
+  return 1 - 0.65 * clamp((ias - lo) / (hi - lo), 0, 1);
 }

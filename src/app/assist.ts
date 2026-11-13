@@ -17,10 +17,13 @@ export class RudderAssist {
   private holdHeading: number | undefined;
   private lastHeading = 0;
   private command = 0;
+  /** Rudder that has turned out to be needed to hold the heading (the pull of the engine). */
+  private bias = 0;
 
   reset() {
     this.holdHeading = undefined;
     this.command = 0;
+    this.bias = 0;
   }
 
   /**
@@ -41,14 +44,19 @@ export class RudderAssist {
     if (telemetry.onGround) {
       if (telemetry.groundSpeed < 1) {
         this.holdHeading = heading;
+        this.bias = 0;
       } else {
         this.holdHeading ??= heading;
         // Steer back to the heading held, damped by the turn rate (degrees, degrees/s).
+        // A steady pull needs a steady foot: the error also builds up a lasting rudder
+        // offset, otherwise the nose would settle a few degrees off.
         const error = headingDiff(this.holdHeading, heading);
-        want = clamp(0.12 * error - 0.05 * rate, -1, 1);
+        this.bias = clamp(this.bias + 0.5 * error * dt, -0.7, 0.7);
+        want = clamp(0.35 * error - 0.08 * rate + this.bias, -1, 1);
       }
     } else {
       this.holdHeading = undefined;
+      this.bias = 0;
       // Centre the ball: rudder towards the side the air comes from.
       want = clamp(4 * telemetry.beta, -0.6, 0.6);
     }

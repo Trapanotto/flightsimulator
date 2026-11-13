@@ -6,6 +6,8 @@
 export class AudioEngine {
   private context?: AudioContext;
   private master?: GainNode;
+  private meter?: AnalyserNode;
+  private samples?: Float32Array<ArrayBuffer>;
   private volume = 0.7;
   private muted = false;
 
@@ -14,7 +16,10 @@ export class AudioEngine {
     if (!this.context) {
       this.context = new AudioContext({ latencyHint: 'interactive' });
       this.master = this.context.createGain();
-      this.master.connect(this.context.destination);
+      this.meter = this.context.createAnalyser();
+      this.meter.fftSize = 1024;
+      this.samples = new Float32Array(this.meter.fftSize);
+      this.master.connect(this.meter).connect(this.context.destination);
       this.apply();
     }
     return this.context;
@@ -28,6 +33,15 @@ export class AudioEngine {
 
   async resume() {
     if (this.audio.state === 'suspended') await this.audio.resume();
+  }
+
+  /** Loudness of what is being played right now (RMS, 0 = silence). For meters and tests. */
+  level(): number {
+    if (!this.meter || !this.samples) return 0;
+    this.meter.getFloatTimeDomainData(this.samples);
+    let sum = 0;
+    for (const v of this.samples) sum += v * v;
+    return Math.sqrt(sum / this.samples.length);
   }
 
   /** 0..1 */

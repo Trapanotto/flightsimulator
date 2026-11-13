@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AIRPORTS, bearingDeg, findAirport, offsetPoint, runwayStart } from '../src/app/airports';
 import { WorldEnvironment } from '../src/app/environment';
-import { type InputEvents, PilotInput } from '../src/app/input';
+import { type InputEvents, PilotInput, keyAuthorityAt } from '../src/app/input';
 import { emptyState, lerpState, stateToRenderPose } from '../src/app/pose';
 import { LocalFrame, geodeticToEcef } from '../src/geo';
 import { neutralControls } from '../src/sim';
@@ -233,6 +233,29 @@ describe('PilotInput', () => {
       2 / 3,
     );
     expect(run(input, 0.02, [], { flapsDown: 0, flapsUp: 0, gearToggle: 1 }).gearDown).toBe(false);
+  });
+
+  it('gives held keys less yoke travel at speed', () => {
+    const vs = 25;
+    expect(keyAuthorityAt(0, vs)).toBe(1);
+    expect(keyAuthorityAt(28, vs)).toBe(1);
+    expect(keyAuthorityAt(60, vs)).toBeCloseTo(0.35);
+    expect(keyAuthorityAt(42, vs)).toBeGreaterThan(0.35);
+    expect(keyAuthorityAt(42, vs)).toBeLessThan(1);
+    const input = new PilotInput();
+    const out = neutralControls(1);
+    for (let i = 0; i < 120; i++)
+      input.update(
+        1 / 60,
+        (c) => c === 'KeyW' || c === 'KeyD',
+        null,
+        null,
+        noEvents(),
+        { invertPitch: false, keyAuthority: 0.35 },
+        out,
+      );
+    expect(out.pitch).toBeCloseTo(-0.35);
+    expect(out.roll).toBeCloseTo(0.675);
   });
 
   it('lets a gamepad or the touch stick override the keys', () => {

@@ -10,7 +10,7 @@ import {
 } from 'three/webgpu';
 import { pass } from 'three/tsl';
 import { type AircraftVisual, createReferenceMarker, loadAircraftVisual } from '@aircraft';
-import { AudioEngine } from '@audio';
+import { AircraftSound, AudioEngine } from '@audio';
 import {
   LocalFrame,
   ecefToGeodetic,
@@ -27,7 +27,7 @@ import {
   type Telemetry,
   createAircraft,
 } from '@sim';
-import { Sky, WEATHER_PRESETS } from '@sky';
+import { Sky, WEATHER_PRESETS, type Weather } from '@sky';
 import { type FlightPlan, game, mountUi, settings, status, touchInput } from '@ui';
 import { World } from '@world';
 import { AIRPORTS, findAirport, runwayStart } from './airports';
@@ -36,7 +36,8 @@ import { CameraRig } from './camera';
 import { PROFILES, detectDevice } from './device';
 import { WorldEnvironment } from './environment';
 import { Flight } from './Flight';
-import { type InputEvents, KEYS, Keyboard, PilotInput, readGamepad } from './input';
+import { fetchLiveWeather } from './liveWeather';
+import { type InputEvents, KEYS, Keyboard, PilotInput, keyAuthorityAt, readGamepad } from './input';
 import { dateAtSwissHour } from './time';
 
 /** Where the menu scene is set and where the first flight starts. */
@@ -61,6 +62,8 @@ export interface AppDebug {
   frameMs: number;
   worstMs: number;
   assist: RudderAssist;
+  /** Loudness of the sound output right now (RMS). */
+  audioLevel: () => number;
 }
 
 declare global {
@@ -167,9 +170,16 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   let visualId: AircraftId | 'marker' = 'marker';
   visual.object.visible = false;
   scene.add(visual.object);
-  const useVisual = async (id: AircraftId) => {
-    if (visualId === id) return;
-    visualId = id;
+  let visualLoad: Promise<void> = Promise.resolve();
+  const useVisual = (id: AircraftId): Promise<void> => {
+    // A second request for the same model waits for the first.
+    if (visualId !== id) {
+      visualId = id;
+      visualLoad = loadVisual(id);
+    }
+    return visualLoad;
+  };
+  const loadVisual = async (id: AircraftId) => {
     try {
       const next = await loadAircraftVisual(id, {
         quality: profile.device === 'mobile' ? 'low' : 'high',
@@ -204,6 +214,12 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   const events: InputEvents = { flapsDown: 0, flapsUp: 0, gearToggle: 0 };
   let flight: Flight | undefined;
   let pending: Pending | undefined;
+  /** Seconds the world has had nothing left to load. */
+  let calm = 0;
+  let modelReady = false;
+  /** The screen to show once the scene has been drawn a few times. */
+  let reveal: { screen: 'menu' | 'flight'; frames: number } | undefined;
+  let tilesLoaded = 0;
   /** The terrain under the aircraft last frame: its level of detail and height. */
   let groundZoom = 0;
   let groundHeight = 0;
@@ -228,6 +244,18 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     sky.setLocation(lon, lat);
   };
 
+  let weatherRequest: AbortController | undefined;
+  const applyWeather = (weather: Weather) => {
+    sky.setWeather(weather);
+    game.weather.value = weather;
+    env.air_ = {
+      windFromDeg: weather.windFromDeg,
+      windSpeed: weather.windSpeed,
+      isaDeviation: weather.temperature - 15,
+      wetness: weather.precipitation,
+    };
+  };
+
   /**
    * Prepares a flight (a plan) or the parked aircraft of the menu (null). The aircraft
    * appears once the terrain under it is loaded.
@@ -237,6 +265,9 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     visual.object.visible = false;
     game.telemetry.value = null;
     game.levers.value = null;
+    game.loadProgress.value = 0;
+    // Back to the menu: the loading screen covers the change of place.
+    if (!p) game.screen.value = 'loading';
     plan = p;
     const icao = p?.airport ?? (p?.start.kind === 'runway' ? p.start.airport : undefined);
     const airport = (icao && findAirport(icao)) || homeAirport;
@@ -265,36 +296,46 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       };
     }
     rebase(pending.lon, pending.lat);
+    calm = 0;
+    tilesLoaded = 0;
+    reveal = undefined;
+    modelReady = false;
+    void useVisual(p?.aircraft ?? 'c172').then(() => (modelReady = true));
     if (!timeIsFixed) {
       const time = p?.time;
       sky.setTime(typeof time === 'number' ? dateAtSwissHour(new Date(), time) : new Date());
     }
-    // Live weather follows with the sky package; until then it is a fair day.
     // Screenshot tests need a sky that looks the same every time: no drifting clouds.
-    const weather =
-      WEATHER_PRESETS[shot ? 'clear' : p && p.weather !== 'live' ? p.weather : 'fair'];
-    sky.setWeather(weather);
-    game.weather.value = weather;
-    env.air_ = {
-      windFromDeg: weather.windFromDeg,
-      windSpeed: weather.windSpeed,
-      isaDeviation: weather.temperature - 15,
-      wetness: weather.precipitation,
-    };
+    const choice = shot ? 'clear' : (p?.weather ?? 'live');
+    // Live weather arrives a moment later; until then (or without a connection) a fair day.
+    applyWeather(WEATHER_PRESETS[choice === 'live' ? 'fair' : choice]);
+    weatherRequest?.abort();
+    if (choice === 'live') {
+      weatherRequest = new AbortController();
+      fetchLiveWeather(pending.lon, pending.lat, airport.elevation, weatherRequest.signal).then(
+        applyWeather,
+        (err: unknown) => {
+          if ((err as Error).name !== 'AbortError') console.warn(err);
+        },
+      );
+    }
   };
 
   /** Places the pending flight if its terrain has arrived. */
-  const tryBegin = () => {
+  const tryBegin = (dt: number) => {
     if (!pending) return;
+    // The world counts as loaded once nothing has been outstanding for a moment (between
+    // two batches of tiles it is briefly idle too).
+    calm = world.loading ? 0 : calm + dt;
     const under = world.ground(pending.lon, pending.lat);
     const waited = (performance.now() - pending.since) / 1000;
-    // Wait for the fine terrain under the wheels (coarse tiles are metres off) and for the
-    // view to fill in, but not forever.
     if (!under) return;
+    // Everything in view is loaded before anything is shown: the aircraft stands on the
+    // final terrain (coarse tiles are metres off) and nothing sharpens while one watches.
+    // Not forever, though: a slow connection still gets to fly.
     const fine = under.zoom >= profile.world.maxZoom - 1;
-    // The menu shows up as soon as the aircraft can stand; a flight also waits for the view.
-    if (!fine && waited < 20) return;
-    if (pending.plan && world.loading && waited < 10) return;
+    if (!(fine && calm > 0.5) && waited < 30) return;
+    if (!modelReady && waited < 20) return;
     const ground = under.height;
     env.heightOffset = 0;
     groundZoom = under.zoom;
@@ -318,16 +359,14 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     input.reset(aircraft.controls.throttle[0] ?? 0, aircraft.controls.flaps, true);
     assist.reset();
     visual.object.visible = true;
-    void useVisual(id);
-    if (p.plan) {
-      setView('outside');
-      game.loadProgress.value = 1;
-      game.screen.value = 'flight';
-    } else {
+    if (p.plan) setView('outside');
+    else {
       rig.setMode('menu');
       visual.setCockpitView(false);
-      game.screen.value = 'menu';
     }
+    // The first frames with the aircraft compile its shaders and stall; they are drawn
+    // behind the loading screen, which comes down a moment later.
+    reveal = { screen: p.plan ? 'flight' : 'menu', frames: 24 };
   };
 
   // ---- interface ----
@@ -360,9 +399,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   mountUi(uiRoot, {
     startFlight(p) {
       game.plan.value = p;
-      game.loadProgress.value = 0;
-      game.screen.value = 'briefing';
       prepare(p);
+      game.screen.value = 'briefing';
     },
     pause: togglePause,
     resume: togglePause,
@@ -420,7 +458,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
 
   // Browsers start audio only after a gesture.
   const audio = new AudioEngine();
-  const unlock = () => void audio.resume();
+  const sound = new AircraftSound(audio);
+  const unlock = () => void audio.resume().then(() => sound.start());
   window.addEventListener('pointerdown', unlock, { once: true });
   window.addEventListener('keydown', unlock, { once: true });
 
@@ -452,6 +491,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     frameMs: 0,
     worstMs: 0,
     assist,
+    audioLevel: () => audio.level(),
   };
   window.__app = debug;
 
@@ -471,13 +511,27 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     const dt = Math.min(frameMs / 1000, 0.25);
     last = now;
 
-    tryBegin();
-    if (pending && pending.plan)
-      game.loadProgress.value = Math.max(game.loadProgress.value, world.progress * 0.98);
+    tryBegin(dt);
+    if (pending) {
+      // Mostly terrain; the share only ever grows, although the view asks for more tiles
+      // as it sharpens.
+      tilesLoaded = Math.max(tilesLoaded, world.progress);
+      const progress = 0.04 + 0.82 * tilesLoaded + (modelReady ? 0.08 : 0);
+      game.loadProgress.value = Math.max(game.loadProgress.value, Math.min(progress, 0.95));
+    } else if (reveal) {
+      game.loadProgress.value = Math.max(game.loadProgress.value, 1 - reveal.frames / 500);
+      if (--reveal.frames <= 0) {
+        game.loadProgress.value = 1;
+        game.screen.value = reveal.screen;
+        reveal = undefined;
+      }
+    }
 
     if (flight) {
       const aircraft = flight.aircraft;
       const flying = plan !== null && game.screen.value === 'flight';
+      // The aircraft of the menu settles on its wheels and then stands still for good.
+      if (plan === null) flight.paused = true;
       readTouchButtons();
       const pad = flying ? readGamepad() : null;
       const touch = flying
@@ -489,7 +543,10 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
             brake: touchInput.brake.value,
           }
         : noTouch;
-      const options = { invertPitch: settings.invertPitch.value };
+      const options = {
+        invertPitch: settings.invertPitch.value,
+        keyAuthority: keyAuthorityAt(aircraft.telemetry.ias, aircraft.info.vs),
+      };
       const alpha = flight.advance(dt, (stepDt) => {
         // Finer (or coarser) terrain arrived under the aircraft: its height changed without
         // the aircraft moving. Take the step out before the wheels feel it and let it fade.
@@ -550,6 +607,14 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       camera.lookAt(local);
     }
 
+    audio.setVolume(settings.volume.value);
+    audio.setMuted(settings.muted.value);
+    sound.update(
+      plan && flight ? flight.aircraft.telemetry : undefined,
+      game.view.value === 'cockpit',
+      game.screen.value === 'flight',
+    );
+
     world.update(camera);
     const camGeo = frame.toGeodetic(camera.position, geo);
     anchor.fromGeodetic(frame.origin.lon, frame.origin.lat, 0, local);
@@ -565,7 +630,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     pipeline.render();
 
     debug.frames++;
-    if (!debug.ready && flight && debug.frames > 5 && (!shot || !world.loading)) debug.ready = true;
+    if (!debug.ready && flight && game.screen.value === 'menu') debug.ready = true;
     fpsFrames++;
     fpsTime += dt;
     worst = Math.max(worst, frameMs);

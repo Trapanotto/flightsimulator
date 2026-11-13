@@ -35,6 +35,13 @@ export class Flight {
   /** Back to the start of this flight. */
   restart() {
     this.aircraft.reset(this.start, this.env);
+    if (this.start.onGround) {
+      // Let it sink into its struts, brakes on, before it is shown.
+      const c = this.aircraft.controls;
+      c.brakeLeft = c.brakeRight = 1;
+      this.settle(2.5);
+      c.brakeLeft = c.brakeRight = 0;
+    }
     copyState(this.aircraft.state, this.previous);
     this.loop.reset();
   }
@@ -50,6 +57,15 @@ export class Flight {
       beforeStep(dt);
       this.aircraft.step(dt, this.env);
     });
+  }
+
+  /**
+   * Runs the simulation ahead by `seconds` without drawing: an aircraft put on the ground
+   * sinks into its struts, and that should be over before anyone sees it.
+   */
+  settle(seconds: number) {
+    for (let t = 0; t < seconds; t += this.loop.dt) this.aircraft.step(this.loop.dt, this.env);
+    copyState(this.aircraft.state, this.previous);
   }
 
   /** Places the model for drawing: `alpha` blends the last two states. */

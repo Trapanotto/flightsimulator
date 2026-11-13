@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.0-alpha.2 – Phase 1 abgerundet (2026-11-13)
+
+- **Laden:** Das Gelände wird vollständig geladen, bevor Menü oder Flug erscheinen; der
+  Ladebalken zeigt den echten Fortschritt. Das Flugzeug steht von Anfang an ruhig auf
+  seinem Fahrwerk, statt nachzufedern, und der einmalige Hänger beim ersten Bild liegt
+  hinter dem Ladebild.
+- **Ton:** Triebwerk aus Zündfolge und Propeller berechnet, Fahrtwind, Rollgeräusch und
+  Überziehwarnung; im Cockpit gedämpft. Lautstärke und Stummschalten in den Einstellungen.
+- **Live-Wetter** von Open-Meteo: Bewölkung, Wolkenbasis, Sicht, Wind und Temperatur am
+  Startort.
+- **Seitenruder-Hilfe** hält den Startlauf jetzt auf unter 2 Grad genau.
+- **Tastatur:** Bei hoher Geschwindigkeit bewegen die Tasten das Steuer feiner, damit volles
+  Drücken das Flugzeug nicht überlastet.
+
 ## 1.0.0-alpha.1 – Phase 1: Kostprobe Bern–Thunersee (2026-11-13)
 
 Der erste fliegbare Stand des Neuaufbaus.
