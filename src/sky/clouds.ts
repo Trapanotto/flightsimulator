@@ -95,8 +95,8 @@ export interface CloudQuality {
   shadowSamples: number;
 }
 
-function noiseTexture3D(size: number): Data3DTexture {
-  const tex = new Data3DTexture(new Uint8Array(size * size * size * 4), size, size, size);
+function noiseTexture3D(size: number, data?: Uint8Array): Data3DTexture {
+  const tex = new Data3DTexture(data ?? new Uint8Array(size * size * size * 4), size, size, size);
   tex.format = RGBAFormat;
   tex.type = UnsignedByteType;
   tex.wrapS = tex.wrapT = tex.wrapR = RepeatWrapping;
@@ -108,12 +108,8 @@ function noiseTexture3D(size: number): Data3DTexture {
   return tex;
 }
 
-function weatherTexture(): DataTexture {
-  const tex = new DataTexture(
-    new Uint8Array(WEATHER_SIZE * WEATHER_SIZE * 4),
-    WEATHER_SIZE,
-    WEATHER_SIZE,
-  );
+function weatherTexture(size: number, data?: Uint8Array): DataTexture {
+  const tex = new DataTexture(data ?? new Uint8Array(size * size * 4), size, size);
   tex.format = RGBAFormat;
   tex.type = UnsignedByteType;
   tex.wrapS = tex.wrapT = RepeatWrapping;
@@ -146,9 +142,11 @@ export class CloudNode extends TempNode {
     return 'SkyCloudNode';
   }
 
-  readonly shape = noiseTexture3D(SHAPE_SIZE);
-  readonly detail = noiseTexture3D(DETAIL_SIZE);
-  readonly weather = weatherTexture();
+  // Stand-ins until the worker has built the noises (no clouds meanwhile, see noiseReady).
+  private shape = noiseTexture3D(1);
+  private detail = noiseTexture3D(1);
+  private weather = weatherTexture(1);
+  private readonly noiseReady = uniform(0);
 
   private readonly march = new RenderTarget(1, 1, { type: HalfFloatType, depthBuffer: false });
   private history = [
@@ -196,13 +194,19 @@ export class CloudNode extends TempNode {
     return this.output;
   }
 
+  /**
+   * Hands over the noises built by the worker. New textures rather than updating the
+   * stand-ins: the WebGL 2 backend does not re-upload a 3D texture's data.
+   */
   setNoise(n: CloudNoise) {
-    (this.shape.image.data as Uint8Array).set(n.shape);
-    this.shape.needsUpdate = true;
-    (this.detail.image.data as Uint8Array).set(n.detail);
-    this.detail.needsUpdate = true;
-    (this.weather.image.data as Uint8Array).set(n.weather);
-    this.weather.needsUpdate = true;
+    for (const t of [this.shape, this.detail, this.weather]) t.dispose();
+    this.shape = noiseTexture3D(SHAPE_SIZE, n.shape);
+    this.detail = noiseTexture3D(DETAIL_SIZE, n.detail);
+    this.weather = weatherTexture(WEATHER_SIZE, n.weather);
+    this.shapeNode.value = this.shape;
+    this.detailNode.value = this.detail;
+    this.weatherNode.value = this.weather;
+    this.noiseReady.value = 1;
   }
 
   /** Called by the sky after the camera moved: remembers the matrix for the next frame. */
@@ -369,7 +373,9 @@ export class CloudNode extends TempNode {
     const sigma = mix(SIGMA * 0.55, SIGMA, type);
     // Steepen the edge: real cumulus end within tens of metres, the noise ramps over hundreds.
     const dense = opts.detail ? clamp(d.mul(3), 0, 1) : clamp(d.mul(2), 0, 1);
-    return select(inside, dense.mul(dense.mul(-0.5).add(1.5)).mul(sigma), float(0));
+    return select(inside, dense.mul(dense.mul(-0.5).add(1.5)).mul(sigma), float(0)).mul(
+      this.noiseReady,
+    );
   }
 
   private marchPass(): V4 {
@@ -425,17 +431,17 @@ export class CloudNode extends TempNode {
           const sigma = this.density(qxz, h, { detail: true, distance: t });
           If(sigma.greaterThan(1e-5), () => {
             // Optical depth towards the sun, steps growing from 30 m (cheap density).
+            // Unrolled with the distances as constants: a loop-carried position in a loop
+            // nested in the march was miscompiled on the WebGL 2 fallback (ANGLE).
             const od = float(0).toVar();
-            const ls = float(30).toVar();
-            const lp = pos.toVar();
-            const lh = h.toVar();
-            loop('cl', q.lightSteps, () => {
-              lp.addAssign(u.lightDir.mul(ls));
-              lh.addAssign(sunUp.mul(ls));
+            let reach = 0;
+            for (let k = 0; k < q.lightSteps; k++) {
+              const step = 30 * 1.9 ** k;
+              reach += step;
+              const lp = pos.add(u.lightDir.mul(reach));
               const lq = vec2(lp.x, lp.z).add(u.originOffset);
-              od.addAssign(this.density(lq, lh, { detail: false }).mul(ls));
-              ls.mulAssign(1.9);
-            });
+              od.addAssign(this.density(lq, h.add(sunUp.mul(reach)), { detail: false }).mul(step));
+            }
             // Multiple scattering (Wrenninge): octaves see less extinction, a softer phase.
             const ms = exp(od.negate())
               .mul(ph0)

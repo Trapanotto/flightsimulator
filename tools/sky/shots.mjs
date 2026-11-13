@@ -70,7 +70,8 @@ try {
     await page.screenshot({ path: file });
     let ms = '';
     if (measure) {
-      const t = await page.evaluate(() => window.__demo.measure(120));
+      await page.evaluate(() => window.__demo.measure(60));
+      const t = await page.evaluate(() => window.__demo.measure(180));
       ms = ` ${t.toFixed(2)} ms/frame`;
     }
     console.log(`${name} (${state.backend})${ms} -> ${file}`);

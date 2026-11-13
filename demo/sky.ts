@@ -9,6 +9,7 @@
  *   device=mobile        quality preset       webgl=1 (WebGL 2 fallback)
  *   depth=reversed|log|standard              fov=55
  *   lapse=600            time-lapse, seconds of sky time per real second
+ *   speed=120&turn=3     fly forward (m/s) and turn (deg/s), with floating-origin rebasing
  *   shot=1               hide the text
  */
 import {
@@ -161,6 +162,8 @@ async function main() {
 
   const quality = { ...SKY_QUALITY[device] };
   if (q.has('steps')) quality.cloudSteps = num('steps', quality.cloudSteps);
+  if (q.has('lsteps')) quality.cloudLightSteps = num('lsteps', quality.cloudLightSteps);
+  if (q.has('detail')) quality.cloudDetail = q.get('detail') === '1';
   const scene = new Scene();
   const camera = new PerspectiveCamera(num('fov', 55), 1, 0.5, 225_000);
   let time = new Date(q.get('t') ?? '2026-06-21T11:30:00Z');
@@ -246,31 +249,54 @@ async function main() {
   window.addEventListener('resize', resize);
 
   const lapse = num('lapse', 0);
+  // Fly: the camera moves forward at this speed (m/s) and turns (deg/s), the floating
+  // origin is rebased every 2 km like the app will do (scenery stays where it is).
+  const speed = num('speed', 0);
+  const turn = num('turn', 0) * (Math.PI / 180);
+  const origin = { x: 0, z: 0 };
+  const scenery = scene.children.filter((o) => o !== sky.object);
   const frame = (dt: number) => {
+    if (speed || turn) {
+      camera.position.addScaledVector(fwd, speed * dt);
+      camera.rotateY(-turn * dt);
+      camera.getWorldDirection(fwd);
+      fwd.y = 0;
+      fwd.normalize();
+      if (Math.hypot(camera.position.x, camera.position.z) > 2000) {
+        const shift = new Vector3(camera.position.x, 0, camera.position.z);
+        origin.x += shift.x;
+        origin.z += shift.z;
+        camera.position.sub(shift);
+        for (const o of scenery) o.position.sub(shift);
+      }
+    }
     if (lapse) {
       time = new Date(time.getTime() + dt * lapse * 1000);
       sky.setTime(time);
     }
-    sky.update(camera, { dt, altitude: camera.position.y + GROUND });
+    sky.update(camera, { dt, altitude: camera.position.y + GROUND, origin });
     const focus = camera.position.clone().addScaledVector(fwd, 30);
     sun.target.position.copy(focus);
     sun.position.copy(focus).addScaledVector(sky.state.lightDirection, 300);
     pipeline.render();
   };
 
-  /** GPU time per frame (timestamp queries, `?timing=1`), else wall time; milliseconds. */
+  /**
+   * GPU time per frame from timestamp queries (`?timing=1`), averaged over `frames` frames of
+   * the running animation loop (the sky's per-frame passes run once per animation frame).
+   * Returns -1 where the backend has no timestamp queries.
+   */
+  let samples: number[] | null = null;
   debug.measure = async (frames: number) => {
-    renderer.setAnimationLoop(null);
-    const timed = (renderer.backend as { trackTimestamp?: boolean }).trackTimestamp;
-    let gpuMs = 0;
-    const t0 = performance.now();
-    for (let i = 0; i < frames; i++) {
-      frame(1 / 60);
-      if (timed) gpuMs += (await renderer.resolveTimestampsAsync('render')) ?? 0;
-    }
-    const gpu = (renderer.backend as { device?: GPUDevice }).device;
-    if (gpu) await gpu.queue.onSubmittedWorkDone();
-    return timed ? gpuMs / frames : (performance.now() - t0) / frames;
+    if (!(renderer.backend as { trackTimestamp?: boolean }).trackTimestamp) return -1;
+    samples = [];
+    const s = samples;
+    while (s.length < frames) await new Promise((r) => setTimeout(r, 50));
+    samples = null;
+    s.sort((a, b) => a - b);
+    // The 10th percentile: the GPU is shared (other pages, other processes); the fastest
+    // frames show the cost of this one, the slow ones show contention.
+    return s[Math.floor(s.length / 10)]!;
   };
 
   let last = performance.now();
@@ -278,6 +304,12 @@ async function main() {
     const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
     frame(dt);
+    if (samples) {
+      const s = samples;
+      void renderer.resolveTimestampsAsync('render').then((v) => {
+        if (v) s.push(v);
+      });
+    }
     debug.frames++;
     if (debug.frames === 30) debug.ready = true;
     const s = sky.state;
