@@ -101,6 +101,7 @@
 .tab {
   position: relative;
   min-height: var(--tap);
+  min-width: var(--tap);
   padding: 0 2px;
   border-radius: var(--r-1);
   border: 0;

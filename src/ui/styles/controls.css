@@ -373,3 +373,8 @@
   color: var(--c-ink-3);
   font-size: var(--fs-1);
 }
+
+/* Touch: every choice is at least a thumb high. */
+.ui[data-touch] :is(.seg-option, .rwy-seg .seg-option, .lang-switch .seg-option) {
+  min-height: var(--tap);
+}

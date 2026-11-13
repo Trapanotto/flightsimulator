@@ -161,6 +161,13 @@
   animation: dots 1.6s steps(4, end) infinite;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .loading-dots::after {
+    content: '…';
+    animation: none;
+  }
+}
+
 @keyframes dots {
   0% {
     content: '';

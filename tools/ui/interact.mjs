@@ -93,6 +93,25 @@ await check('keyboard: menu → setup → flight → pause → resume', async ()
   await page.close();
 });
 
+// --- Loading to menu: the wordmark does not move ------------------------------------------------
+await check('loading → menu without a layout jump', async () => {
+  for (const vp of [
+    { width: 1280, height: 720 },
+    { width: 844, height: 390 },
+    { width: 390, height: 844 },
+  ]) {
+    const page = await browser.newPage({ viewport: vp });
+    await page.goto(`${base}?screen=loading&lang=de`);
+    await page.waitForSelector('.loading-block');
+    const before = await page.locator('.brand-title').boundingBox();
+    await page.waitForSelector('.menu-item', { timeout: 6000 });
+    await page.waitForTimeout(800);
+    const after = await page.locator('.brand-title').boundingBox();
+    assert.deepEqual(after, before, `${vp.width}x${vp.height}`);
+    await page.close();
+  }
+});
+
 // --- Settings: change, Esc closes without resuming, persists over a reload -------------------
 await check('settings: units persist; Esc closes only the dialog', async () => {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
@@ -234,6 +253,35 @@ await check('HUD: 20 updates a second without re-rendering', async () => {
     `     (${counts.updates} telemetry updates, ${counts.text} text changes, ${counts.nodes} node changes)`,
   );
   await page.close();
+});
+
+// --- Touch targets are at least 44 px on touch devices ------------------------------------------
+await check('touch targets at least 44 px', async () => {
+  const small = [];
+  for (const vp of [
+    { width: 844, height: 390 },
+    { width: 390, height: 844 },
+  ]) {
+    const page = await browser.newPage({ viewport: vp });
+    for (const s of ['menu', 'setup', 'settings', 'flight&still', 'paused&still']) {
+      await page.goto(base + '?screen=' + s + '&device=mobile&lang=de');
+      await page.waitForTimeout(700);
+      const found = await page.evaluate(() =>
+        [...document.querySelectorAll('.ui button, .ui input, .ui [role=slider]')]
+          .filter((el) => !el.closest('[inert]'))
+          .map((el) => ({ el, r: el.getBoundingClientRect() }))
+          .filter(({ r }) => r.width > 0 && r.bottom > 0 && r.top < innerHeight)
+          .filter(({ r }) => Math.min(r.width, r.height) < 43.5)
+          .map(
+            ({ el, r }) =>
+              (el.className || el.tagName) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height),
+          ),
+      );
+      for (const f of found) small.push(vp.width + 'x' + vp.height + ' ' + s + ': ' + f);
+    }
+    await page.close();
+  }
+  assert.deepEqual(small, []);
 });
 
 // --- No horizontal overflow at any size ------------------------------------------------------
