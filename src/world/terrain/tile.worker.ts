@@ -86,7 +86,7 @@ function isBlank(bmp: ImageBitmap): boolean {
  * The orthophoto of a geographic tile: Mercator tiles are pasted into a mosaic, then the mosaic
  * is redrawn in thin horizontal bands so that every row lands at its true latitude.
  */
-async function composeImage(job: TileJob, b: GeoBounds, signal: AbortSignal) {
+async function composeImage(job: TileJob, b: GeoBounds, signal: AbortSignal, clock: Clock) {
   const plan = planMercatorWarp(b, job.imageZoom, job.imageSize);
   const r = plan.range;
   const mosaic = new OffscreenCanvas(
@@ -116,6 +116,15 @@ async function composeImage(job: TileJob, b: GeoBounds, signal: AbortSignal) {
     }),
   );
 
+  return timed(clock, () => warpImage(job, plan, mosaic, missing));
+}
+
+function warpImage(
+  job: TileJob,
+  plan: ReturnType<typeof planMercatorWarp>,
+  mosaic: OffscreenCanvas,
+  missing: number,
+) {
   const out = new OffscreenCanvas(job.imageSize, job.imageSize);
   const ctx = out.getContext('2d')!;
   ctx.imageSmoothingEnabled = true;
@@ -242,7 +251,12 @@ function drawLayer(
   }
 }
 
-async function composeMask(job: TileJob, b: GeoBounds, signal: AbortSignal): Promise<Uint8Array> {
+async function composeMask(
+  job: TileJob,
+  b: GeoBounds,
+  signal: AbortSignal,
+  clock: Clock,
+): Promise<Uint8Array> {
   const size = job.maskSize;
   const canvas = new OffscreenCanvas(size, size);
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
@@ -257,16 +271,33 @@ async function composeMask(job: TileJob, b: GeoBounds, signal: AbortSignal): Pro
         loads.push(vectorTile(tile.z, x, y, signal).then((vt) => ({ tile, vt })));
       }
     const tiles = await Promise.all(loads);
-    // Additive drawing: channels of overlapping classes combine instead of covering each other.
-    ctx.globalCompositeOperation = 'lighter';
-    for (const rule of MASK_RULES)
-      for (const { tile, vt } of tiles)
-        if (vt) drawLayer(ctx, vt.layers[rule.layer], tile, b, size, rule);
+    timed(clock, () => {
+      // Additive drawing: channels of overlapping classes combine instead of covering each other.
+      ctx.globalCompositeOperation = 'lighter';
+      for (const rule of MASK_RULES)
+        for (const { tile, vt } of tiles)
+          if (vt) drawLayer(ctx, vt.layers[rule.layer], tile, b, size, rule);
+    });
   }
-  return new Uint8Array(ctx.getImageData(0, 0, size, size).data.buffer);
+  return timed(clock, () => new Uint8Array(ctx.getImageData(0, 0, size, size).data.buffer));
+}
+
+/** CPU time of one job's synchronous work (drawing, decoding, baking), ms. */
+interface Clock {
+  cpu: number;
+}
+function timed<T>(clock: Clock, fn: () => T): T {
+  const t0 = performance.now();
+  try {
+    return fn();
+  } finally {
+    clock.cpu += performance.now() - t0;
+  }
 }
 
 async function build(job: TileJob, controller: AbortController): Promise<TileOutput> {
+  const start = performance.now();
+  const clock: Clock = { cpu: 0 };
   const b = geoTileBounds(job.key);
   const signal = controller.signal;
   const terrain = fetchRetry(job.terrainUrl, signal).then(async (res) => {
@@ -278,11 +309,13 @@ async function build(job: TileJob, controller: AbortController): Promise<TileOut
   terrain.catch(() => controller.abort());
   const [buffer, img, mask] = await Promise.all([
     terrain,
-    composeImage(job, b, signal),
-    composeMask(job, b, signal),
+    composeImage(job, b, signal, clock),
+    composeMask(job, b, signal, clock),
   ]);
-  const qm = decodeQuantizedMesh(buffer);
-  const geometry = buildTileGeometry(qm, job.key);
+  const { qm, geometry } = timed(clock, () => {
+    const qm = decodeQuantizedMesh(buffer);
+    return { qm, geometry: buildTileGeometry(qm, job.key) };
+  });
   return {
     geometry,
     u: qm.u,
@@ -291,6 +324,7 @@ async function build(job: TileJob, controller: AbortController): Promise<TileOut
     mask,
     maskSize: job.maskSize,
     missingImagery: img.missing,
+    timing: { totalMs: performance.now() - start, cpuMs: clock.cpu },
   };
 }
 

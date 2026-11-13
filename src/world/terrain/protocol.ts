@@ -33,6 +33,8 @@ export interface TileOutput {
   maskSize: number;
   /** Imagery tiles that could not be loaded (the tile still shows, partly in a flat colour). */
   missingImagery: number;
+  /** Wall time of the whole job (downloads included) and of its CPU work alone, ms. */
+  timing: { totalMs: number; cpuMs: number };
 }
 
 export type WorkerRequest =

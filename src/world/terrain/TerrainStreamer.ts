@@ -116,7 +116,17 @@ export class TerrainStreamer implements TileProvider<TileData> {
   private readonly uploads: Upload[] = [];
   private frame: LocalFrame;
   /** Counters for the demo and the performance report. */
-  readonly counters = { uploaded: 0, evicted: 0, failed: 0, absent: 0, cancelled: 0 };
+  readonly counters = {
+    uploaded: 0,
+    evicted: 0,
+    failed: 0,
+    absent: 0,
+    cancelled: 0,
+    /** Tiles built by the workers, their summed wall time and CPU time (ms). */
+    built: 0,
+    buildMs: 0,
+    bakeMs: 0,
+  };
 
   constructor(
     private readonly layer: TerrainLayer,
@@ -222,6 +232,9 @@ export class TerrainStreamer implements TileProvider<TileData> {
     this.jobs.delete(node);
     if (r.ok) {
       this.errors.delete(node);
+      this.counters.built++;
+      this.counters.buildMs += r.result.timing.totalMs;
+      this.counters.bakeMs += r.result.timing.cpuMs;
       this.uploads.push({ node, out: r.result });
       return;
     }
