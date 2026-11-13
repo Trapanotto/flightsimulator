@@ -51,3 +51,21 @@ export {
   fillTemplate,
   parseTerrainLayer,
 } from './sources';
+export {
+  AIRPORTS,
+  AIRPORT_ATTRIBUTION,
+  type AirportInfo,
+  type RunwayEndInfo,
+  type RunwayInfo,
+  type RunwaySurface,
+  airportsNear,
+  bearingDeg,
+  distanceM,
+  findAirport,
+  findRunwayEnd,
+  isPaved,
+  offsetPoint,
+  oppositeIdent,
+  runwayStart,
+  thresholdOf,
+} from './airports';
