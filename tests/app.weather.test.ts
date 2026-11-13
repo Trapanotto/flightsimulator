@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { weatherFromReport } from '../src/app/liveWeather';
+import { SNOW_LINE, nightFactor, seasonOf } from '../src/app/season';
 
 describe('weatherFromReport', () => {
   const report = {
@@ -47,5 +48,25 @@ describe('weatherFromReport', () => {
     expect(w.precipitation).toBe(1);
     expect(w.windFromDeg).toBe(350);
     expect(weatherFromReport({ ...report, visibility: undefined }, 0).visibility).toBe(30_000);
+  });
+});
+
+describe('season and night', () => {
+  it('takes the season from the calendar', () => {
+    expect(seasonOf(new Date('2026-01-15T12:00Z'))).toBe('winter');
+    expect(seasonOf(new Date('2026-04-15T12:00Z'))).toBe('spring');
+    expect(seasonOf(new Date('2026-07-15T12:00Z'))).toBe('summer');
+    expect(seasonOf(new Date('2026-11-13T12:00Z'))).toBe('autumn');
+    expect(seasonOf(new Date('2026-12-24T12:00Z'))).toBe('winter');
+    expect(SNOW_LINE.winter).toBeLessThan(SNOW_LINE.spring);
+    expect(SNOW_LINE.summer).toBeGreaterThan(SNOW_LINE.autumn);
+  });
+
+  it('turns the lights on through dusk', () => {
+    expect(nightFactor(20)).toBe(0);
+    expect(nightFactor(2)).toBe(0);
+    expect(nightFactor(-6)).toBe(1);
+    expect(nightFactor(-30)).toBe(1);
+    expect(nightFactor(-2)).toBeCloseTo(0.5);
   });
 });

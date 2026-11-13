@@ -12,8 +12,20 @@ import type { Plane, ViewState } from './terrain/Quadtree';
 import { TerrainStreamer } from './terrain/TerrainStreamer';
 import { DETAIL_PERIOD, TerrainMaterials } from './terrain/terrainMaterial';
 
+import { createAirportLayer } from './airports';
+import { createBuildingLayer } from './buildings';
+import {
+  type DeviceClass,
+  type LayerContext,
+  type WorldConditions,
+  type WorldLayer,
+} from './layers';
+import { createTreeLayer } from './trees';
+
 /** How much of the world is drawn; set from the device class and the graphics setting. */
 export interface WorldQuality {
+  /** The budget class; the layers (trees, buildings, airports) pick their own presets by it. */
+  device: DeviceClass;
   /** Metres to the far edge of what is drawn. */
   viewDistance: number;
   /**
@@ -46,6 +58,7 @@ export interface WorldQuality {
 /** Presets per device class; the app picks one. */
 export const WORLD_QUALITY: Record<'desktop' | 'mobile', WorldQuality> = {
   desktop: {
+    device: 'desktop',
     viewDistance: 150_000,
     maxTexelPx: 1.4,
     textureSize: 512,
@@ -60,6 +73,7 @@ export const WORLD_QUALITY: Record<'desktop' | 'mobile', WorldQuality> = {
     water: true,
   },
   mobile: {
+    device: 'mobile',
     viewDistance: 80_000,
     maxTexelPx: 2,
     textureSize: 256,
@@ -139,6 +153,18 @@ export class World {
   }));
   private readonly v = new Vector3();
   private readonly hit: SurfaceHit = { height: 0, normal: { x: 0, y: 0, z: 1 } };
+  /** Trees, buildings, airports: they stream by themselves, on top of the terrain. */
+  private readonly layers: WorldLayer[];
+  private conditions: WorldConditions = {
+    night: 0,
+    exposure: 1,
+    season: 'summer',
+    snowLine: 2900,
+    lightDirection: new Vector3(0.4, 0.8, 0.4).normalize(),
+    time: 0,
+  };
+  private lastUpdate = 0;
+  private readonly layerContext: LayerContext;
 
   constructor(
     private frame: LocalFrame,
@@ -146,6 +172,28 @@ export class World {
   ) {
     this.object.name = 'World';
     this.materials = new TerrainMaterials({ detail: quality.detail, water: quality.water });
+    this.layers = [
+      createTreeLayer(frame, quality.device),
+      createBuildingLayer(frame, quality.device),
+      createAirportLayer(frame, quality.device),
+    ];
+    for (const layer of this.layers) this.object.add(layer.object);
+    this.layerContext = {
+      camera: undefined as unknown as Camera,
+      frame,
+      view: { lon: 0, lat: 0, h: 0 },
+      conditions: this.conditions,
+      dt: 0,
+      screenHeight: this.screenHeight,
+      groundHeight: (lon, lat) => this.groundHeight(lon, lat),
+      groundRevision: 0,
+    };
+  }
+
+  /** The light and the season everything on the ground is shown in. Cheap: call every frame. */
+  setConditions(conditions: WorldConditions) {
+    this.conditions = conditions;
+    this.materials.setConditions(conditions);
   }
 
   /**
@@ -183,6 +231,7 @@ export class World {
     this.materials.uniforms.detailOrigin.value.set(this.detailOrigin.x, this.detailOrigin.z);
     this.frame = frame;
     this.terrain?.setFrame(frame);
+    for (const layer of this.layers) layer.setFrame(frame);
   }
 
   /** Drawing buffer size in pixels: the level of detail is measured in screen pixels. */
@@ -239,6 +288,22 @@ export class World {
       pixelsPerRadian: this.screenHeight / (2 * Math.tan((fov * Math.PI) / 180 / 2)),
     };
     this.terrain.update(view);
+
+    const now = performance.now();
+    const ctx = this.layerContext;
+    ctx.camera = camera;
+    ctx.frame = frame;
+    ctx.view.lon = geo.lon;
+    ctx.view.lat = geo.lat;
+    ctx.view.h = geo.h;
+    ctx.conditions = this.conditions;
+    ctx.dt = this.lastUpdate ? Math.min((now - this.lastUpdate) / 1000, 0.25) : 0;
+    ctx.screenHeight = this.screenHeight;
+    // Tiles arriving or leaving change the heights the layers stand on.
+    const c = this.terrain.counters;
+    ctx.groundRevision = c.uploaded + c.evicted;
+    this.lastUpdate = now;
+    for (const layer of this.layers) layer.update(ctx);
   }
 
   /**
@@ -288,13 +353,15 @@ export class World {
   }
 
   /** Credits of the data shown, for the interface. */
-  readonly attribution: string[] = [SWISSTOPO_ATTRIBUTION];
+  get attribution(): string[] {
+    return [...new Set([SWISSTOPO_ATTRIBUTION, ...this.layers.flatMap((l) => l.attribution)])];
+  }
 
   /** True while tiles for the current view are still loading. */
   get loading(): boolean {
     const t = this.terrain;
     if (!t) return true;
-    return t.tree.stats.missing > 0 || t.pendingUploads > 0;
+    return t.tree.stats.missing > 0 || t.pendingUploads > 0 || this.layers.some((l) => l.loading);
   }
 
   /** Share of the tiles the current view needs that are loaded, 0..1 (for a loading screen). */
@@ -323,6 +390,7 @@ export class World {
   }
 
   dispose() {
+    for (const layer of this.layers) layer.dispose();
     this.terrain?.dispose();
     this.materials.dispose();
   }

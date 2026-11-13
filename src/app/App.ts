@@ -28,8 +28,9 @@ import {
   createAircraft,
 } from '@sim';
 import { Sky, WEATHER_PRESETS, type Weather } from '@sky';
+import { SNOW_LINE, nightFactor, seasonOf } from './season';
 import { type FlightPlan, game, mountUi, settings, status, touchInput } from '@ui';
-import { World } from '@world';
+import { type Season, World } from '@world';
 import { AIRPORTS, findAirport, runwayStart } from './airports';
 import { RudderAssist } from './assist';
 import { CameraRig } from './camera';
@@ -224,6 +225,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   let groundZoom = 0;
   let groundHeight = 0;
   let plan: FlightPlan | null = null;
+  /** The season the landscape is shown in: the calendar's, until a flight chooses one. */
+  let season: Season = seasonOf(startDate);
 
   const say = (key: string) => {
     // Setting null first lets the same notice show again.
@@ -505,6 +508,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   let fpsTime = 0;
   let worst = 0;
   let hudTime = 0;
+  let appTime = 0;
 
   renderer.setAnimationLoop((now: number) => {
     const frameMs = now - last;
@@ -615,6 +619,15 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       game.screen.value === 'flight',
     );
 
+    appTime += dt;
+    world.setConditions({
+      night: nightFactor(sky.state.sunElevation),
+      exposure: sky.state.exposure,
+      season,
+      snowLine: SNOW_LINE[season],
+      lightDirection: sky.state.lightDirection,
+      time: appTime,
+    });
     world.update(camera);
     const camGeo = frame.toGeodetic(camera.position, geo);
     anchor.fromGeodetic(frame.origin.lon, frame.origin.lat, 0, local);

@@ -1,3 +1,4 @@
+import type { WorldConditions } from '../layers';
 import {
   Color,
   DataTexture,
@@ -90,6 +91,12 @@ export class TerrainMaterials {
     TerrainNodeMaterial,
     'colorNode' | 'normalNode' | 'roughnessNode' | 'metalnessNode' | 'emissiveNode'
   >;
+
+  /**
+   * The light and the season the ground is shown in (snow line, autumn colours, lights at
+   * night). Called every frame; phase 2 fills this in.
+   */
+  setConditions(_conditions: WorldConditions) {}
 
   constructor(readonly look: TerrainLook) {
     this.noise = new DataTexture(
