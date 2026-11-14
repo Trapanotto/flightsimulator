@@ -200,8 +200,8 @@ export type LightKind = (typeof LightKind)[keyof typeof LightKind];
 export const LIGHT_COLOURS = {
   white: [1, 0.93, 0.8],
   yellow: [1, 0.72, 0.18],
-  red: [1, 0.06, 0.02],
-  green: [0.1, 1, 0.45],
+  red: [1, 0.03, 0.01],
+  green: [0.02, 1, 0.3],
   blue: [0.08, 0.2, 1],
   none: [0, 0, 0],
 } as const;

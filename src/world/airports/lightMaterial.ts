@@ -55,6 +55,18 @@ import { LightKind } from './layout';
 import type { LightBuffers } from './lights';
 import { pullFor, pulledView } from './pull';
 
+
+/**
+ * cond ? a : b, with both sides evaluated up front. TSL's select() builds an if/else, and a node
+ * first built inside one branch is declared there: used again elsewhere it reads as garbage.
+ */
+function pick(cond: Node<'bool'>, a: Node<'vec3'>, b: Node<'vec3'> | number): Node<'vec3'>;
+function pick(cond: Node<'bool'>, a: Node<'float'> | number, b: Node<'float'> | number): Node<'float'>;
+function pick(cond: Node<'bool'>, a: Node<'float'> | Node<'vec3'> | number, b: Node<'float'> | Node<'vec3'> | number) {
+  const w = select(cond, 1, 0);
+  return typeof a === 'number' && typeof b === 'number' ? mix(float(b), float(a), w) : mix(b as Node<'vec3'>, a as Node<'vec3'>, w);
+}
+
 type V3 = Node<'vec3'>;
 type V4 = Node<'vec4'>;
 
@@ -138,7 +150,7 @@ export function createLightMaterial(cameraLocal: Node<'vec3'>): MeshBasicNodeMat
   const axis = vec3(param.x, 0, param.y);
   const c = dot(horizontal, axis);
   const ahead = c.greaterThanEqual(0);
-  const colour = select(ahead, colA, colB);
+  const colour = pick(ahead, colA, colB);
   const ac = abs(c);
   const isOmni = kind.lessThan(LightKind.Omni + 0.5);
   const isBi = kind
@@ -153,13 +165,13 @@ export function createLightMaterial(cameraLocal: Node<'vec3'>): MeshBasicNodeMat
   // zone and PAPI lights only from within about 15 degrees of their axis.
   const narrow = smoothstep(0.93, 0.985, ac);
   const wide = mix(float(0.3), float(1), smoothstep(0.4, 0.95, ac));
-  const beam = select(isOmni, 1, select(isBi, wide, narrow));
+  const beam = pick(isOmni, 1, pick(isBi, wide, narrow));
   // Seen from high above, inset and elevated lights look dimmer.
   const vertical = mix(float(1), float(0.3), smoothstep(12, 60, elevation));
   // PAPI: white above the unit's setting, red below, a 2 arcminute transition.
   const white = smoothstep(param.w.sub(0.017), param.w.add(0.017), elevation);
   const lum = dot(colA, vec3(0.2126, 0.7152, 0.0722));
-  const papi = mix(vec3(1, 0.06, 0.02).mul(lum.mul(0.35)), colA, white);
+  const papi = mix(vec3(1, 0.03, 0.01).mul(lum.mul(0.35)), colA, white);
   // Rabbit: each flasher fires once per half second, the next one 1/n later.
   const phase = fract(u.time.mul(2));
   const flash = smoothstep(0.045, 0.0, abs(phase.sub(param.w)));
@@ -168,13 +180,13 @@ export function createLightMaterial(cameraLocal: Node<'vec3'>): MeshBasicNodeMat
   const beamW = pow(max(cos(bearing), 0), 60);
   const beamG = pow(max(cos(bearing).negate(), 0), 60);
   const beacon = colA.mul(beamW).add(colB.mul(beamG)).add(colA.mul(0.02));
-  const rgb = select(
+  const rgb = pick(
     isBeacon,
     beacon,
-    select(
+    pick(
       isPapi,
       papi.mul(narrow),
-      select(isFlasher, colour.mul(narrow).mul(flash), colour.mul(beam).mul(vertical)),
+      pick(isFlasher, colour.mul(narrow).mul(flash), colour.mul(beam).mul(vertical)),
     ),
   );
 

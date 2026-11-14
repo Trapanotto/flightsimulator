@@ -76,6 +76,18 @@ import {
 import { GROUND_APRON, GROUND_GRASS, GROUND_HOLD, GROUND_TAXIWAY } from './geometry';
 import { pulledVertex } from './pull';
 
+
+/**
+ * cond ? a : b, with both sides evaluated up front. TSL's select() builds an if/else, and a node
+ * first built inside one branch is declared there: used again elsewhere it reads as garbage.
+ */
+function pick(cond: Node<'bool'>, a: Node<'vec3'>, b: Node<'vec3'> | number): Node<'vec3'>;
+function pick(cond: Node<'bool'>, a: Node<'float'> | number, b: Node<'float'> | number): Node<'float'>;
+function pick(cond: Node<'bool'>, a: Node<'float'> | Node<'vec3'> | number, b: Node<'float'> | Node<'vec3'> | number) {
+  const w = select(cond, 1, 0);
+  return typeof a === 'number' && typeof b === 'number' ? mix(float(b), float(a), w) : mix(b as Node<'vec3'>, a as Node<'vec3'>, w);
+}
+
 type F = Node<'float'>;
 type V2 = Node<'vec2'>;
 type V3 = Node<'vec3'>;
@@ -231,10 +243,10 @@ export function createRunwayMaterial(t: SurfaceTextures): MeshStandardNodeMateri
     paint = max(paint, arrows);
     // Aiming point.
     const aimOn = smoothstep(0.5, 1, p2.y);
-    const inner = select(
+    const inner = pick(
       aimOn.greaterThan(0.5),
       p2.w.mul(0.5),
-      select(W.greaterThanEqual(30), 9, 4.5),
+      pick(W.greaterThanEqual(30), 9, 4.5),
     );
     paint = max(
       paint,
@@ -245,8 +257,8 @@ export function createRunwayMaterial(t: SurfaceTextures): MeshStandardNodeMateri
     // Touchdown zone: 3, 3, 2, 2, 1, 1 stripes per side every 150 m.
     const slot = floor(a.div(TDZ_SPACING)).sub(1);
     const local = a.sub(slot.add(1).mul(TDZ_SPACING));
-    const count = select(slot.lessThan(2), 3, select(slot.lessThan(4), 2, 1));
-    const present = select(
+    const count = pick(slot.lessThan(2), 3, pick(slot.lessThan(4), 2, 1));
+    const present = pick(
       slot.greaterThanEqual(0).and(slot.lessThan(6)),
       bit(mask, max(slot, 0)),
       0,
@@ -270,19 +282,19 @@ export function createRunwayMaterial(t: SurfaceTextures): MeshStandardNodeMateri
     const letterRow = hasLetter
       .and(a.greaterThan(DESIGNATOR_START - 1))
       .and(a.lessThan(DESIGNATOR_START + GLYPH_HEIGHT + 1));
-    const numberStart = select(
+    const numberStart = pick(
       hasLetter,
       DESIGNATOR_START + GLYPH_HEIGHT + LETTER_GAP,
       DESIGNATOR_START,
     );
     const halfNumber = GLYPH_WIDTH + GLYPH_GAP / 2;
-    const glyph = floor(select(letterRow, p3.z, select(x.lessThan(0), p3.x, p3.y)).add(0.5));
-    const x0 = select(
+    const glyph = floor(pick(letterRow, p3.z, pick(x.lessThan(0), p3.x, p3.y)).add(0.5));
+    const x0 = pick(
       letterRow,
       -GLYPH_WIDTH / 2,
-      select(x.lessThan(0), -halfNumber, GLYPH_GAP / 2),
+      pick(x.lessThan(0), -halfNumber, GLYPH_GAP / 2),
     );
-    const a0 = select(letterRow, float(DESIGNATOR_START), numberStart);
+    const a0 = pick(letterRow, float(DESIGNATOR_START), numberStart);
     const gx = clamp(x.sub(x0), -ATLAS_PAD, GLYPH_WIDTH + ATLAS_PAD);
     const gy = clamp(a.sub(a0), -ATLAS_PAD, GLYPH_HEIGHT + ATLAS_PAD);
     const atlasW = CELL_W * GLYPH_COUNT;
@@ -295,13 +307,13 @@ export function createRunwayMaterial(t: SurfaceTextures): MeshStandardNodeMateri
       .mul(2 * ATLAS_RANGE);
     const inBox = box(a, a0.sub(0.5), a0.add(GLYPH_HEIGHT + 0.5), fs)
       .mul(
-        select(
+        pick(
           letterRow,
           box(x, -GLYPH_WIDTH / 2 - 0.5, GLYPH_WIDTH / 2 + 0.5, ft),
           box(ax, 0, halfNumber + 0.5, ft),
         ),
       )
-      .mul(select(glyph.greaterThanEqual(0), 1, 0));
+      .mul(pick(glyph.greaterThanEqual(0), 1, 0));
     // Antialiased by the distance field's own screen gradient (sharp across, soft along at
     // grazing angles); once the 0.9 m strokes are below a pixel, the glyph's average.
     const sharp = clamp(float(0.5).sub(dist.div(max(fwidth(dist), 1e-3))), 0, 1);
@@ -395,7 +407,7 @@ export function createGroundMaterial(t: SurfaceTextures): MeshStandardNodeMateri
   const grass = mix(vec3(0.05, 0.09, 0.025), vec3(0.11, 0.16, 0.05), lanes).mul(
     float(1).add(g.mid.mul(0.4)),
   );
-  const albedo = select(isApron, apron, select(isTaxi, taxi, grass));
+  const albedo = pick(isApron, apron, pick(isTaxi, taxi, grass));
   const edgeAcross = half.sub(abs(st.y));
   const edgeTaxi = clamp(edgeAcross.div(ft).add(0.5), 0, 1);
   const edgeGrass = clamp(
@@ -405,13 +417,13 @@ export function createGroundMaterial(t: SurfaceTextures): MeshStandardNodeMateri
     0,
     1,
   );
-  const alpha = select(
+  const alpha = pick(
     isHold,
     0,
-    select(isApron, 1, select(isTaxi, edgeTaxi, edgeGrass.mul(0.22))),
+    pick(isApron, 1, pick(isTaxi, edgeTaxi, edgeGrass.mul(0.22))),
   );
   m.colorNode = vec4(albedo, alpha);
-  m.roughnessNode = select(isGrass, 0.95, 0.9);
+  m.roughnessNode = pick(isGrass, 0.95, 0.9);
   return m;
 }
 
@@ -434,7 +446,7 @@ export function createLineMaterial(t: SurfaceTextures): MeshStandardNodeMaterial
   const dashes = stripes(st.y.add(half), 2, 1, ft);
   const hold = max(solid, dashedRows.mul(dashes)).mul(box(abs(st.y), 0, half, ft));
   const n = texture(t.noise, (positionLocal.xz as unknown as V2).div(0.6)).r;
-  const coverage = select(isTaxi, centre, select(isHold, hold, 0)).mul(float(0.8).add(n.mul(0.25)));
+  const coverage = pick(isTaxi, centre, pick(isHold, hold, 0)).mul(float(0.8).add(n.mul(0.25)));
   m.colorNode = vec4(PAINT_YELLOW, clamp(coverage, 0, 1));
   m.roughnessNode = float(0.75);
   return m;
