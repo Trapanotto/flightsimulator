@@ -34,6 +34,10 @@ const SCENES = [
   { name: 'zurich-night', query: `view=zurich&${NIGHT}`, ...DESKTOP },
   { name: 'grindelwald-night', query: `view=grindelwald&${NIGHT}`, ...DESKTOP },
   { name: 'belp-dusk', query: 'view=belp&hour=21.6', ...DESKTOP },
+  // Nearly full moon over Lake Thun: the moon's glint, no day sky in the water.
+  { name: 'lake-moon', query: 'view=lake&t=2026-08-27T21:45Z', ...DESKTOP },
+  // Low winter sun: mountain shadows across the valleys.
+  { name: 'alps-lowsun', query: 'view=alps4000&season=winter&hour=15.6', ...DESKTOP },
   // Seasons.
   { name: 'alps-spring', query: 'view=alps4000&season=spring', ...DESKTOP },
   { name: 'alps-summer', query: 'view=alps4000&season=summer', ...DESKTOP },

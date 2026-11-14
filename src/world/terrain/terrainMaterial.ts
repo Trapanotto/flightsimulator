@@ -442,8 +442,8 @@ export class TerrainMaterials {
     });
     // Forest keeps its dark canopy with snow on the crowns and in the gaps; bare broadleaf
     // woods show more of the white floor.
-    const gaps = smoothstep(0.04, 0.12, albLum);
-    const forestSnow = float(0.22).add(gaps.mul(0.45)).add(broadleaf.mul(u.season.z).mul(0.2));
+    const gaps = smoothstep(0.14, 0.28, albLum);
+    const forestSnow = float(0.18).add(gaps.mul(0.45)).add(broadleaf.mul(u.season.z).mul(0.2));
     // Small high lakes freeze in winter and carry snow; lakes and rivers below stay open.
     const frozen = water.mul(smoothstep(1300, 1600, elevation));
     const snow = coverSite.cover
