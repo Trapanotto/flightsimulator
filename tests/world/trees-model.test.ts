@@ -10,7 +10,12 @@ import {
   levelFor,
   upperBoundRank,
 } from '../../src/world/trees/chunks';
-import { broadleafMesh, buildTreeMeshes, coniferMesh } from '../../src/world/trees/geometry';
+import {
+  broadleafMesh,
+  buildTreeMeshes,
+  coniferMesh,
+  leafyBroadleafMesh,
+} from '../../src/world/trees/geometry';
 import { photoToAlbedo, srgbToLinear } from '../../src/world/trees/photo';
 import { TREE_PRESETS } from '../../src/world/trees/presets';
 import { STRIDE } from '../../src/world/trees/protocol';
@@ -247,6 +252,70 @@ describe('tree meshes', () => {
     expect(tris(buildTreeMeshes(true).broadleaf[0])).toBeLessThan(
       tris(buildTreeMeshes(false).broadleaf[0]),
     );
+  });
+  it('carry a cluster attribute per vertex', () => {
+    for (const lite of [false, true]) {
+      const all = buildTreeMeshes(lite);
+      for (const m of [...all.conifer, ...all.broadleaf])
+        expect(m.clusters.length).toBe((m.positions.length / 3) * 4);
+    }
+  });
+  it('stay within the triangle budgets of the near level', () => {
+    const tris = (m: { indices: Uint16Array }) => m.indices.length / 3;
+    const desktop = buildTreeMeshes(false);
+    const mobile = buildTreeMeshes(true);
+    // Mobile may not grow at all; desktop by at most half of the old near broadleaf (1260).
+    expect(tris(mobile.broadleaf[0])).toBeLessThanOrEqual(600);
+    expect(tris(mobile.conifer[0])).toBeLessThanOrEqual(178);
+    expect(tris(desktop.broadleaf[0])).toBeLessThanOrEqual(1890);
+    expect(tris(desktop.conifer[0])).toBeLessThanOrEqual(560);
+  });
+  it('build the near broadleaf crown from clusters on branches, the same for the same seed', () => {
+    const o = { clusters: 12, limbs: 4, trunkSides: 6, limbSides: 4, branchSegments: 2 } as const;
+    const m = leafyBroadleafMesh(o);
+    expect(leafyBroadleafMesh(o).positions).toEqual(m.positions);
+    expect(leafyBroadleafMesh({ ...o, seed: 99 }).positions).not.toEqual(m.positions);
+    const n = m.positions.length / 3;
+    const ids = new Set<number>();
+    let branchVerts = 0;
+    let trunkVerts = 0;
+    for (let k = 0; k < n; k++) {
+      const part = m.parts[k]!;
+      const id = m.clusters[k * 4 + 3]!;
+      if (part === 1 && id >= 0) {
+        ids.add(id);
+        expect(id).toBeLessThan(1);
+        // A cluster vertex lies near its own centre (within its radius, crown units).
+        const dx = m.positions[k * 3]! - m.clusters[k * 4]!;
+        const dz = m.positions[k * 3 + 2]! - m.clusters[k * 4 + 2]!;
+        expect(Math.hypot(dx, dz)).toBeLessThan(0.75);
+      }
+      if (part === 2) branchVerts++;
+      if (part === 0) {
+        trunkVerts++;
+        expect(id).toBe(-1);
+      }
+      // The crown stays within its unit envelope (a little beyond, with the bumps).
+      expect(Math.abs(m.positions[k * 3]!)).toBeLessThan(1.25);
+      expect(Math.abs(m.positions[k * 3 + 2]!)).toBeLessThan(1.25);
+    }
+    expect(ids.size).toBe(12);
+    // Every cluster has a branch: winter crowns show their wood.
+    expect(branchVerts).toBeGreaterThanOrEqual(12 * 3 * 4);
+    expect(trunkVerts).toBeGreaterThan(0);
+  });
+  it('give every conifer whorl its own id and radius', () => {
+    const m = coniferMesh({ tiers: 8, spokes: 8, underside: true, trunkSides: 6 });
+    const whorls = new Map<number, number>();
+    for (let k = 0; k < m.positions.length / 3; k++) {
+      const id = m.clusters[k * 4 + 3]!;
+      if (id < 0) continue;
+      whorls.set(id, m.clusters[k * 4]!);
+      // No branch tip reaches far beyond the whorl's radius.
+      const r = Math.hypot(m.positions[k * 3]!, m.positions[k * 3 + 2]!);
+      expect(r).toBeLessThan(m.clusters[k * 4]! * 1.25 + 1e-6);
+    }
+    expect(whorls.size).toBe(8);
   });
   it('stand on the ground and reach the top', () => {
     for (const m of [

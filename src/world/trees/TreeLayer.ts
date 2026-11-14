@@ -47,6 +47,7 @@ import {
 import { type ChunkHandle, type ChunkResult, TreeWorkerPool } from './pool';
 import { LOD_BAND, LOD_JITTER, TREE_PRESETS, type TreePreset } from './presets';
 import { type CellData, type ChunkOutput, STRIDE } from './protocol';
+import { scotopicLoss } from './leaf';
 import { NearSet } from './near';
 import { mixPalettes, seasonPalette } from './season';
 import { HeightGrid, fillGaps } from './seat';
@@ -209,6 +210,7 @@ export class TreeLayer implements WorldLayer {
       g.setAttribute('normal', new BufferAttribute(t.normals, 3));
       g.setAttribute('part', new BufferAttribute(t.parts, 1));
       g.setAttribute('ao', new BufferAttribute(t.ao, 1));
+      g.setAttribute('cluster', new BufferAttribute(t.clusters, 4));
       g.setIndex(new BufferAttribute(t.indices, 1));
       return g;
     };
@@ -343,6 +345,8 @@ export class TreeLayer implements WorldLayer {
     const u = this.uniforms;
     u.time.value = c.time;
     u.snowLine.value = c.snowLine;
+    u.lightDir.value.copy(c.lightDirection).normalize();
+    u.scotopic.value = scotopicLoss(c.night);
     if (c.season !== this.season) {
       const target = seasonPalette(c.season);
       // The first season is set at once; later changes blend.

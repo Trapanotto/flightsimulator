@@ -10,21 +10,31 @@ import { prng } from './hash';
  *   position, normal (tree space, before the instance's non-uniform scale)
  *   part: 0 trunk, 1 crown, 2 branch (hidden in the leafy crown, seen in winter)
  *   ao: baked ambient occlusion of the crown (inner and lower parts darker)
+ *   cluster: what the near shader varies per tree. Broadleaf: centre of the leaf cluster the
+ *     vertex belongs to (or whose branch it is) and the cluster's id in [0, 1). Conifer: the
+ *     whorl's radius and hub height, and its id. id -1: nothing to vary (trunk, core, spire).
  */
 export interface TreeMesh {
   positions: Float32Array;
   normals: Float32Array;
   parts: Float32Array;
   ao: Float32Array;
+  clusters: Float32Array;
   indices: Uint16Array;
 }
+
+/** Cluster attribute of vertices that no per-tree variation touches. */
+const NO_CLUSTER: readonly [number, number, number, number] = [0, 0, 0, -1];
 
 class Builder {
   p: number[] = [];
   n: number[] = [];
   part: number[] = [];
   ao: number[] = [];
+  cl: number[] = [];
   idx: number[] = [];
+  /** Cluster attribute given to the vertices emitted from now on. */
+  cluster: readonly [number, number, number, number] = NO_CLUSTER;
 
   vertex(
     x: number,
@@ -41,6 +51,7 @@ class Builder {
     this.n.push(nx / l, ny / l, nz / l);
     this.part.push(part);
     this.ao.push(ao);
+    this.cl.push(...this.cluster);
     return this.p.length / 3 - 1;
   }
 
@@ -54,6 +65,7 @@ class Builder {
       normals: new Float32Array(this.n),
       parts: new Float32Array(this.part),
       ao: new Float32Array(this.ao),
+      clusters: new Float32Array(this.cl),
       indices: new Uint16Array(this.idx),
     };
   }
@@ -141,6 +153,8 @@ export const BROADLEAF_CROWN_BASE = 0.36;
 export function coniferMesh(o: ConiferOptions): TreeMesh {
   const b = new Builder();
   const rnd = prng(o.seed ?? 7);
+  // Ids from their own stream, so the shapes stay those of the seed.
+  const ids = prng((o.seed ?? 7) ^ 0x5bd1e995);
   const cb = CONIFER_CROWN_BASE;
   const top = 0.93;
   const T = o.tiers;
@@ -155,6 +169,7 @@ export function coniferMesh(o: ConiferOptions): TreeMesh {
     const rot = rnd() * Math.PI * 2;
     // Lower whorls are shaded by the ones above and by the neighbours.
     const aoTier = 0.35 + 0.65 * Math.pow(t, 0.7);
+    b.cluster = [R, hubY, 0, ids()];
     const rim: Array<[number, number, number, number, number]> = [];
     for (let s = 0; s < S * 2; s++) {
       const a = rot + (s / (S * 2)) * Math.PI * 2 + (rnd() - 0.5) * 0.25;
@@ -178,6 +193,7 @@ export function coniferMesh(o: ConiferOptions): TreeMesh {
       for (let s = 0; s < S * 2; s++) b.tri(under, f2 + s, f2 + ((s + 1) % (S * 2)));
     }
   }
+  b.cluster = NO_CLUSTER;
   // The leader: a thin spire above the last whorl.
   const lastHub = cb + (top - cb) * Math.pow((T - 1) / T, 1.05) + (T > 3 ? 1.9 : 1.5) * step;
   if (lastHub < 1) {
@@ -384,6 +400,223 @@ export function broadleafMesh(o: BroadleafOptions): TreeMesh {
   return b.build();
 }
 
+/**
+ * A tube along a polyline: rings of `sides` vertices at each point, radii per point. Like
+ * `prism`, its ends are open (they sit in the trunk, in a fork or in a leaf cluster).
+ */
+function tube(
+  b: Builder,
+  sides: number,
+  pts: ReadonlyArray<V3>,
+  radii: readonly number[],
+  part: number,
+  ao: readonly number[],
+) {
+  const n = pts.length;
+  // One reference axis for the whole tube keeps the rings from twisting along a gentle curve.
+  const d0 = norm(sub(pts[1]!, pts[0]!));
+  const ref: V3 = Math.abs(d0[0]) < 0.8 ? [1, 0, 0] : [0, 0, 1];
+  const base = b.p.length / 3;
+  for (let k = 0; k < n; k++) {
+    const dir = norm(sub(pts[Math.min(n - 1, k + 1)]!, pts[Math.max(0, k - 1)]!));
+    const u = norm(cross(dir, ref));
+    const v = cross(dir, u);
+    const p = pts[k]!;
+    const r = radii[k]!;
+    for (let s = 0; s <= sides; s++) {
+      const a = (s / sides) * Math.PI * 2;
+      const c = Math.cos(a);
+      const si = Math.sin(a);
+      const nx = u[0] * c + v[0] * si;
+      const ny = u[1] * c + v[1] * si;
+      const nz = u[2] * c + v[2] * si;
+      b.vertex(p[0] + nx * r, p[1] + ny * r, p[2] + nz * r, nx, ny, nz, part, ao[k]!);
+    }
+  }
+  for (let k = 0; k < n - 1; k++)
+    for (let s = 0; s < sides; s++) {
+      const i = base + k * (sides + 1) + s;
+      const j = i + sides + 1;
+      b.tri(i, i + 1, j);
+      b.tri(j, i + 1, j + 1);
+    }
+}
+
+type V3 = [number, number, number];
+const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const cross = (a: V3, b: V3): V3 => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+];
+const norm = (a: V3): V3 => {
+  const l = Math.hypot(a[0], a[1], a[2]) || 1;
+  return [a[0] / l, a[1] / l, a[2] / l];
+};
+
+export interface LeafyOptions {
+  /** Leaf clusters spread over the crown's shell, each at the end of its own branch. */
+  clusters: number;
+  /** Main limbs from the top of the trunk; each carries the clusters on its side. */
+  limbs: number;
+  trunkSides: number;
+  /** Sides of the limbs; the branches out to the clusters have three. */
+  limbSides: number;
+  /** Segments of each branch: 2 bends it upwards, as branches grow towards the light. */
+  branchSegments: 1 | 2;
+  seed?: number;
+}
+
+interface Cluster {
+  c: V3;
+  r: number;
+  id: number;
+  az: number;
+  top: boolean;
+}
+
+/**
+ * The near broadleaf tree: a crown of separate leaf clusters, each on a branch that forks from
+ * one of a few main limbs, around a small dark core that keeps the sky from showing straight
+ * through. The shader gives every tree its own crown from this one mesh (clusters grown,
+ * shrunk, shifted or left out by their ids) and opens leafy gaps at the clusters' edges,
+ * through which the branches show; in winter the clusters thin out to a net of twigs and the
+ * branches carry the crown's shape.
+ */
+export function leafyBroadleafMesh(o: LeafyOptions): TreeMesh {
+  const b = new Builder();
+  const rnd = prng(o.seed ?? 13);
+  const cb = BROADLEAF_CROWN_BASE;
+  const hy = (1 - cb) / 2;
+  const cy = cb + hy;
+  const ico = icosphere(1);
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  const N = o.clusters;
+  // Clusters over the shell (a Fibonacci spiral), fewer underneath where branches carry less.
+  const clusters: Cluster[] = [];
+  for (let i = 0; i < N; i++) {
+    const yy = 1 - (i + 0.5) * (1.62 / N);
+    const rr = Math.sqrt(Math.max(0, 1 - yy * yy));
+    const a = i * golden + (rnd() - 0.5) * 0.6;
+    const dist = 0.58 + 0.14 * rnd();
+    const r = (0.37 + 0.1 * rnd()) * (yy > 0.6 ? 1.1 : 1) * Math.min(1.5, Math.pow(14 / N, 0.45));
+    clusters.push({
+      c: [Math.cos(a) * rr * dist, cy + yy * dist * hy, Math.sin(a) * rr * dist],
+      r,
+      id: rnd(),
+      az: ((a % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2),
+      top: yy > 0.72,
+    });
+  }
+
+  // The core: inside the crown, seen only through gaps, so it is dark and coarse.
+  b.cluster = NO_CLUSTER;
+  lump(b, icosphere(0), [0, cy - 0.08 * hy, 0], 0.5, hy, cy, cb, rnd() * 100, 0.6);
+  for (const k of clusters) {
+    b.cluster = [k.c[0], k.c[1], k.c[2], k.id];
+    lump(b, ico, k.c, k.r, hy, cy, cb, rnd() * 100, 1);
+  }
+
+  // ---- Wood ----
+  b.cluster = NO_CLUSTER;
+  if (o.trunkSides > 0)
+    prism(b, o.trunkSides, [0, -0.08, 0], [0, cb + 0.2, 0], 1, 0.75, 0, 0.5, 0.3);
+  const root: V3 = [0, cb - 0.04, 0];
+  // Side clusters are shared out among the limbs by direction; the top ones sit on the leader.
+  const side = clusters.filter((k) => !k.top).sort((p, q) => p.az - q.az);
+  const L = Math.max(1, Math.min(o.limbs, side.length));
+  const turn = Math.floor(rnd() * side.length);
+  const groups: Cluster[][] = Array.from({ length: L }, () => []);
+  side.forEach((k, i) =>
+    groups[Math.floor((((i + turn) % side.length) * L) / side.length)]!.push(k),
+  );
+  const branch = (from: V3, k: Cluster, r0: number) => {
+    // Through the cluster's centre to near its edge: in winter the twigs reach the outline.
+    const d = norm(sub(k.c, from));
+    const tip: V3 = [
+      k.c[0] + d[0] * k.r * 0.55,
+      k.c[1] + d[1] * k.r * 0.55 * hy,
+      k.c[2] + d[2] * k.r * 0.55,
+    ];
+    b.cluster = [k.c[0], k.c[1], k.c[2], k.id];
+    if (o.branchSegments === 2) {
+      const mid: V3 = [
+        (from[0] + tip[0]) / 2,
+        (from[1] + tip[1]) / 2 + 0.05,
+        (from[2] + tip[2]) / 2,
+      ];
+      tube(b, 3, [from, mid, tip], [r0, r0 * 0.6, 0.006], 2, [0.45, 0.65, 0.85]);
+    } else tube(b, 3, [from, tip], [r0, 0.006], 2, [0.45, 0.85]);
+    b.cluster = NO_CLUSTER;
+  };
+  for (const g of groups) {
+    if (g.length === 0) continue;
+    const m = g.reduce<V3>((s, k) => [s[0] + k.c[0], s[1] + k.c[1], s[2] + k.c[2]], [0, 0, 0]);
+    const fork: V3 = [
+      (m[0] / g.length) * 0.42,
+      cb + (m[1] / g.length - cb) * 0.45,
+      (m[2] / g.length) * 0.42,
+    ];
+    tube(b, o.limbSides, [root, fork], [0.06, 0.035], 2, [0.4, 0.55]);
+    for (const k of g) branch(fork, k, 0.026);
+  }
+  const crest: V3 = [0, cy + 0.45 * hy, 0];
+  tube(b, o.limbSides, [root, crest], [0.065, 0.03], 2, [0.4, 0.7]);
+  for (const k of clusters) if (k.top) branch(crest, k, 0.024);
+  return b.build();
+}
+
+/**
+ * One leaf cluster (or the core): an icosphere bumped by its own low waves, squashed to the
+ * crown's proportions. Normals are half the lump's own and half the whole crown's, so the
+ * crown reads as one volume lit from the side but keeps its clusters.
+ */
+function lump(
+  b: Builder,
+  ico: { v: number[][]; f: number[][] },
+  c: V3,
+  lr: number,
+  hy: number,
+  cy: number,
+  cb: number,
+  phase: number,
+  light: number,
+) {
+  const base = b.p.length / 3;
+  for (const [nx, ny, nz] of ico.v) {
+    const bump =
+      1 +
+      0.13 * Math.sin(nx! * 5.1 + phase) * Math.cos(nz! * 4.3 + phase * 0.7) +
+      0.1 * Math.sin(ny! * 6.7 + nx! * 2.1 + phase * 1.3);
+    const r = lr * bump;
+    const x = c[0] + nx! * r;
+    const y = c[1] + ny! * r * hy;
+    const z = c[2] + nz! * r;
+    const cyn = (y - cy) / (hy * hy);
+    const cl = Math.hypot(x, cyn, z) || 1;
+    const lyn = ny! / hy;
+    const ll = Math.hypot(nx!, lyn, nz!) || 1;
+    const radial = Math.min(1, Math.hypot(x, z));
+    const height = (y - cb) / (1 - cb);
+    // The underside of each cluster lies in its own shade, besides the crown's.
+    const ao = Math.min(
+      1,
+      (0.3 + 0.45 * radial + 0.35 * height) * (0.62 + 0.38 * (0.5 + 0.5 * ny!)) * light,
+    );
+    b.vertex(
+      x,
+      y,
+      z,
+      0.5 * (nx! / ll) + 0.5 * (x / cl),
+      0.5 * (lyn / ll) + 0.5 * (cyn / cl),
+      0.5 * (nz! / ll) + 0.5 * (z / cl),
+      1,
+      ao,
+    );
+  }
+  for (const [i0, i1, i2] of ico.f) b.tri(base + i0!, base + i1!, base + i2!);
+}
+
 /** Levels of detail per form: near (full), mid, far. */
 export interface TreeMeshes {
   conifer: [TreeMesh, TreeMesh, TreeMesh];
@@ -402,10 +635,10 @@ export function buildTreeMeshes(lite: boolean): TreeMeshes {
       coniferMesh({ tiers: 2, spokes: 4, underside: false, trunkSides: 0, seed: 5 }),
     ],
     broadleaf: [
-      broadleafMesh(
+      leafyBroadleafMesh(
         lite
-          ? { lumps: 7, detail: 1, trunkSides: 5, limbs: 4 }
-          : { lumps: 15, detail: 1, trunkSides: 6, limbs: 7 },
+          ? { clusters: 6, limbs: 3, trunkSides: 5, limbSides: 3, branchSegments: 1 }
+          : { clusters: 18, limbs: 5, trunkSides: 6, limbSides: 4, branchSegments: 2 },
       ),
       broadleafMesh({ lumps: 6, detail: 0, trunkSides: 3, limbs: 0, seed: 4 }),
       broadleafMesh({ lumps: 1, detail: 0, trunkSides: 0, limbs: 0, seed: 6 }),
