@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Audio demo</title>
+    <link rel="icon" href="data:," />
+    <style>
+      body {
+        margin: 16px;
+        background: #20262e;
+        color: #dde;
+        font:
+          14px system-ui,
+          sans-serif;
+      }
+      button {
+        margin: 4px;
+        padding: 8px 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <p>Each button plays a scenario of the audio package (see demo/audio.ts).</p>
+    <div id="scenarios"></div>
+    <p id="out"></p>
+    <script type="module" src="./audio.ts"></script>
+  </body>
+</html>
