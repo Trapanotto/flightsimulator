@@ -191,8 +191,8 @@ export const SKY_QUALITY: Record<'desktop' | 'mobile', SkyQuality> = {
     cloudDetail: false,
     cloudShadowSamples: 1,
     environmentSize: 32,
-    stratusSteps: 3,
-    stratusBisection: 5,
+    stratusSteps: 2,
+    stratusBisection: 3,
     stratusScud: false,
     precipitationDrops: 4000,
     precipitationScale: 0.5,
@@ -835,8 +835,9 @@ export class Sky {
     const ph = node.phase.value.addScaledVector(rel, -dt);
     const BOX = 36;
     ph.set(((ph.x % BOX) + BOX) % BOX, ((ph.y % BOX) + BOX) % BOX, ((ph.z % BOX) + BOX) % BOX);
-    // A drop shows about the light around it; flakes reflect it.
-    const L = (s.illuminance / SOLAR_ILLUMINANCE_LUX / Math.PI) * s.exposure;
+    // A drop refracts the brighter sky above into the eye, so it shows lighter than the land
+    // behind it; flakes reflect the light around them.
+    const L = (s.illuminance / SOLAR_ILLUMINANCE_LUX / Math.PI) * s.exposure * (1.8 - 0.8 * s.snow);
     node.light.value.set(L, L, L * 1.02);
     node.extinction.value = KOSCHMIEDER / Math.max(s.visibility, 1);
     node.time.value = (node.time.value + dt) % 1000;
@@ -933,8 +934,10 @@ export class Sky {
     const insideMix = mix(sky, inside, clamp(cover.mul(1.5), 0, 1));
     const clouded = select(below, withBelow, select(above, withAbove, insideMix));
     // The stratus under, around or over the camera (weights 0 without one).
-    const withUp = mix(clouded, u.envUp, u.envUpWeight.mul(upper));
-    return mix(withUp, u.envDown, u.envDownWeight.mul(upper.oneMinus()));
+    // Blended per hemisphere, so the horizon band takes nothing of the clear sky's colours.
+    const withUp = mix(clouded, u.envUp, u.envUpWeight);
+    const withDown = mix(clouded, u.envDown, u.envDownWeight);
+    return mix(withDown, withUp, upper);
   }
 
   private loadNoise() {

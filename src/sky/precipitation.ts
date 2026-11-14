@@ -266,7 +266,7 @@ export class PrecipitationNode extends TempNode {
       Discard(viewZ.lessThan(sceneZ));
       const soft = float(1).sub(across01.mul(across01));
       // Raindrops show the light around them faintly (they are clear); flakes are white.
-      const a = clamp(weight.mul(soft).mul(mix(float(0.35), float(0.9), this.snow)), 0, 1);
+      const a = clamp(weight.mul(soft).mul(mix(float(1.2), float(0.9), this.snow)), 0, 1);
       return vec4(this.light.mul(a), a);
     })();
     this.material.needsUpdate = true;
