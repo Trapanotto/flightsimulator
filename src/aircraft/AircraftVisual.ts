@@ -79,9 +79,16 @@ export interface ControlHit {
   /**
    * For knobs and selectors with two halves: -1 if the left (or lower) half was hit, 1 for
    * the right (or upper) one, 0 if the control has no sides. A click on the left half turns
-   * the knob down.
+   * the knob down. The flap lever is the exception: +1 when the click is below the handle
+   * (more flap), -1 above it.
    */
   side: -1 | 0 | 1;
+  /**
+   * What one click changes instead of the control's own step: the outer ring of a dual knob
+   * (1000 kHz on a radio, 100 kHz on the ADF, 1000 ft on the autopilot) or one of the
+   * transponder's code knobs (1000, 100, 10, 1: an octal digit). See `pressControl`.
+   */
+  step?: number;
 }
 
 export interface AircraftVisualOptions {

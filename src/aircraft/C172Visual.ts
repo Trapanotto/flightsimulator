@@ -19,8 +19,10 @@ import {
   MeshPhysicalMaterial,
   MeshStandardNodeMaterial,
   type Object3D,
+  Matrix4,
   type PerspectiveCamera,
   Quaternion,
+  type Raycaster,
   RepeatWrapping,
   SRGBColorSpace,
   SpotLight,
@@ -49,8 +51,9 @@ import {
 } from 'three/tsl';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import type { ControlInput, Telemetry } from '@sim';
+import type { Cockpit, ControlInput, Telemetry } from '@sim';
 import type { AircraftVisual, AircraftVisualOptions, ControlHit, Vec3Like } from './AircraftVisual';
+import { C172Cockpit } from './c172Cockpit';
 import { FACES, type FaceId } from './c172Parts';
 import {
   ATLAS_COLS,
@@ -63,28 +66,7 @@ import {
   drawPropDisc,
   tileOf,
 } from './dials';
-import {
-  AI_CARD_RADIUS,
-  AI_CARD_RANGE,
-  AI_PITCH_SCALE,
-  M_TO_FT,
-  MS_TO_FPM,
-  MS_TO_KT,
-  RAD_TO_DEG,
-  altimeterAngles,
-  asiAngle,
-  attitudeCardOffset,
-  flapIndicatorAngle,
-  fuelPerTankGal,
-  headingDelta,
-  lag,
-  slipBallAngle,
-  smallGaugeAngle,
-  tachAngle,
-  turnCoordinatorAngle,
-  vsiAngle,
-  C172S_TANK_GAL,
-} from './instruments';
+import { AI_CARD_RADIUS, AI_CARD_RANGE, AI_PITCH_SCALE, lag } from './instruments';
 import {
   type AircraftLights,
   autoLights,
@@ -151,6 +133,8 @@ class C172 implements AircraftVisual {
   private readonly panelLight = uniform(0.04);
   private readonly blades: Object3D[] = [];
   private readonly spot?: SpotLight;
+  private readonly cockpit: C172Cockpit;
+  private faceMaterial!: Material;
   private readonly glowScale: number;
   /** 0.2 by day .. 1 at night, see setExposure. */
   private glowVisibility = 1;
@@ -158,29 +142,12 @@ class C172 implements AircraftVisual {
   private lightsOverride: Partial<AircraftLights> | undefined;
   private inside = false;
   private first = true;
-  // Instrument and animation state.
+  // Animation state of the exterior.
   private s = {
-    asi: 0,
-    alt: 0,
-    vsi: 0,
-    tach: 0,
-    tc: 0,
-    ball: 0,
-    yawRate: 0,
-    rollRate: 0,
-    heading: 0,
-    bank: 0,
-    compass: 0,
-    oilT: 60,
-    oilP: 0,
-    egt: 0,
-    vac: 0,
-    flaps: 0,
     steer: 0,
     wheel: 0,
     wheelSpin: 0,
     prop: 0,
-    ai: 0,
   };
 
   constructor(scene: Object3D, quality: 'high' | 'low', options: AircraftVisualOptions) {
@@ -210,6 +177,17 @@ class C172 implements AircraftVisual {
     this.collectPivots(lod2);
     this.setupMaterials(quality);
     this.object.updateMatrixWorld(true);
+    this.cockpit = new C172Cockpit({
+      root: this.object,
+      cockpit: lod0.getObjectByName('Cockpit')!,
+      faceMaterial: this.faceMaterial,
+      panelLight: this.panelLight,
+      aiOffset: this.aiOffset,
+      quality,
+      canvasTexture: (c, a) => this.canvasTexture(c, a),
+      track: (m) => this.track(m),
+    });
+    this.cockpit.setInside(false);
     this.setupGlows(lod0);
     if (options.landingLightSpot) {
       // Created once with the aircraft; switching it off only zeroes the intensity, so the
@@ -264,12 +242,6 @@ class C172 implements AircraftVisual {
     if (p?.slide) p.node.position.copy(p.rest).addScaledVector(p.slide, amount);
   }
 
-  /** Needles turn clockwise (as the pilot sees them) for positive angles. */
-  private needle(name: string, deg: number) {
-    const p = this.pivots.get(name);
-    if (p) p.node.quaternion.setFromAxisAngle(p.axis, -deg * DEG);
-  }
-
   private track(m: Material): Material {
     this.materials.add(m);
     return m;
@@ -294,6 +266,7 @@ class C172 implements AircraftVisual {
     // the panel lights (switched with the position lights).
     faceMat.emissiveNode = texture(atlas, uv()).rgb.mul(this.panelLight);
     this.track(faceMat);
+    this.faceMaterial = faceMat;
 
     const pitch = this.canvasTexture(drawPitchCard(quality === 'low' ? 256 : 512));
     const scaleV = (2 * AI_CARD_RADIUS) / AI_PITCH_SCALE / (2 * AI_CARD_RANGE);
@@ -385,6 +358,18 @@ class C172 implements AircraftVisual {
       lampMats.set(name, this.track(m));
     }
 
+    // Needles and pointers are painted luminous: the gauges' lighting shows them at night.
+    const lit = new Map<string, Material>();
+    for (const [name, hex] of [
+      ['Needle', 0xf0f0ec],
+      ['NeedleOrange', 0xff7a12],
+    ] as const) {
+      const m = new MeshStandardNodeMaterial({ color: hex, roughness: 0.5, metalness: 0 });
+      m.name = name;
+      const col = new Color(hex);
+      m.emissiveNode = vec3(col.r, col.g, col.b).mul(this.panelLight);
+      lit.set(name, this.track(m));
+    }
     const faceTiles = new Set<FaceId>(FACES);
     // Dial faces get their own geometry before their UVs move into the atlas: the optimiser
     // may share one disc between dials of the same shape.
@@ -407,6 +392,7 @@ class C172 implements AircraftVisual {
       else if (mat.name === 'LightLens') o.material = lensMat;
       else if (mat.name === 'PropDisc') o.material = discMat;
       else if (lampMats.has(mat.name)) o.material = lampMats.get(mat.name)!;
+      else if (lit.has(mat.name)) o.material = lit.get(mat.name)!;
       else {
         if (quality === 'low' && mat instanceof MeshPhysicalMaterial) mat.clearcoat = 0;
         this.materials.add(mat);
@@ -531,24 +517,49 @@ class C172 implements AircraftVisual {
     this.lightsOverride = lights === 'auto' ? undefined : { ...this.lightsOverride, ...lights };
   }
 
-  // Phase 3 placeholders.
-  pickControl(): ControlHit | null {
-    return null;
+  pickControl(raycaster: Raycaster): ControlHit | null {
+    if (!this.inside) return null;
+    // The ray in the model's own frame: a handful of boxes, no raycast against the model.
+    this.object.updateWorldMatrix(true, false);
+    const inv = tmpM.copy(this.object.matrixWorld).invert();
+    const o = tmpV.copy(raycaster.ray.origin).applyMatrix4(inv);
+    const d = tmpV2.copy(raycaster.ray.direction).transformDirection(inv);
+    return this.cockpit.pick(o, d);
   }
 
-  highlightControl(): void {}
+  highlightControl(id: string | null): void {
+    this.cockpit.highlight(id);
+  }
+
+  /** Model-frame hit boxes of the cockpit controls (tests and the demo's click test). */
+  get hitBoxes() {
+    return this.cockpit.hitBoxes;
+  }
+
+  /** Bytes of the canvases painted at runtime (dials, displays, placards). */
+  get canvasBytes(): number {
+    let n = 0;
+    for (const t of this.textures) {
+      const img = t.image as { width?: number; height?: number } | undefined;
+      if (t instanceof CanvasTexture && img?.width && img.height)
+        n += img.width * img.height * 4 * 1.33;
+    }
+    return n;
+  }
 
   setExposure(exposure: number): void {
     this.glowVisibility = glowVisibility(exposure);
+    this.cockpit.setExposure(exposure);
   }
 
   setCockpitView(inside: boolean): void {
     this.inside = inside;
+    this.cockpit.setInside(inside);
     // From the seat the windshield must not veil the view; keep a hint of reflection.
     this.glassOpacity.value = inside ? 0.3 : 1;
   }
 
-  update(dt: number, t: Telemetry, c: ControlInput): void {
+  update(dt: number, t: Telemetry, c: ControlInput, cockpit?: Cockpit): void {
     const s = this.s;
     const first = this.first;
     this.first = false;
@@ -602,63 +613,9 @@ class C172 implements AircraftVisual {
     }
     this.slideBy('Pedals_R', c.yaw);
     this.slideBy('Pedals_L', -c.yaw);
-    this.slideBy('Throttle', 1 - (c.throttle[0] ?? 0));
-    this.slideBy('Mixture', 1 - (c.mixture[0] ?? 1));
-    this.slideBy('FlapLever', c.flaps);
-    const tw = this.pivots.get('TrimWheel');
-    if (tw) tw.node.quaternion.setFromAxisAngle(tw.axis, c.pitchTrim * 3);
-    // --- instruments -------------------------------------------------------------------------
-    s.asi = lag(s.asi, t.ias * MS_TO_KT, dt, k(0.15));
-    this.needle('Needle_ASI', asiAngle(s.asi));
-    s.alt = lag(s.alt, (t.altitude + this.altOffset) * M_TO_FT, dt, k(0.15));
-    const alt = altimeterAngles(s.alt);
-    this.needle('Needle_ALT100', alt.p100);
-    this.needle('Needle_ALT1000', alt.p1000);
-    this.needle('Needle_ALT10000', alt.p10000);
-    // Real vertical-speed indicators lag by a second or two.
-    s.vsi = lag(s.vsi, t.verticalSpeed * MS_TO_FPM, dt, k(1.2));
-    this.needle('Needle_VSI', vsiAngle(s.vsi));
-    s.tach = lag(s.tach, rpm, dt, k(0.15));
-    this.needle('Needle_TACH', tachAngle(s.tach));
-    // Turn rate and roll rate from the change of heading and bank.
-    if (!first && dt > 0) {
-      s.yawRate = lag(s.yawRate, headingDelta(s.heading, t.headingDeg) / dt, dt, 0.3);
-      s.rollRate = lag(s.rollRate, ((t.bank - s.bank) * RAD_TO_DEG) / dt, dt, 0.15);
-    }
-    s.heading = t.headingDeg;
-    s.bank = t.bank;
-    s.tc = lag(s.tc, turnCoordinatorAngle(s.yawRate, s.rollRate), dt, k(0.25));
-    this.needle('TC_Plane', s.tc);
-    s.ball = lag(s.ball, slipBallAngle(t.beta), dt, k(0.3));
-    const ball = this.pivots.get('TC_Ball');
-    // The ball pivot turns counter-clockwise to roll the ball to the pilot's right.
-    if (ball) ball.node.quaternion.setFromAxisAngle(ball.axis, s.ball * DEG);
-    const ai = this.pivots.get('AI_Roll');
-    if (ai) ai.node.quaternion.setFromAxisAngle(ai.axis, t.bank);
-    this.aiOffset.value = attitudeCardOffset(t.pitch * RAD_TO_DEG);
-    const hi = this.pivots.get('HI_Card');
-    if (hi) hi.node.quaternion.setFromAxisAngle(hi.axis, t.headingDeg * DEG);
-    s.compass =
-      s.compass + headingDelta(s.compass, t.headingDeg) * (first ? 1 : 1 - Math.exp(-dt / 0.6));
-    const cc = this.pivots.get('Compass_Card');
-    if (cc) cc.node.quaternion.setFromAxisAngle(cc.axis, s.compass * DEG);
-    this.needle('Needle_FLAPS', flapIndicatorAngle(t.flaps));
-    const gal = fuelPerTankGal(t.fuel);
-    this.needle('Needle_FUELL', smallGaugeAngle(gal, 0, C172S_TANK_GAL));
-    this.needle('Needle_FUELR', smallGaugeAngle(gal, 0, C172S_TANK_GAL));
-    const eng = t.engines[0];
-    const running = !!eng?.running;
-    const power = eng?.power ?? 0;
-    s.oilT = lag(s.oilT, running ? 165 + 45 * power : 60, dt, first && running ? 0 : 60);
-    s.oilP = lag(s.oilP, running ? 55 + 25 * Math.min(rpm / 2700, 1) : 0, dt, k(1));
-    s.egt = lag(s.egt, running ? 0.35 + 0.5 * power * Math.min(1, c.mixture[0] ?? 1) : 0, dt, k(6));
-    s.vac = lag(s.vac, running ? 5 * Math.min(rpm / 900, 1) : 0, dt, k(0.6));
-    this.needle('Needle_OILT', smallGaugeAngle(s.oilT, 75, 250));
-    this.needle('Needle_OILP', smallGaugeAngle(s.oilP, 0, 120));
-    this.needle('Needle_EGT', smallGaugeAngle(s.egt, 0, 1));
-    this.needle('Needle_VAC', smallGaugeAngle(s.vac, 3, 7));
     // --- lights -----------------------------------------------------------------------------
-    const L = { ...autoLights(t), ...this.lightsOverride };
+    // The systems know which lights are switched on and powered; without them a pilot's habits.
+    const L = { ...(t.systems?.lights ?? autoLights(t)), ...this.lightsOverride };
     const beacon = L.beacon ? beaconIntensity(t.time) : 0;
     const strobe = L.strobe ? strobeIntensity(t.time) : 0;
     const nav = L.nav ? 1 : 0;
@@ -668,7 +625,14 @@ class C172 implements AircraftVisual {
     this.lamps.get('Lamp_Beacon')!.value = 12 * beacon;
     this.lamps.get('Lamp_Strobe')!.value = 40 * strobe;
     this.lamps.get('Lamp_Landing')!.value = L.landing || L.taxi ? 25 : 0;
-    this.panelLight.value = L.nav ? 0.3 : 0.04;
+    this.cockpit.update(
+      dt,
+      t,
+      c,
+      cockpit,
+      this.altOffset,
+      t.systems?.panelLight ?? (L.nav ? 1 : 0),
+    );
     const level: Record<string, number> = {
       Nav_L: 1.6 * nav,
       Nav_R: 1.6 * nav,
@@ -701,12 +665,14 @@ class C172 implements AircraftVisual {
       }
     });
     for (const m of this.materials) m.dispose();
+    this.cockpit.dispose(this.textures);
     for (const t of this.textures) t.dispose();
     this.spot?.dispose();
   }
 }
 
 const tmpQ = new Quaternion();
+const tmpM = new Matrix4();
 const tmpV = new Vector3();
 const tmpV2 = new Vector3();
 /** Glow size as a share of the screen height. */

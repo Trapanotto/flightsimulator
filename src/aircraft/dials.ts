@@ -145,10 +145,10 @@ function drawALT(c: Ctx, cx: number, cy: number, R: number) {
     tick(c, cx, cy, R * (major ? 0.8 : 0.88), R * 0.97, i * 7.2, R * (major ? 0.035 : 0.018));
   }
   for (let n = 0; n < 10; n++) label(c, String(n), cx, cy, R * 0.64, n * 36, R * 0.2);
-  // Kollsman window with the pressure setting (standard pressure, static).
+  // Kollsman window: the setting itself is a display drawn over this (displays.ts, KOLL).
   c.fillStyle = '#050505';
-  c.fillRect(cx + R * 0.3, cy - R * 0.1, R * 0.38, R * 0.2);
-  text(c, '29.92', cx + R * 0.49, cy, R * 0.12, WHITE, 500);
+  c.fillRect(cx + R * 0.29, cy - R * 0.11, R * 0.4, R * 0.22);
+  text(c, 'hPa', cx + R * 0.49, cy + R * 0.2, R * 0.08, WHITE, 500);
   text(c, 'ALT', cx, cy - R * 0.32, R * 0.11, WHITE, 500);
   text(c, '100 FEET', cx, cy + R * 0.3, R * 0.09, WHITE, 500);
   // Low-altitude warning stripes (shown below 10 000 ft on real altimeters; static here).
@@ -307,6 +307,7 @@ function drawTACH(c: Ctx, cx: number, cy: number, R: number) {
   screw(c, cx, cy, R);
 }
 
+/** Azimuth card of a course indicator (turns with the OBS); the dots and needles are geometry. */
 function drawCDI(c: Ctx, cx: number, cy: number, R: number, nav: string) {
   base(c, cx, cy, R);
   for (let d = 0; d < 360; d += 5)
@@ -325,23 +326,40 @@ function drawCDI(c: Ctx, cx: number, cy: number, R: number, nav: string) {
     );
     c.restore();
   }
-  c.strokeStyle = WHITE;
-  c.lineWidth = R * 0.02;
-  for (let i = -5; i <= 5; i++) {
-    if (!i) continue;
-    c.beginPath();
-    c.arc(cx + i * R * 0.1, cy, R * 0.025, 0, Math.PI * 2);
-    c.stroke();
-  }
-  text(c, nav, cx, cy + R * 0.42, R * 0.1, WHITE, 500);
-  text(c, 'TO', cx + R * 0.3, cy - R * 0.25, R * 0.09, WHITE, 500);
+  // The card's centre is hidden by the needles' mask on the real gauge: keep it plain.
+  c.fillStyle = '#0d0d0d';
+  c.beginPath();
+  c.arc(cx, cy, R * 0.6, 0, Math.PI * 2);
+  c.fill();
+  text(c, nav, cx, cy + R * 0.32, R * 0.08, '#9a9a96', 500);
 }
 
-function drawClock(c: Ctx, cx: number, cy: number, R: number) {
+/** ADF indicator: a fixed card, north up (the pointer shows the bearing relative to the nose). */
+function drawADF(c: Ctx, cx: number, cy: number, R: number) {
   base(c, cx, cy, R);
-  for (let i = 0; i < 60; i++)
-    tick(c, cx, cy, R * (i % 5 ? 0.88 : 0.76), R * 0.97, i * 6, R * (i % 5 ? 0.02 : 0.045));
-  for (let h = 1; h <= 12; h++) label(c, String(h), cx, cy, R * 0.6, h * 30, R * 0.17);
+  for (let d = 0; d < 360; d += 5)
+    tick(c, cx, cy, R * (d % 10 ? 0.9 : 0.82), R * 0.98, d, R * (d % 10 ? 0.015 : 0.025));
+  for (let d = 0; d < 360; d += 30) {
+    const [x, y] = polar(cx, cy, R * 0.68, d);
+    c.save();
+    c.translate(x, y);
+    c.rotate((d * Math.PI) / 180);
+    text(
+      c,
+      d === 0 ? 'N' : d === 90 ? 'E' : d === 180 ? 'S' : d === 270 ? 'W' : String(d / 10),
+      0,
+      0,
+      R * 0.14,
+    );
+    c.restore();
+  }
+  // Lubber marks and a small aircraft in the middle.
+  for (const d of [45, 135, 225, 315]) tick(c, cx, cy, R * 0.98, R * 1.02, d, R * 0.03, '#ff7a14');
+  c.fillStyle = '#ff7a14';
+  c.fillRect(cx - R * 0.025, cy - R * 0.22, R * 0.05, R * 0.4);
+  c.fillRect(cx - R * 0.22, cy - R * 0.07, R * 0.44, R * 0.05);
+  c.fillRect(cx - R * 0.09, cy + R * 0.14, R * 0.18, R * 0.04);
+  text(c, 'ADF', cx, cy + R * 0.38, R * 0.09, WHITE, 500);
 }
 
 function drawFlaps(c: Ctx, cx: number, cy: number, R: number) {
@@ -414,6 +432,8 @@ const DRAW: Record<FaceId, (c: Ctx, cx: number, cy: number, R: number) => void> 
       [smallGaugeAngle(20, 0, 120), smallGaugeAngle(115, 0, 120)],
     ),
   EGT: (c, x, y, r) => drawSmall(c, x, y, r, 'EGT', ['', ''], [], []),
+  AMP: (c, x, y, r) => drawSmall(c, x, y, r, 'AMP', ['-', '+'], [], []),
+  FF: (c, x, y, r) => drawSmall(c, x, y, r, 'GPH', ['0', '20'], [], []),
   VAC: (c, x, y, r) =>
     drawSmall(
       c,
@@ -425,7 +445,7 @@ const DRAW: Record<FaceId, (c: Ctx, cx: number, cy: number, R: number) => void> 
       [[smallGaugeAngle(4.5, 3, 7), smallGaugeAngle(5.5, 3, 7), GREEN]],
       [],
     ),
-  CLOCK: drawClock,
+  ADF: drawADF,
   FLAPS: drawFlaps,
 };
 
@@ -553,5 +573,37 @@ export function drawPropDisc(
   c.beginPath();
   c.arc(r, r, r, 0, Math.PI * 2);
   c.fill();
+  return canvas;
+}
+
+/**
+ * Placard texts in an atlas of cols x rows cells of 4:1 (the model's label quads have the same
+ * shape). Each text is fitted to its cell; the background stays transparent.
+ */
+export function drawLabelAtlas(
+  texts: readonly string[],
+  colors: readonly string[],
+  cols: number,
+  rows: number,
+  cellW: number,
+): HTMLCanvasElement {
+  const cellH = cellW / 4;
+  const canvas = document.createElement('canvas');
+  canvas.width = cols * cellW;
+  canvas.height = rows * cellH;
+  const c = canvas.getContext('2d')!;
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  texts.forEach((s, i) => {
+    const x = ((i % cols) + 0.5) * cellW;
+    const y = (Math.floor(i / cols) + 0.5) * cellH;
+    let size = cellH * 0.78;
+    c.font = `600 ${size}px ${FONT}`;
+    const w = c.measureText(s).width;
+    if (w > cellW * 0.94) size *= (cellW * 0.94) / w;
+    c.font = `600 ${size}px ${FONT}`;
+    c.fillStyle = colors[i] ?? WHITE;
+    c.fillText(s, x, y + size * 0.04);
+  });
   return canvas;
 }
