@@ -12,6 +12,9 @@ import {
   float,
   floor,
   fract,
+  fwidth,
+  atan,
+  cross,
   int,
   interleavedGradientNoise,
   min,
@@ -216,6 +219,8 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
   let clusterPick: N = float(0);
   let outer: N = float(0);
   let clusterNormal: N = normal;
+  let twigRel: N = vec3(0);
+  let twigId: N = float(0);
   if (leafy) {
     const cl = attribute('cluster', 'vec4') as N;
     const has = cl.w.greaterThanEqual(0);
@@ -247,6 +252,14 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
       // The cluster's own surface normal (its ellipsoid is squashed like the crown).
       const hy = (1 - BROADLEAF_CROWN_BASE) / 2;
       clusterNormal = select(has.and(isCrownPart), vec3(rel.x, rel.y.div(hy * hy), rel.z), normal);
+      // From the cluster's (grown, shifted) centre to the point, and 1 + the cluster's id
+      // (0 for the core and the wood): bare crowns draw their twigs from it.
+      twigRel = select(
+        has.and(isCrownPart),
+        rel.mul(vec3(kept, kept.mul(leafLook.x), kept)),
+        vec3(0),
+      );
+      twigId = select(has.and(isCrownPart), cl.w.add(1), float(0));
     }
   }
 
@@ -341,6 +354,16 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
     return normalize((modelWorldMatrix as N).mul(vec4(turned, 0)).xyz);
   };
   const nWorld = varying(toWorld(normal), 'vTreeNormal') as N;
+  // A direction in tree space scaled and turned like the tree (no normalising).
+  const spanToWorld = (v: N): N =>
+    (modelWorldMatrix as N).mul(
+      vec4(
+        v.x.mul(sxz).mul(c).sub(v.z.mul(sxz).mul(s)),
+        v.y.mul(sy),
+        v.x.mul(sxz).mul(s).add(v.z.mul(sxz).mul(c)),
+        0,
+      ),
+    ).xyz;
 
   const vLo = varying(lo, 'vTreeLo') as N;
   const vHi = varying(hi, 'vTreeHi') as N;
@@ -360,6 +383,7 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
   let trans: N = float(0);
   let fine: N = float(1);
   let vLeaf: N = vec3(0);
+  let vTwig: N = vec4(0);
   if (leafy) {
     vLeaf = varying(metric.add(seed.mul(53)), 'vTreeLeaf') as N;
     const vPick = varying(clusterPick, 'vTreePick') as N;
@@ -390,6 +414,7 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
       const clusterRim = float(1).sub(abs(dot(normalize(vClusterN), view)));
       gapEdge = smoothstep(0.15, 0.8, clusterRim).max(silhouette);
       thin = clamp(clusterRim.mul(1.6), 0, 1);
+      vTwig = varying(vec4(spanToWorld(twigRel), twigId), 'vTreeTwig') as N;
     }
     gapEdge = gapEdge.mul(leafLook.z);
     // Light through the leaves: looking towards the sun, the whole crown lets some through and
@@ -429,14 +454,60 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
     let crown = mix(nearColor, farColor, w).mul(u.crownGain) as N;
     const isCrown = isCrownPart;
     if (leafy) {
-      // Bare crowns: a fine net of twigs (the ridges of a noise, in metres) around the
-      // branches; the lines widen with distance until they merge into a grey-brown haze.
-      // First, and only for bare crowns: most of their pixels go, before the leaves are paid for.
-      If(isCrown.and(bare.greaterThan(0.01)), () => {
-        const lace = mx_noise_float(vLeaf.mul(conifer ? 2.2 : 1.6).add(seed.mul(31))) as N;
-        const twig = mix(float(0.2), float(0.075), fine);
-        Discard(abs(lace).greaterThan(mix(float(2), twig, bare)));
-      });
+      if (conifer) {
+        // Bare larches: a net of twigs (the ridges of a noise) around the whorls.
+        If(isCrown.and(bare.greaterThan(0.01)), () => {
+          const lace = mx_noise_float(vLeaf.mul(2.2).add(seed.mul(31))) as N;
+          const twig = mix(float(0.2), float(0.075), fine);
+          Discard(abs(lace).greaterThan(mix(float(2), twig, bare)));
+        });
+      } else {
+        // Bare crowns: straight twigs radiating from each cluster's middle, where its branch
+        // ends, as seen from the camera: lines of equal angle around the cluster's centre in
+        // the plane facing the viewer, so they stay straight and never close into loops. Each
+        // is about a pixel wide (the derivative of its angle sets the width), starts a little
+        // out from the middle and stops at its own length; the fine ones only grow outside,
+        // so the crown thins out towards its edge. Far away the fine ones crowd closer than a
+        // pixel and are thinned to a haze through which the branches show. Derivatives are
+        // taken here, outside any branch.
+        const id = vTwig.w.sub(1);
+        const rel = vTwig.xyz;
+        const across = rel.sub(view.mul(dot(rel, view)));
+        const right = normalize(cross(view, vec3(0, 1, 0)));
+        const up = cross(right, view);
+        const ang = atan(dot(across, up), dot(across, right));
+        // 0 in the cluster's middle (as seen) .. 1 at its outline.
+        const s01 = across.length().div(rel.length().max(1e-4));
+        const twigs = (count: number, width: number, from: number, offset: number) => {
+          const g0 = ang.mul(count / (2 * Math.PI)).add(id.mul(7.3 + offset));
+          const twig = floor(g0.add(0.5)).add(id.mul(13).add(offset));
+          const h1 = hash1(twig);
+          const h2 = hash1(twig.add(0.71));
+          // Each twig leans a little to one side as it grows out (staying in its own sector),
+          // starts and stops on its own, and some are missing: no regular star.
+          const g = g0.add(hash1(twig.add(1.93)).sub(0.5).mul(0.6).mul(s01));
+          const f = fract(g);
+          const off = min(f, float(1).sub(f)).div(fwidth(g0).max(1e-4));
+          const keepTwig = off
+            .lessThan(width)
+            .and(h2.greaterThan(0.25))
+            .and(s01.greaterThan(h2.mul(0.25).add(from)))
+            .and(s01.lessThan(h1.mul(0.45).add(0.5)));
+          return { keep: keepTwig, crowd: fwidth(g0) };
+        };
+        const main = twigs(26, 0.6, 0.15, 0);
+        const thinTwigs = twigs(80, 0.4, 0.35, 3.7);
+        const dither = fract(t.mul(7.13).add(0.37));
+        // Fine twigs closer than about two pixels: only some pixels of them, a haze.
+        const haze = mix(float(1), float(0.4), smoothstep(0.25, 0.6, thinTwigs.crowd));
+        const kept = main.keep.or(thinTwigs.keep.and(dither.lessThan(haze)));
+        If(isCrown.and(bare.greaterThan(0.01)), () => {
+          // The core has no branch to fan from: it goes with the leaves.
+          Discard(kept.not().or(vTwig.w.lessThan(0.5)).and(dither.lessThan(bare)));
+        });
+        // Twigs are thin wood seen against the sky: dark, whatever the sun does.
+        crown = crown.mul(mix(float(1), float(0.35), bare));
+      }
       // Sprays of leaves stand out lit against the dark hollows between them.
       const sprays = smoothstep(-0.25, 0.3, leaves);
       // Light through a leaf comes out yellower than the light it reflects.
