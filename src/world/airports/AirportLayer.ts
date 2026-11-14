@@ -13,11 +13,10 @@ import {
   BufferAttribute,
   BufferGeometry,
   Group,
-  InstancedMesh,
   InterleavedBuffer,
   InterleavedBufferAttribute,
   Mesh,
-  type MeshBasicNodeMaterial,
+  type Object3D,
   Vector3,
 } from 'three/webgpu';
 import { uniform } from 'three/tsl';
@@ -35,7 +34,7 @@ import { type Draped, type Steps, groundSteps, runwaySteps } from './geometry';
 import { createLightGeometry, createLightMaterial, lightUniforms } from './lightMaterial';
 import { lightSteps } from './lights';
 import { AIRPORT_PRESETS, type AirportPreset } from './presets';
-import { type PropPlace, PropKit, placeProp, propPlaces } from './props';
+import { PropKit, type PropMesh, nearestPlace, propPlaces, setWindsockConditions } from './props';
 import {
   SurfaceTextures,
   createGroundMaterial,
@@ -59,6 +58,11 @@ const BUILD_MS = 4;
 const SEAT_MS = 3;
 /** A probe whose ground moved more than this triggers a new seating pass. */
 const PROBE_TOLERANCE = 0.01;
+/**
+ * Windsocks cast shadows only this close to the camera: the shadow map covers a few dozen metres
+ * around the aircraft, and a sock further away only costs a shadow pass that draws nothing.
+ */
+export const WINDSOCK_SHADOW_RANGE = 100;
 
 /** Something whose points take their heights from the terrain. */
 interface Seatable {
@@ -112,8 +116,18 @@ class Kit {
   readonly ground = createGroundMaterial(this.textures);
   readonly lines = createLineMaterial(this.textures);
   readonly props = new PropKit();
+  /**
+   * One light material for all airports (one shader); the camera in each airport's own frame
+   * is a per-object uniform, read from the Lights mesh.
+   */
+  readonly lights = createLightMaterial(
+    uniform(new Vector3()).onObjectUpdate(
+      ({ object }) => (object as Object3D).userData.cameraLocal as Vector3,
+    ),
+  );
 
   dispose() {
+    this.lights.dispose();
     this.textures.dispose();
     this.runway.dispose();
     this.ground.dispose();
@@ -141,8 +155,9 @@ class Site {
   revision = -1;
   readonly since = performance.now();
   /** The camera in this airport's frame, for its lights (see lightMaterial.ts). */
-  private readonly cameraLocal = uniform(new Vector3());
-  private lightMaterial?: MeshBasicNodeMaterial;
+  private readonly cameraLocal = new Vector3();
+  private readonly props: PropMesh[] = [];
+  private windsocks?: PropMesh;
   distance = 0;
   /** Counts for performance notes. */
   readonly stats = { vertices: 0, triangles: 0, lights: 0, draws: 0 };
@@ -183,7 +198,11 @@ class Site {
 
   /** The camera, given in ECEF, in this airport's frame. */
   setCamera(ecef: { x: number; y: number; z: number }) {
-    this.frame.toLocal(ecef, this.cameraLocal.value);
+    this.frame.toLocal(ecef, this.cameraLocal);
+    const w = this.windsocks;
+    if (w && this.seated)
+      w.mesh.castShadow =
+        nearestPlace(w.place, w.places.length, this.cameraLocal) < WINDSOCK_SHADOW_RANGE;
   }
 
   /** True while this airport still has something to build or seat for the first time. */
@@ -247,9 +266,9 @@ class Site {
           const positions = new Float32Array(b.count * 4);
           for (let i = 0; i < b.count; i++) positions[i * 4 + 3] = b.size[i]!;
           const geometry = createLightGeometry(b, positions);
-          this.lightMaterial = createLightMaterial(this.cameraLocal);
-          const mesh = new Mesh(geometry, this.lightMaterial);
+          const mesh = new Mesh(geometry, this.kit.lights);
           mesh.name = 'Lights';
+          mesh.userData.cameraLocal = this.cameraLocal;
           mesh.frustumCulled = false;
           mesh.renderOrder = 5;
           this.group.add(mesh);
@@ -271,39 +290,25 @@ class Site {
       }
       case 'props': {
         const places = propPlaces(this.frame, this.airport, this.detail);
-        const meshes = this.kit.props.create(places);
-        const lists: PropPlace[][] = [];
-        if (places.windsocks.length) lists.push(places.windsocks);
-        if (places.markers.length) lists.push(places.markers);
-        meshes.forEach((mesh, k) => {
-          const list = lists[k]!;
-          this.group.add(mesh);
+        for (const prop of this.kit.props.create(places)) {
+          this.group.add(prop.mesh);
+          this.props.push(prop);
+          if (prop.mesh.name === 'Windsocks') this.windsocks = prop;
           this.stats.draws++;
-          const out = new Float32Array(list.length * 3);
           this.addSeatable({
-            lon: Float64Array.from(list, (p) => p.lon),
-            lat: Float64Array.from(list, (p) => p.lat),
-            out,
-            stride: 3,
-            done: () => {
-              // The seated point is in the airport frame; back to an ellipsoid height for the
-              // matrix (the ground height is what was stored in y relative to the frame).
-              list.forEach((p, i) => placeProp(this.frame, mesh, i, p, this.heightOf(out, i)));
-              mesh.instanceMatrix.needsUpdate = true;
-            },
+            lon: Float64Array.from(prop.places, (p) => p.lon),
+            lat: Float64Array.from(prop.places, (p) => p.lat),
+            out: prop.place,
+            stride: 4,
+            done: prop.placed,
           });
-        });
+        }
         this.stage = 'done';
         return true;
       }
       default:
         return false;
     }
-  }
-
-  /** Ellipsoid height of a seated point (stored as local x, y, z of the airport frame). */
-  private heightOf(out: Float32Array, i: number): number {
-    return this.frame.toGeodetic({ x: out[i * 3]!, y: out[i * 3 + 1]!, z: out[i * 3 + 2]! }).h;
   }
 
   private addDraped(d: Draped, materials: Array<Mesh['material']>, order: number) {
@@ -435,9 +440,8 @@ class Site {
 
   dispose() {
     this.abort.abort();
-    this.lightMaterial?.dispose();
     for (const g of this.geometries) g.dispose();
-    for (const child of this.group.children) if (child instanceof InstancedMesh) child.dispose();
+    for (const p of this.props) p.dispose();
     this.group.removeFromParent();
   }
 }
@@ -512,6 +516,7 @@ export class AirportLayer implements WorldLayer {
     u.exposure.value = ctx.conditions.exposure;
     u.on.value = lightsOnFor(ctx.conditions);
     u.time.value = ctx.conditions.time;
+    setWindsockConditions(ctx.conditions);
     // Sprite limits are in pixels of a 1080 pixel high screen.
     const scale = Math.max(0.6, ctx.screenHeight / 1080);
     u.minPx.value = this.preset.minPx * Math.max(1, scale * 0.8);

@@ -42,6 +42,7 @@ import {
   pow,
   select,
   smoothstep,
+  sqrt,
   texture,
   vec2,
   vec3,
@@ -316,9 +317,11 @@ export function createRunwayMaterial(t: SurfaceTextures): MeshStandardNodeMateri
       )
       .mul(pick(glyph.greaterThanEqual(0), 1, 0));
     // Antialiased by the distance field's own screen gradient (sharp across, soft along at
-    // grazing angles); once the 0.9 m strokes are below a pixel, the glyph's average.
+    // grazing angles); once the 0.9 m strokes are below a pixel, the glyph's average. "Below a
+    // pixel" by the pixel's area, not its long side: on final the footprint is a metre along
+    // the runway but a few centimetres across, and the digits read clearly.
     const sharp = clamp(float(0.5).sub(dist.div(max(fwidth(dist), 1e-3))), 0, 1);
-    const glyphCov = mix(sharp, float(0.22), smoothstep(0.5, 1.5, footprint)).mul(inBox);
+    const glyphCov = mix(sharp, float(0.22), smoothstep(0.5, 1.5, sqrt(fs.mul(ft)))).mul(inBox);
     paint = max(paint, glyphCov);
     return paint;
   };
