@@ -14,6 +14,7 @@ import {
   SphereGeometry,
   TempNode,
   Vector3,
+  Vector4,
   type Camera,
   type CubeTexture,
   type Node,
@@ -46,6 +47,7 @@ import { aerialLookup, depthToViewZ, sceneDistance, viewRay } from './aerial';
 import {
   EARTH_RADIUS,
   GROUND_ALBEDO,
+  NIGHT_FLOOR_LUX,
   LUMA,
   SOLAR_ILLUMINANCE_LUX,
   exposureFor,
@@ -64,6 +66,20 @@ import {
 } from './astro';
 import { CloudNode } from './clouds';
 import type { CloudNoise } from './cloudNoise';
+import { PrecipitationNode, fallSpeed, snowShare, temperatureAt } from './precipitation';
+import {
+  BILLOW_PERIOD,
+  KOSCHMIEDER,
+  STRATUS_ALBEDO,
+  belowness,
+  diffuseTransmission,
+  directThrough,
+  stratusExtinction,
+  stratusProfile,
+  stratusThickness,
+  type StratusProfile,
+} from './stratus';
+import { StratusLayer } from './stratusNode';
 import { AtmosphereLuts } from './luts';
 import { R, distanceToGround, hitsGround, type F, type V3, type V4 } from './nodes';
 import { pixelAngleOf, skyRadiance } from './skyDome';
@@ -112,6 +128,16 @@ export interface SkyState {
   exposure: number;
   /** Light on a horizontal surface at the camera, lux (for the simulation, instruments). */
   illuminance: number;
+  /**
+   * How much of the main light's direct beam reaches the camera's surroundings, 0..1: 0 under
+   * a closed deck (no shadows, no sun glints; `sky.sun` is already dimmed by it), 1 in the
+   * clear. Fades smoothly through the stratus.
+   */
+  sunlight: number;
+  /** Horizontal visibility at the camera's height, metres (50-150 m inside a stratus). */
+  visibility: number;
+  /** Share of the precipitation that falls as snow at the camera's height, 0..1. */
+  snow: number;
 }
 
 /** How much the sky may cost; presets per device class are exported as SKY_QUALITY. */
@@ -130,6 +156,16 @@ export interface SkyQuality {
   cloudShadowSamples: number;
   /** Edge of the environment cube map in texels. */
   environmentSize: number;
+  /** Texture reads along a ray that finds the stratus top's billows from above (2..8). */
+  stratusSteps: number;
+  /** Bisection steps for the depth the stratus light comes from. */
+  stratusBisection: number;
+  /** Ragged scud under the stratus base. */
+  stratusScud: boolean;
+  /** Most rain drops or snowflakes around the camera; 0 = no precipitation drawn. */
+  precipitationDrops: number;
+  /** Resolution of the precipitation layer relative to the screen. */
+  precipitationScale: number;
 }
 
 export const SKY_QUALITY: Record<'desktop' | 'mobile', SkyQuality> = {
@@ -141,6 +177,11 @@ export const SKY_QUALITY: Record<'desktop' | 'mobile', SkyQuality> = {
     cloudDetail: true,
     cloudShadowSamples: 3,
     environmentSize: 128,
+    stratusSteps: 6,
+    stratusBisection: 8,
+    stratusScud: true,
+    precipitationDrops: 16_000,
+    precipitationScale: 1,
   },
   mobile: {
     cloudSteps: 28,
@@ -150,6 +191,11 @@ export const SKY_QUALITY: Record<'desktop' | 'mobile', SkyQuality> = {
     cloudDetail: false,
     cloudShadowSamples: 1,
     environmentSize: 32,
+    stratusSteps: 3,
+    stratusBisection: 5,
+    stratusScud: false,
+    precipitationDrops: 4000,
+    precipitationScale: 0.5,
   },
 };
 
@@ -209,6 +255,14 @@ export class Sky {
   private readonly envScene = new Scene();
   private readonly refreshNode: RefreshNode;
   private clouds: CloudNode | null = null;
+  private readonly stratus: StratusLayer;
+  private precipitation: PrecipitationNode | null = null;
+  private profile: StratusProfile | null = null;
+  /** Camera position in the fixed frame last frame, and its smoothed velocity (m/s). */
+  private readonly lastPosition = new Vector3(NaN, NaN, NaN);
+  private readonly velocity = new Vector3();
+  /** What the environment cube was last rendered with under, in or over the deck. */
+  private readonly renderedEnv = new Vector4(NaN, NaN, NaN, NaN);
   private weather: Weather = { ...WEATHER_PRESETS.clear };
   private mieDensity = mieDensityFromVisibility(WEATHER_PRESETS.clear.visibility);
   private readonly up = new Vector3(0, 1, 0);
@@ -241,7 +295,15 @@ export class Sky {
       lightDirection: new Vector3(0, 1, 0),
       exposure: 1,
       illuminance: 100_000,
+      sunlight: 1,
+      visibility: WEATHER_PRESETS.clear.visibility,
+      snow: 0,
     };
+    this.stratus = new StratusLayer(this.u, {
+      steps: quality.stratusSteps,
+      bisection: quality.stratusBisection,
+      scud: quality.stratusScud,
+    });
     this.refreshNode = new RefreshNode((r) => this.refresh(r));
     const refresh = vec3(this.refreshNode as unknown as F);
 
@@ -344,6 +406,22 @@ export class Sky {
       this.quality.cloudSteps > 0 ? Math.min(Math.max(weather.cloudCover, 0), 1) : 0;
     this.mieDensity = mieDensityFromVisibility(weather.visibility);
     this.luts.mieDensity.value = this.mieDensity;
+    const p = weather.stratus ? stratusProfile(weather.stratus) : null;
+    this.profile = p;
+    const su = this.u;
+    su.stratusOn.value = p ? 1 : 0;
+    if (p) {
+      su.stratusH.value.set(p.h[0], p.h[1], p.h[2], p.h[3]);
+      su.stratusH4.value = p.h[4];
+      su.stratusS.value.set(p.s[0], p.s[1], p.s[2], p.s[3]);
+      su.stratusBase.value = p.base;
+      su.stratusTop.value = p.top;
+      su.stratusAmplitude.value = p.amplitude;
+      su.stratusScud.value = p.scud;
+      su.stratusTopAtCamera.value = p.top;
+    } else {
+      su.stratusFront.value = 0;
+    }
     if (changedAir) this.dirty.air = true;
     this.dirty.env = true;
     this.updateLight();
@@ -356,7 +434,7 @@ export class Sky {
    * (`scenePass.getTextureNode('depth')`); `camera` the camera of that pass, the same one
    * passed to `update()`. Call once; the result goes into the render pipeline.
    */
-  post(color: Node, depth: Node, _camera: Camera): Node {
+  post(color: Node, depth: Node, camera: Camera): Node {
     const depthTex = depth as unknown as TextureNode;
     const q = this.quality;
     if (q.cloudSteps > 0 && !this.clouds) {
@@ -370,7 +448,14 @@ export class Sky {
       });
       this.noiseUploaded = false;
     }
+    if (q.precipitationDrops > 0 && !this.precipitation) {
+      this.precipitation = new PrecipitationNode(this.u, depthTex, camera, {
+        drops: q.precipitationDrops,
+        scale: q.precipitationScale,
+      });
+    }
     const clouds = this.clouds;
+    const precipitation = this.precipitation;
     const u = this.u;
     return Fn(() => {
       const scene = vec4(color as unknown as V4).toVar();
@@ -408,7 +493,13 @@ export class Sky {
       const farGround = sd.sky.and(hitsGround(rKm, hKm, muView));
       const apDist = select(farGround, distanceToGround(rKm, hKm, muView).mul(1000), dist);
       out.assign(select(farGround, u.groundRadiance.mul(1 / 1.3), out));
-      const ap = aerialLookup(u, this.luts, dir, apDist.mul(0.001));
+      const solid = geometry.or(farGround);
+      // The stratus along the ray, up to what stops it.
+      const deck = this.stratus.trace(dir, select(solid, apDist, float(1e9)));
+      const Ts = deck.transmittance;
+      // The air in front reaches as far as the light comes from: the scene through a clear
+      // ray, the depth the deck shines from where it is opaque.
+      const ap = aerialLookup(u, this.luts, dir, mix(deck.distance, apDist, Ts).mul(0.001));
       const T = ap.transmittance;
       const fade = float(1).sub(T.dot(vec3(...LUMA)));
       // Under an overcast deck the haze is lit by the grey cloud base instead of the sun.
@@ -416,7 +507,10 @@ export class Sky {
         .mul(u.exposure)
         .mul(float(1).sub(u.hazeShadow))
         .add(u.deckRadiance.mul(u.hazeShadow).mul(fade));
-      out.assign(select(geometry.or(farGround), out.mul(T).add(haze), out));
+      out.assign(select(solid, out.mul(T).add(haze), out));
+      // The deck's light seen through the air in front of it (pixels of empty sky get that
+      // air only where the deck covers them: the dome already holds the air beyond).
+      const deckLight = deck.color.mul(T).add(haze.mul(Ts.oneMinus()));
       if (clouds) {
         // Depth-aware upsampling: of the four nearest low-resolution texels, trust those whose
         // depth matches this pixel's (no cloud bleeding over a mountain's edge).
@@ -449,7 +543,18 @@ export class Sky {
         const layer = clouds.layer(dir);
         const clear = geometry.and(dist.lessThan(layer.t0).or(layer.t1.lessThanEqual(layer.t0)));
         const c = select(clear, vec4(0, 0, 0, 1), sum.div(max(wsum, 1e-6)));
-        out.assign(out.mul(c.a).add(c.rgb));
+        // The stratus lies below the cumulus: in front of them from below and inside it,
+        // behind them from above.
+        const deckFirst = out.mul(Ts).add(deckLight).mul(c.a).add(c.rgb);
+        const cumulusFirst = out.mul(c.a).add(c.rgb).mul(Ts).add(deckLight);
+        out.assign(mix(deckFirst, cumulusFirst, u.stratusFront));
+      } else {
+        out.assign(out.mul(Ts).add(deckLight));
+      }
+      if (precipitation) {
+        // Rain and snow right in front of the camera, over everything else.
+        const r = precipitation.getTextureNode().sample(p) as unknown as V4;
+        out.assign(out.mul(float(1).sub(clamp(r.a, 0, 1))).add(r.rgb));
       }
       return vec4(out, scene.a);
     })() as unknown as Node;
@@ -489,10 +594,25 @@ export class Sky {
     u.windOffset.value.y = (u.windOffset.value.y - wind.south * dt) % wrap;
     u.time.value = (u.time.value + dt) % 20_000;
 
-    if (Math.abs(altitude - this.altitude) > 1) {
+    let relight = Math.abs(altitude - this.altitude) > 1;
+    const p = this.profile;
+    if (p) {
+      // The deck drifts slowly with the surface wind (a Hochnebel moves with the Bise).
+      const w = this.weather;
+      const to = (w.windFromDeg + 180) * DEG;
+      const off = u.stratusOffset.value;
+      off.x = (off.x - Math.sin(to) * w.windSpeed * dt) % BILLOW_PERIOD;
+      off.y = (off.y + Math.cos(to) * w.windSpeed * dt) % BILLOW_PERIOD;
+      const o = u.originOffset.value;
+      const top = this.stratus.topAt(camera.position.x + o.x, camera.position.z + o.y);
+      if (Math.abs(top - u.stratusTopAtCamera.value) > 0.5) relight = true;
+      u.stratusTopAtCamera.value = top;
+    }
+    if (relight) {
       this.altitude = altitude;
       this.updateLight();
     }
+    this.updatePrecipitation(camera, dt);
     this.checkDirty();
 
     this.dome.position.copy(camera.position);
@@ -504,6 +624,8 @@ export class Sky {
   dispose() {
     this.luts.dispose();
     this.clouds?.dispose();
+    this.stratus.dispose();
+    this.precipitation?.dispose();
     this.envTarget.dispose();
     this.dome.geometry.dispose();
     (this.dome.material as MeshBasicNodeMaterial).dispose();
@@ -534,14 +656,29 @@ export class Sky {
         1,
       );
     const cloudDim = 1 - 0.7 * cover * cover * below;
-    const lux = horizontalIlluminance(sunEl, sunDirect, moonLux) * cloudDim;
+    const moonMain = luminance(moonDirect) > luminance(sunDirect);
+    const lightMu = moonMain ? muMoon : muSun;
+    // The stratus: the direct beam through what of it lies above the camera, the diffuse light
+    // through the whole deck below it (two-stream), mixed by how deep in it the camera is.
+    const p = this.profile;
+    const sunlightDeck = p ? directThrough(p, this.altitude, lightMu) : 1;
+    const deep = p ? belowness(p, this.altitude) : 0;
+    const deckT = p ? diffuseTransmission(stratusThickness(p)) : 1;
+    let lux = horizontalIlluminance(sunEl, sunDirect, moonLux) * cloudDim;
+    if (p) {
+      const direct =
+        luminance(sunDirect) * SOLAR_ILLUMINANCE_LUX * Math.max(Math.sin(sunEl * DEG), 0) + moonLux;
+      const diffuse = lux / cloudDim - direct;
+      const through = (direct + diffuse) * deckT;
+      lux = (direct * sunlightDeck + diffuse + (through - diffuse) * deep) * cloudDim;
+      lux = Math.max(lux, NIGHT_FLOOR_LUX * deckT);
+    }
     s.illuminance = lux;
     const X = exposureFor(lux, sunEl);
     s.exposure = X;
     u.exposure.value = X;
 
     // The main light: whichever of sun and moon gives more direct light.
-    const moonMain = luminance(moonDirect) > luminance(sunDirect);
     const direct = moonMain ? moonDirect : sunDirect;
     s.lightDirection.copy(moonMain ? s.moonDirection : s.sunDirection);
     u.lightDir.value.copy(s.lightDirection);
@@ -550,12 +687,15 @@ export class Sky {
     // A closed deck takes the sun away below it altogether (the post pass shades only the
     // broken cloud's shadows, and cannot tell direct from diffuse light per pixel).
     const deckClosed = Math.min(Math.max((cover - 0.7) / 0.25, 0), 1);
-    const sunThrough = 1 - deckClosed * deckClosed * (3 - 2 * deckClosed) * below;
+    const sunThrough = (1 - deckClosed * deckClosed * (3 - 2 * deckClosed) * below) * sunlightDeck;
+    s.sunlight = sunThrough;
     this.sun.intensity = lum * X * sunThrough;
-    const lightMu = moonMain ? muMoon : muSun;
 
     // Sky light (diffuse) on a horizontal surface, sky units; bluish by day.
-    const skyE = (skyDiffuseLux(sunEl) * cloudDim + moonLux * 0.1) / SOLAR_ILLUMINANCE_LUX;
+    const skyClear = (skyDiffuseLux(sunEl) * cloudDim + moonLux * 0.1) / SOLAR_ILLUMINANCE_LUX;
+    // Under the deck the sky light is what comes through it, grey.
+    const directTop = luminance(direct) * Math.max(lightMu, 0);
+    const skyE = p ? skyClear + ((directTop + skyClear) * deckT - skyClear) * deep : skyClear;
     const directH = lum * Math.max(lightMu, 0) * sunThrough;
     const tint: Vec3 = sunEl > -4 ? [0.78, 0.9, 1.15] : [0.7, 0.82, 1.2];
     const tl = luminance(tint);
@@ -591,6 +731,115 @@ export class Sky {
     const deck =
       ((luminance(atClouds) * Math.max(lightMu, 0) + skyE) * deckTransmission(cover)) / Math.PI;
     u.deckRadiance.value.set(0.95, 0.97, 1.0).multiplyScalar(deck * X);
+
+    const st = this.state;
+    st.visibility = this.weather.visibility;
+    if (!p) {
+      u.envUpWeight.value = u.envDownWeight.value = 0;
+      return;
+    }
+    // ---- the stratus deck ----
+    const hc = this.altitude;
+    const light = sunIlluminance(p.top / 1000, lightMu, this.mieDensity).map(
+      (v) => v * (moonMain ? moonToa : 1),
+    ) as Vec3;
+    const skyTop = (skyDiffuseLux(sunEl) + moonLux * 0.1) / SOLAR_ILLUMINANCE_LUX;
+    const k = (STRATUS_ALBEDO / Math.PI) * X;
+    const up = Math.max(lightMu, 0);
+    u.stratusSun.value.set(light[0] * k, light[1] * k, light[2] * k);
+    u.stratusSky.value.set(tint[0] / tl, tint[1] / tl, tint[2] / tl).multiplyScalar(skyTop * k);
+    const lightTop = u.stratusLightTop.value
+      .copy(u.stratusSun.value)
+      .multiplyScalar(up)
+      .add(u.stratusSky.value);
+    // Under the deck: what diffuses through it, grey (the droplets scatter every colour
+    // alike), plus the orange glow of the towns below at night.
+    const tau = stratusThickness(p);
+    const eTop = luminance(light) * up + skyTop;
+    const town = (4e-3 / SOLAR_ILLUMINANCE_LUX) * X;
+    const grey = (eTop * diffuseTransmission(tau) * X) / Math.PI;
+    const lightBase = u.stratusLightBase.value.set(
+      0.96 * grey + town,
+      0.98 * grey + 0.72 * town,
+      grey + 0.48 * town,
+    );
+    u.stratusLightMist.value.copy(lightBase).multiplyScalar(0.85);
+    lightTop.addScaledVector(lightBase, 0.15);
+    // Forward scattering lets a little of the beam through a thin deck as a glow.
+    const glow = Math.exp((-0.15 * tau) / Math.max(up, 0.05)) * (0.11 / Math.PI) * X;
+    u.stratusAureole.value.set(light[0] * glow, light[1] * glow, light[2] * glow);
+    // A fog sea also brightens what is above it from below (cumulus bases, the far land).
+    u.groundRadiance.value.copy(lightTop).multiplyScalar(1.3);
+    // The haze the camera sees is in the deck's shade as far as the deck takes the beam.
+    const shade = 1 - sunlightDeck;
+    u.hazeShadow.value += (1 - u.hazeShadow.value) * shade;
+    u.deckRadiance.value.lerp(u.stratusLightMist.value, shade);
+    u.diffuseShare.value += (1 - u.diffuseShare.value) * shade;
+    // In front of the cumulus from below and inside, behind them from above.
+    const front = (u.stratusTopAtCamera.value + 10 - hc) / 20;
+    u.stratusFront.value = Math.min(Math.max(front, 0), 1);
+    const sigma = stratusExtinction(p, hc) + KOSCHMIEDER / Math.max(this.weather.visibility, 1);
+    st.visibility = KOSCHMIEDER / sigma;
+
+    // The environment: the deck's underside above, the inside all around, the bright sea
+    // below; continuous in the height so the light on everything fades through the layer.
+    const smooth = (a: number, b: number, x: number) => {
+      const t = Math.min(Math.max((x - a) / (b - a), 0), 1);
+      return t * t * (3 - 2 * t);
+    };
+    const aboveTop = smooth(p.top - 20, p.top + 30, hc);
+    const aboveBase = smooth(p.base - 30, p.base + 30, hc);
+    const f = Math.min(Math.max((hc - p.base) / (p.top - p.base), 0), 1);
+    const inside = lightBase.clone().lerp(lightTop, f);
+    const ground = lightBase
+      .clone()
+      .multiplyScalar(GROUND_ALBEDO[1] * 1.2)
+      .lerp(lightBase, 0.35);
+    u.envUp.value.copy(lightBase).lerp(inside.clone().lerp(lightTop, 0.5), aboveBase);
+    u.envUpWeight.value = 1 - aboveTop;
+    u.envDown.value
+      .copy(ground)
+      .lerp(inside.clone().lerp(lightBase, 0.5), aboveBase)
+      .lerp(lightTop, aboveTop);
+    u.envDownWeight.value = 1;
+  }
+
+  /** Drops around the camera: how many, how they fall, how fast the camera flies through. */
+  private updatePrecipitation(camera: Camera, dt: number) {
+    const w = this.weather;
+    const s = this.state;
+    s.snow = snowShare(temperatureAt(w.temperature, this.altitude));
+    const node = this.precipitation;
+    if (!node) return;
+    const o = this.u.originOffset.value;
+    const now = new Vector3(camera.position.x + o.x, this.altitude, camera.position.z + o.y);
+    if (Number.isFinite(this.lastPosition.x) && dt > 0) {
+      const v = now.clone().sub(this.lastPosition).divideScalar(dt);
+      // A jump (a new flight, a teleport) is no speed.
+      if (v.length() < 400) this.velocity.lerp(v, Math.min(1, dt * 12));
+    }
+    this.lastPosition.copy(now);
+    // Precipitation falls out of the clouds: none above the deck it comes from.
+    const p = this.profile;
+    const top = p ? p.top : w.cloudCover > 0.05 ? w.cloudTop : Infinity;
+    const out = Math.min(Math.max((this.altitude - (top - 100)) / 150, 0), 1);
+    const amount = Math.min(Math.max(w.precipitation, 0), 1) * (1 - out);
+    node.count = Math.round(node.quality.drops * amount);
+    node.intensity.value = amount;
+    node.snow.value = s.snow;
+    const to = (w.windFromDeg + 180) * DEG;
+    // Wind picks up with height above the ground (roughly, without knowing the ground).
+    const wind = w.windSpeed * (1 + Math.min(Math.max(this.altitude - 500, 0) / 1000, 1.5));
+    const drop = new Vector3(Math.sin(to) * wind, -fallSpeed(s.snow), -Math.cos(to) * wind);
+    const rel = node.relative.value.copy(drop).sub(this.velocity);
+    const ph = node.phase.value.addScaledVector(rel, -dt);
+    const BOX = 36;
+    ph.set(((ph.x % BOX) + BOX) % BOX, ((ph.y % BOX) + BOX) % BOX, ((ph.z % BOX) + BOX) % BOX);
+    // A drop shows about the light around it; flakes reflect it.
+    const L = (s.illuminance / SOLAR_ILLUMINANCE_LUX / Math.PI) * s.exposure;
+    node.light.value.set(L, L, L * 1.02);
+    node.extinction.value = KOSCHMIEDER / Math.max(s.visibility, 1);
+    node.time.value = (node.time.value + dt) % 1000;
   }
 
   /** Marks the tables that no longer match the light or the camera height. */
@@ -607,6 +856,22 @@ export class Sky {
       if (moonVisible) this.dirty.moon = true;
     }
     if (!(Math.abs(this.altitude - r.envAltitude) < 250)) this.dirty.env = true;
+    if (this.profile) {
+      // Through the deck the environment changes within metres: follow it in small steps.
+      const u = this.u;
+      const e = this.renderedEnv;
+      const now = [
+        luminance([u.envUp.value.x, u.envUp.value.y, u.envUp.value.z]),
+        luminance([u.envDown.value.x, u.envDown.value.y, u.envDown.value.z]),
+        u.envUpWeight.value,
+        u.exposure.value,
+      ];
+      const ref = [e.x, e.y, e.z, e.w];
+      const changed = now.some(
+        (v, i) => !(Math.abs(v - ref[i]!) <= 0.03 * Math.max(Math.abs(v), 1e-9)),
+      );
+      if (changed || !(Math.abs(u.envUpWeight.value - e.z) < 0.02)) this.dirty.env = true;
+    }
   }
 
   /** Renders what is dirty; runs once per frame from a node of the dome and the post pass. */
@@ -636,6 +901,13 @@ export class Sky {
       this.envCamera.update(renderer, this.envScene);
       this.environment.pmremVersion++;
       this.rendered.envAltitude = this.altitude;
+      const u = this.u;
+      this.renderedEnv.set(
+        luminance([u.envUp.value.x, u.envUp.value.y, u.envUp.value.z]),
+        luminance([u.envDown.value.x, u.envDown.value.y, u.envDown.value.z]),
+        u.envUpWeight.value,
+        u.exposure.value,
+      );
     }
     d.air = d.sun = d.moon = d.env = false;
   }
@@ -659,7 +931,10 @@ export class Sky {
     // Inside the layer: mostly cloud all around.
     const inside = mix(fromBelow, fromAbove, mu.mul(0.5).add(0.5));
     const insideMix = mix(sky, inside, clamp(cover.mul(1.5), 0, 1));
-    return select(below, withBelow, select(above, withAbove, insideMix));
+    const clouded = select(below, withBelow, select(above, withAbove, insideMix));
+    // The stratus under, around or over the camera (weights 0 without one).
+    const withUp = mix(clouded, u.envUp, u.envUpWeight.mul(upper));
+    return mix(withUp, u.envDown, u.envDownWeight.mul(upper.oneMinus()));
   }
 
   private loadNoise() {
