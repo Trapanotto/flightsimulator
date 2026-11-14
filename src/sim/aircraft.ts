@@ -1,15 +1,22 @@
 import { C172 } from './c172';
 import { FlightModel } from './flightModel';
+import type { AvionicsUnit } from './avionicsTypes';
 import type { AircraftId, AircraftInfo, ControlInput, SimAircraft } from './types';
 
 /** Every flyable type, for menus. */
 export const AIRCRAFT: AircraftInfo[] = [C172.info];
 
-/** A new aircraft of the type, to be placed with reset(). */
-export function createAircraft(id: AircraftId): SimAircraft {
+/**
+ * A new aircraft of the type, to be placed with reset(). `avionics` is the unit its radios,
+ * navigation and autopilot run in; without one the avionics stay dark.
+ */
+export function createAircraft(
+  id: AircraftId,
+  options: { avionics?: AvionicsUnit } = {},
+): SimAircraft {
   switch (id) {
     case 'c172':
-      return new FlightModel(C172);
+      return new FlightModel(C172, options.avionics);
   }
   throw new Error(`createAircraft('${String(id)}'): unknown type`);
 }

@@ -5,6 +5,7 @@
  */
 import type { AirfoilData } from './airfoil';
 import type { PistonEngineData, PropellerData } from './engine';
+import type { SystemsData } from './systems/data';
 import type { AircraftInfo, Vec3 } from './types';
 
 /** A group of strips that shares one induced angle (one wing half, a tailplane, the fin). */
@@ -159,4 +160,6 @@ export interface AircraftDefinition {
   ultimateLoad: { positive: number; negative: number };
   /** Airspeed calibration: KCAS to KIAS rows for each flap detent (index of flapDetents). */
   airspeedCalibration: (readonly (readonly [number, number])[])[];
+  /** Electrical, fuel, engine-management, vacuum and icing figures. */
+  systems: SystemsData;
 }
