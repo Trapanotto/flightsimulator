@@ -96,6 +96,14 @@ export class PilotInput {
   }
 
   /**
+   * Takes over the throttle and flap lever as they stand in `controls`: something else moved
+   * them (a click in the cockpit), and the keys continue from there.
+   */
+  adopt(controls: ControlInput) {
+    this.reset(controls.throttle[0] ?? 0, controls.flaps, this.gearDown);
+  }
+
+  /**
    * Advances the control positions by `dt` seconds and writes them to `out`.
    * `down(code)` tells whether a key is held.
    */

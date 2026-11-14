@@ -13,16 +13,29 @@ import { SHOWCASE_SPEED, Showcase } from './Showcase';
 import { headingAt } from './showcasePath';
 import { pass } from 'three/tsl';
 import { type AircraftVisual, createReferenceMarker, loadAircraftVisual } from '@aircraft';
-import { AircraftSound, AudioEngine } from '@audio';
+import {
+  AircraftSound,
+  AudioEngine,
+  CockpitSound,
+  NavAudio,
+  RadioSquelch,
+  RadioVoice,
+  browserSpeech,
+} from '@audio';
 import {
   AIRPORTS,
   LocalFrame,
+  bearingDeg,
   ecefToGeodetic,
   ellipsoidToSeaLevel,
   findAirport,
+  findRunwayEnd,
   geodeticToEcef,
   geoidUndulation,
+  ilsFor,
+  offsetPoint,
   runwayStart,
+  thresholdOf,
   seaLevelToEllipsoid,
 } from '@geo';
 import {
@@ -42,6 +55,7 @@ import { CameraRig } from './camera';
 import { PROFILES, detectDevice } from './device';
 import { WorldEnvironment } from './environment';
 import { Flight } from './Flight';
+import { FlightDeck } from './flightDeck';
 import { fetchLiveWeather } from './liveWeather';
 import { type InputEvents, KEYS, Keyboard, PilotInput, keyAuthorityAt, readGamepad } from './input';
 import { dateAtSwissHour } from './time';
@@ -96,6 +110,8 @@ interface Pending {
   altitude?: number;
   /** Rough height of the ground there above the ellipsoid, until the terrain knows better. */
   guess: number;
+  /** Flap lever at the start, 0..1 (up if not given). */
+  flaps?: number;
   start: Omit<InitialCondition, 'position'>;
   since: number;
 }
@@ -335,17 +351,45 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   let weatherRequest: AbortController | undefined;
   /** The wind as the things on the ground show it (windsocks). */
   const worldWind = { fromDeg: 250, speed: 0 };
+  let currentWeather: Weather = WEATHER_PRESETS.fair;
   const applyWeather = (weather: Weather) => {
     worldWind.fromDeg = weather.windFromDeg;
     worldWind.speed = weather.windSpeed;
     sky.setWeather(weather);
     game.weather.value = weather;
+    currentWeather = weather;
     env.air_ = {
       windFromDeg: weather.windFromDeg,
       windSpeed: weather.windSpeed,
       isaDeviation: weather.temperature - 15,
       wetness: weather.precipitation,
+      cloudCover: weather.cloudCover,
+      cloudBase: weather.cloudBase,
+      cloudTop: weather.cloudTop,
+      stratus: weather.stratus,
+      precipitation: weather.precipitation,
+      temperature: weather.temperature,
+      sunElevationDeg: sky.state.sunElevation,
+      sunAzimuthDeg: sky.state.sunAzimuth,
     };
+  };
+
+  /** The radio, checklists and switches of the flight in progress. */
+  let deck: FlightDeck | undefined;
+  const openDeck = () => {
+    deck?.dispose();
+    deck = undefined;
+    if (flight && plan)
+      deck = new FlightDeck(flight.aircraft, plan, currentWeather, {
+        cockpit: cockpitSound,
+        radio,
+      });
+  };
+  /** Operates a cockpit control; the keys' throttle and flap lever follow. */
+  const setControl = (id: string, value: number, held = false) => {
+    if (!deck || !flight) return;
+    deck.setControl(id, value, held);
+    if (id === 'throttle' || id === 'flaps') input.adopt(flight.aircraft.controls);
   };
 
   /**
@@ -361,6 +405,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     // Back to the menu: the loading screen covers the change of place.
     if (!p) game.screen.value = 'loading';
     plan = p;
+    deck?.dispose();
+    deck = undefined;
     // Screenshot tests must not change with the calendar.
     season = shot ? 'summer' : !p?.season || p.season === 'now' ? seasonOf(new Date()) : p.season;
     const icao = p?.airport ?? (p?.start.kind === 'runway' ? p.start.airport : undefined);
@@ -389,8 +435,30 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
         start: { headingDeg: s.headingDeg, speed: 100 * KT, onGround: false },
         since,
       };
+    } else if (p.start.kind === 'approach' && findRunwayEnd(airport, p.start.runway)) {
+      // On final: on the extended centre line, on the glide path of the runway's ILS (or a
+      // 3 degree one), a little above approach speed with the first stage of flaps.
+      const s = p.start;
+      const { end, opposite } = findRunwayEnd(airport, s.runway)!;
+      const threshold = thresholdOf(end, opposite);
+      const course = bearingDeg(end, opposite);
+      const metres = s.distanceNm * 1852;
+      const at = offsetPoint(threshold, course + 180, metres);
+      const angle = ilsFor(airport.icao, s.runway)?.glideSlope?.angleDeg ?? 3;
+      const height =
+        (end.elevation ?? airport.elevation) + 15 + metres * Math.tan((angle * Math.PI) / 180);
+      pending = {
+        plan: p,
+        lon: at.lon,
+        lat: at.lat,
+        altitude: seaLevelToEllipsoid(at.lon, at.lat, height),
+        guess: 0,
+        start: { headingDeg: course, speed: 80 * KT, onGround: false },
+        flaps: 1 / 3,
+        since,
+      };
     } else {
-      const ident = p.start.kind === 'runway' ? p.start.runway : HOME.runway;
+      const ident = p.start.runway;
       const at =
         runwayStart(airport, ident) ?? runwayStart(airport, airport.runways[0]!.ends[0].ident)!;
       pending = {
@@ -398,7 +466,12 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
         lon: at.lon,
         lat: at.lat,
         guess: seaLevelToEllipsoid(at.lon, at.lat, airport.elevation),
-        start: { headingDeg: at.headingDeg, speed: 0, onGround: true, enginesRunning: true },
+        start: {
+          headingDeg: at.headingDeg,
+          speed: 0,
+          onGround: true,
+          enginesRunning: !p.coldStart,
+        },
         since,
       };
     }
@@ -473,8 +546,10 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       return;
     }
     const position = geodeticToEcef(p.lon, p.lat, p.altitude ?? ground, { x: 0, y: 0, z: 0 });
-    aircraft.controls.flaps = 0;
+    // The reset trims the aircraft for the flaps as they are set here.
+    aircraft.controls.flaps = p.flaps ?? 0;
     flight = new Flight(aircraft, env, { ...p.start, position });
+    openDeck();
     // The reset trims the aircraft: take the throttle it chose.
     input.reset(aircraft.controls.throttle[0] ?? 0, aircraft.controls.flaps, true);
     assist.reset();
@@ -519,7 +594,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       if (!flight) return;
       flight.restart();
       flight.paused = false;
-      input.reset(flight.aircraft.controls.throttle[0] ?? 0, 0, true);
+      openDeck();
+      input.reset(flight.aircraft.controls.throttle[0] ?? 0, flight.aircraft.controls.flaps, true);
       assist.reset();
       env.heightOffset = 0;
       game.screen.value = 'flight';
@@ -529,6 +605,10 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       prepare(null);
     },
     toggleView,
+    setControl: (id, value) => setControl(id, value),
+    atcReply: (id) => deck?.reply(id),
+    openChecklist: (id) => deck?.openChecklist(id),
+    checkItem: () => deck?.checkItem(),
   });
   keyboard.onPress = (code) => {
     const is = (keys: readonly string[]) => keys.includes(code);
@@ -570,7 +650,21 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   // Browsers start audio only after a gesture.
   const audio = new AudioEngine();
   const sound = new AircraftSound(audio);
-  const unlock = () => void audio.resume().then(() => sound.start());
+  const cockpitSound = new CockpitSound(audio);
+  const navAudio = new NavAudio(audio);
+  const squelch = new RadioSquelch(audio);
+  const radio = new RadioVoice(browserSpeech(), squelch);
+  audio.onVolumeChange((volume, muted) => radio.setVolume(volume, muted));
+  const unlock = () => {
+    // Speech must be woken inside the gesture itself (iOS), not after the context resumed.
+    radio.unlock();
+    void audio.resume().then(() => {
+      sound.start();
+      cockpitSound.start();
+      navAudio.start();
+      squelch.start();
+    });
+  };
   window.addEventListener('pointerdown', unlock, { once: true });
   window.addEventListener('keydown', unlock, { once: true });
 
@@ -611,6 +705,9 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
 
   // ---- loop ----
   const noTouch = { pitch: null, roll: null, yaw: null, throttle: null, brake: false };
+  const deckPosition = { lon: 0, lat: 0, msl: 0 };
+  /** The control the 3D cockpit marks (the open checklist's next item). */
+  let highlighted: string | null = null;
   const geo = { lon: 0, lat: 0, h: 0 };
   let last = performance.now();
   let fpsFrames = 0;
@@ -676,9 +773,13 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
         // the aircraft moving. Take the step out before the wheels feel it and let it fade.
         ecefToGeodetic(aircraft.state.position, geo);
         const under = world.ground(geo.lon, geo.lat);
+        env.time = aircraft.telemetry.time;
         env.heightOffset *= Math.exp(-stepDt / 0.8);
         if (under) {
-          if (under.zoom !== groundZoom) env.heightOffset += groundHeight - under.height;
+          if (under.zoom !== groundZoom) {
+            env.heightOffset += groundHeight - under.height;
+            env.terrainChanged();
+          }
           groundZoom = under.zoom;
           groundHeight = under.height;
         }
@@ -706,8 +807,17 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
           flight.place(visual.object, frame, alpha);
         }
       }
+      if (deck && flying) {
+        ecefToGeodetic(aircraft.state.position, geo);
+        deckPosition.lon = geo.lon;
+        deckPosition.lat = geo.lat;
+        deckPosition.msl = ellipsoidToSeaLevel(geo.lon, geo.lat, geo.h);
+        deck.update(dt, deckPosition);
+        const mark = deck.highlighted;
+        if (mark !== highlighted) visual.highlightControl((highlighted = mark));
+      }
       visual.setExposure(sky.state.exposure);
-      visual.update(dt, aircraft.telemetry, aircraft.controls);
+      visual.update(dt, aircraft.telemetry, aircraft.controls, tour ? undefined : aircraft.cockpit);
       if (!tour)
         rig.update(dt, camera, visual.object, visual.view, flying && !aircraft.telemetry.onGround);
       // The picture dips to black around the menu's camera cuts.
@@ -755,11 +865,31 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
 
     audio.setVolume(settings.volume.value);
     audio.setMuted(settings.muted.value);
-    sound.update(
-      plan && flight ? flight.aircraft.telemetry : undefined,
-      game.view.value === 'cockpit',
-      game.screen.value === 'flight',
-    );
+    {
+      const flown = plan && flight ? flight.aircraft : undefined;
+      const inside = game.view.value === 'cockpit';
+      const active = game.screen.value === 'flight';
+      const c = flown?.controls;
+      sound.update(
+        flown?.telemetry,
+        inside,
+        active,
+        flown && c
+          ? {
+              starter: c.starter?.[0] || flown.cockpit.get('magnetos') === 4,
+              surface: env.ground(flown.state.position)?.surface,
+              brake: Math.max(c.brakeLeft, c.brakeRight),
+            }
+          : undefined,
+      );
+      cockpitSound.update(flown?.telemetry, {
+        inside,
+        active: active && !!flown,
+        precipitation: currentWeather.precipitation,
+        cockpit: flown?.cockpit,
+      });
+      navAudio.update(flown?.telemetry.avionics, { markers: true, active: active && !!flown });
+    }
 
     appTime += dt;
     world.setConditions({
