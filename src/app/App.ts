@@ -48,7 +48,7 @@ import {
 } from '@sim';
 import { Sky, WEATHER_PRESETS, type Weather } from '@sky';
 import { SNOW_LINE, nightFactor, seasonOf } from './season';
-import { type FlightPlan, game, mountUi, settings, status, touchInput } from '@ui';
+import { type FlightPlan, type UiActions, game, mountUi, settings, status, touchInput } from '@ui';
 import { type Season, World } from '@world';
 import { RudderAssist } from './assist';
 import { CameraRig } from './camera';
@@ -89,6 +89,11 @@ export interface AppDebug {
   assist: RudderAssist;
   /** Loudness of the sound output right now (RMS). */
   audioLevel: () => number;
+  /** For tests: starts a flight as the menu would, and operates a cockpit control. */
+  startFlight: (plan: FlightPlan) => void;
+  setControl: (id: string, value: number) => void;
+  /** The interface's state (radio, checklist, cockpit values). */
+  game: typeof game;
   /** What the loading screen is waiting for. */
   loading: () => { compiling: number; calm: number; modelReady: boolean };
   /** Test switch: a fixed reach of the shadow map in metres instead of the adaptive one. */
@@ -445,8 +450,10 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       const metres = s.distanceNm * 1852;
       const at = offsetPoint(threshold, course + 180, metres);
       const angle = ilsFor(airport.icao, s.runway)?.glideSlope?.angleDeg ?? 3;
+      // Level a little below the glide path, as an approach is flown: the path comes down
+      // to the aircraft (an autopilot only captures it from below).
       const height =
-        (end.elevation ?? airport.elevation) + 15 + metres * Math.tan((angle * Math.PI) / 180);
+        (end.elevation ?? airport.elevation) + 15 + metres * Math.tan((angle * Math.PI) / 180) - 60;
       pending = {
         plan: p,
         lon: at.lon,
@@ -582,7 +589,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     setView(game.view.value === 'outside' ? 'cockpit' : 'outside');
     say(game.view.value === 'cockpit' ? 'msg.viewCockpit' : 'msg.viewOutside');
   };
-  mountUi(uiRoot, {
+  const actions: UiActions = {
     startFlight(p) {
       game.plan.value = p;
       prepare(p);
@@ -609,7 +616,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     atcReply: (id) => deck?.reply(id),
     openChecklist: (id) => deck?.openChecklist(id),
     checkItem: () => deck?.checkItem(),
-  });
+  };
+  mountUi(uiRoot, actions);
   keyboard.onPress = (code) => {
     const is = (keys: readonly string[]) => keys.includes(code);
     if (is(KEYS.pause)) togglePause();
@@ -698,6 +706,9 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     assist,
     audioLevel: () => audio.level(),
     loading: () => ({ compiling, calm, modelReady }),
+    startFlight: (p) => actions.startFlight(p),
+    setControl: (id, value) => setControl(id, value),
+    game,
   };
   window.__app = debug;
 
