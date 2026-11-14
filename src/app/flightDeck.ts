@@ -92,6 +92,8 @@ export class FlightDeck {
         ? undefined
         : atcConfigFromPlan(plan, atcWeatherFromSky(weather, QNH), ATC_WORLD);
     if (config) {
+      // Arriving, the airport is departure and destination at once: the runway holds for both.
+      if (plan.start.kind === 'approach') config.departure.runway = plan.start.runway;
       const at = this.homeOf(plan);
       config.declinationDeg = at ? magneticDeclination(at.lon, at.lat) : 3;
       this.atc = new AtcController(config);

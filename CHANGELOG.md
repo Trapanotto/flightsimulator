@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.0.0-alpha.6 – Phase 3: Tiefe (2026-11-15)
+
+- **Bedienbares Cockpit:** Jeder Schalter, Knopf und Hebel der Cessna 172 lässt sich im
+  3D-Cockpit anklicken, mit dem Mausrad drehen oder ziehen. Mausrad neben den Instrumenten
+  zoomt auf das Brett. Für Handys und wer es lieber so mag: Bedienfelder für Funkgeräte,
+  Autopilot und Schalter.
+- **Systeme:** Elektrik mit Batterie und Generator, zwei Treibstofftanks mit Wahlschalter,
+  Zündmagnete, Anlasser und Kaltstart nach Handbuch, Gemisch, Vakuumkreisel, Vereisung.
+  Sieben Ausfälle, geplant in der Flugplanung oder ausgelöst im Pausenmenü.
+- **Avionik:** zwei Funk- und Navigationsgeräte, VOR, ILS mit Gleitpfad, DME, ADF,
+  Transponder, GPS-Flugplan und ein Autopilot mit Kurs-, Höhen- und Anflugmodus.
+- **Navigation:** 73 Funkfeuer, 16 ILS, Flugplatzfrequenzen und Lufträume der Schweiz mit
+  den echten Frequenzen und Kennungen.
+- **Funk:** simulierte Flugverkehrsleitung vom Anlassen bis zur Landung, auch mit
+  Radarführung auf das ILS; als Text und, wo der Browser eine englische Stimme hat, gesprochen.
+- **Checklisten** der Cessna 172S; erledigte Punkte haken sich selbst ab, der nächste Schalter
+  leuchtet im Cockpit.
+- **Hochnebel:** geschlossene Nebeldecke über dem Mittelland, Sonne und Alpen darüber, Dunst
+  darunter. Dazu Regen und Schnee.
+- **Alpenwind:** Hangaufwind, Lee-Abwind, Thermik, Talwind und Turbulenz aus Gelände und Wetter.
+- **Flugplanung:** Start im Endanflug, Zielflugplatz, Kaltstart, Szenarien mit einem Klick
+  (ILS-Anflug Zürich 14 in Hochnebel, Platzrunde Bern, Alpenflug nach Samedan, Nachtanflug Genf).
+- **Ton:** Anlasser und anspringender Motor, Schalterklicks, Klappenmotor, Morsekennung,
+  Einflugzeichen, Reifenquietschen.
+
+Navigationsdaten: OurAirports, © OpenStreetMap contributors, © BAZL/FOCA.
+
 ## 1.0.0-alpha.5 – Qualitätsrunde (2026-11-14)
 
 - **Laubbäume aus der Nähe:** Kronen aus einzelnen Laubbüscheln mit sichtbaren Ästen und
