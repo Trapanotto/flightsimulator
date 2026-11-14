@@ -53,18 +53,27 @@ import {
 import { SOLAR_ILLUMINANCE_LUX } from './constants';
 import { LightKind } from './layout';
 import type { LightBuffers } from './lights';
-import { pullFor, pulledView } from './pull';
-
+import { LIGHT_TOLERANCE, pullFor, pulledView } from './pull';
 
 /**
  * cond ? a : b, with both sides evaluated up front. TSL's select() builds an if/else, and a node
  * first built inside one branch is declared there: used again elsewhere it reads as garbage.
  */
 function pick(cond: Node<'bool'>, a: Node<'vec3'>, b: Node<'vec3'> | number): Node<'vec3'>;
-function pick(cond: Node<'bool'>, a: Node<'float'> | number, b: Node<'float'> | number): Node<'float'>;
-function pick(cond: Node<'bool'>, a: Node<'float'> | Node<'vec3'> | number, b: Node<'float'> | Node<'vec3'> | number) {
+function pick(
+  cond: Node<'bool'>,
+  a: Node<'float'> | number,
+  b: Node<'float'> | number,
+): Node<'float'>;
+function pick(
+  cond: Node<'bool'>,
+  a: Node<'float'> | Node<'vec3'> | number,
+  b: Node<'float'> | Node<'vec3'> | number,
+) {
   const w = select(cond, 1, 0);
-  return typeof a === 'number' && typeof b === 'number' ? mix(float(b), float(a), w) : mix(b as Node<'vec3'>, a as Node<'vec3'>, w);
+  return typeof a === 'number' && typeof b === 'number'
+    ? mix(float(b), float(a), w)
+    : mix(b as Node<'vec3'>, a as Node<'vec3'>, w);
 }
 
 type V3 = Node<'vec3'>;
@@ -140,7 +149,10 @@ export function createLightMaterial(cameraLocal: Node<'vec3'>): MeshBasicNodeMat
   const view = vec4(centre.xy.add(corner.mul(radius)).add(lift), centre.z, 1);
   // The camera's height above the light decides the pull (see pull.ts).
   const toCamLocal = cameraLocal.sub(iPos.xyz);
-  m.vertexNode = pulledView(view, pullFor(toCamLocal.y));
+  m.vertexNode = pulledView(
+    view,
+    pullFor(toCamLocal.y, LIGHT_TOLERANCE.base, LIGHT_TOLERANCE.slope, LIGHT_TOLERANCE.most),
+  );
 
   // ---- seen from where (in the airport frame: y up) ----
   const toCam = normalize(toCamLocal);

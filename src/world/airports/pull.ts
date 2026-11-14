@@ -56,10 +56,23 @@ export function pullNode(view: Node<'vec3'>): Node<'float'> {
 }
 
 /** The pull k for a camera `height` metres above the point. */
-export function pullFor(height: Node<'float'>): Node<'float'> {
+export function pullFor(
+  height: Node<'float'>,
+  base = TOLERANCE_BASE,
+  slope = TOLERANCE_SLOPE,
+  most = MAX_PULL,
+): Node<'float'> {
   const h = max(height, MIN_HEIGHT);
-  return min(h.mul(TOLERANCE_SLOPE).add(TOLERANCE_BASE).div(h), MAX_PULL);
+  return min(h.mul(slope).add(base).div(h), most);
 }
+
+/**
+ * Lights are points: drawing one over a bump of the ground just in front of it hides nothing
+ * worth seeing, while losing it behind a 10 cm swell of the coarse terrain loses a whole row of
+ * edge lights at grazing angles. They get a larger tolerance (25 cm, 1 % of the height) and may
+ * come up to 30 % of the way towards the camera.
+ */
+export const LIGHT_TOLERANCE = { base: 0.25, slope: 0.01, most: 0.3 };
 
 /** Clip position of a local position, pulled towards the camera (a material's vertexNode). */
 export function pulledVertex(position: Vec3Node) {

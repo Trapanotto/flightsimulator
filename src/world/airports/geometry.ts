@@ -152,6 +152,28 @@ export function packRunway(m: RunwayMarkings): Float32Array {
  * runways cross, the one drawn last (the longest) keeps its markings, as on the real thing.
  */
 export function buildRunways(frame: LocalFrame, airport: AirportInfo, opt: SurfaceOptions): Draped {
+  return runToEnd(runwaySteps(frame, airport, opt));
+}
+
+/**
+ * A build that yields between pieces (a runway, a taxiway, an apron), so that the layer can
+ * spread a big airport over several frames instead of stalling one.
+ */
+export type Steps<T> = Generator<void, T, void>;
+
+/** Runs a stepped build to its end at once (tests, small airports). */
+export function runToEnd<T>(steps: Steps<T>): T {
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+  }
+}
+
+export function* runwaySteps(
+  frame: LocalFrame,
+  airport: AirportInfo,
+  opt: SurfaceOptions,
+): Steps<Draped> {
   const sizes: Record<string, number> = { st: 2 };
   for (let i = 0; i < 7; i++) sizes[`rw${i}`] = 4;
   const b = new Builder(frame, sizes);
@@ -177,7 +199,9 @@ export function buildRunways(frame: LocalFrame, airport: AirportInfo, opt: Surfa
       const [x, z] = runwayPoint(axes, s, t);
       return b.vertex(x, z, values);
     });
+    yield;
   }
+  yield;
   return b.finish();
 }
 
@@ -198,6 +222,15 @@ export function buildGround(
   detail: AirportDetail | undefined,
   opt: SurfaceOptions,
 ): Draped {
+  return runToEnd(groundSteps(frame, airport, detail, opt));
+}
+
+export function* groundSteps(
+  frame: LocalFrame,
+  airport: AirportInfo,
+  detail: AirportDetail | undefined,
+  opt: SurfaceOptions,
+): Steps<Draped> {
   const b = new Builder(frame, { st: 2, ground: 3 });
   const p = { x: 0, y: 0, z: 0 };
   const local = (lon: number, lat: number): [number, number] => {
@@ -220,9 +253,11 @@ export function buildGround(
       const C = contour[tri[2]!]!;
       subdivideTriangle(b, A, B, C, opt.step * 1.5, values);
     }
+    yield;
   }
 
   const lines: Array<{ pts: Array<[number, number]>; half: number }> = [];
+  let lastYield = 0;
   for (const tw of detail?.taxiways ?? []) {
     const pts: Array<[number, number]> = [];
     for (let i = 0; i < tw.line.length; i += 2) {
@@ -232,6 +267,10 @@ export function buildGround(
     }
     if (pts.length < 2) continue;
     ribbon(b, pts, tw.width / 2, opt.step);
+    if (b.count - lastYield > 3000) {
+      lastYield = b.count;
+      yield;
+    }
     lines.push({ pts, half: tw.width / 2 });
   }
 
@@ -259,6 +298,8 @@ export function buildGround(
       return b.vertex(x, z, values);
     });
   }
+  // The arrays are built in a frame of their own.
+  yield;
   return b.finish();
 }
 

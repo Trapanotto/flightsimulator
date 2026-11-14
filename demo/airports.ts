@@ -187,11 +187,7 @@ const view = (VIEWS[viewName] ?? VIEWS.eye!)();
 
 // ---- world and sky, like the app ----
 const date = new Date(Date.UTC(2026, 5, 21, 0, 0, 0) + (hour - 2) * 3600_000);
-const frame = new LocalFrame(
-  view.lon,
-  view.lat,
-  seaLevelToEllipsoid(view.lon, view.lat, elevation),
-);
+let frame = new LocalFrame(view.lon, view.lat, seaLevelToEllipsoid(view.lon, view.lat, elevation));
 const sky = new Sky(date, view.lon, view.lat, SKY_QUALITY[mobile ? 'mobile' : 'desktop']);
 sky.setWeather(WEATHER_PRESETS.clear);
 const world = new World(frame, quality);
@@ -266,6 +262,11 @@ const stats = {
   triangles: 0,
   frameMs: 0,
   cpuMs: 0,
+  /** Worst CPU time of one frame (update + render submission) after the first 30, ms. */
+  cpuMaxMs: 0,
+  /** Worst time of the airport layer alone in one frame, ms (measured around world.update with
+   * and without it is not possible from outside; this is world.update as a whole). */
+  updateMaxMs: 0,
   layer: layer.stats(),
   camera: { lon: 0, lat: 0, hAsl: 0 },
   sun: 0,
@@ -297,6 +298,12 @@ const stats = {
       });
     }
     return out;
+  },
+  /** Moves the render origin by (east, north) metres; the picture must not change. */
+  rebase: (east: number, north: number) => {
+    const o = frame.toGeodetic({ x: east, y: 0, z: -north });
+    frame = new LocalFrame(o.lon, o.lat, o.h);
+    world.setFrame(frame);
   },
   /** Renders n frames back to back and waits for the GPU: ms per frame. */
   bench: async (n: number, withAirports = true) => {
@@ -339,7 +346,9 @@ renderer.setAnimationLoop((now: number) => {
     lightDirection: sky.state.lightDirection,
     time: appTime,
   });
+  const tu = performance.now();
   world.update(camera);
+  const updateMs = performance.now() - tu;
   const g = frame.toGeodetic(camera.position);
   sky.update(camera, {
     dt,
@@ -352,6 +361,10 @@ renderer.setAnimationLoop((now: number) => {
   const cpu = performance.now() - t0;
 
   stats.frames++;
+  if (stats.frames > 30) {
+    stats.cpuMaxMs = Math.max(stats.cpuMaxMs, cpu);
+    stats.updateMaxMs = Math.max(stats.updateMaxMs, updateMs);
+  }
   if (stats.frames > 5) stats.ready = true;
   stats.worldLoading = world.loading;
   stats.airportsLoading = layer.loading;

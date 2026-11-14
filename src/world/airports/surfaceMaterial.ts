@@ -76,16 +76,25 @@ import {
 import { GROUND_APRON, GROUND_GRASS, GROUND_HOLD, GROUND_TAXIWAY } from './geometry';
 import { pulledVertex } from './pull';
 
-
 /**
  * cond ? a : b, with both sides evaluated up front. TSL's select() builds an if/else, and a node
  * first built inside one branch is declared there: used again elsewhere it reads as garbage.
  */
 function pick(cond: Node<'bool'>, a: Node<'vec3'>, b: Node<'vec3'> | number): Node<'vec3'>;
-function pick(cond: Node<'bool'>, a: Node<'float'> | number, b: Node<'float'> | number): Node<'float'>;
-function pick(cond: Node<'bool'>, a: Node<'float'> | Node<'vec3'> | number, b: Node<'float'> | Node<'vec3'> | number) {
+function pick(
+  cond: Node<'bool'>,
+  a: Node<'float'> | number,
+  b: Node<'float'> | number,
+): Node<'float'>;
+function pick(
+  cond: Node<'bool'>,
+  a: Node<'float'> | Node<'vec3'> | number,
+  b: Node<'float'> | Node<'vec3'> | number,
+) {
   const w = select(cond, 1, 0);
-  return typeof a === 'number' && typeof b === 'number' ? mix(float(b), float(a), w) : mix(b as Node<'vec3'>, a as Node<'vec3'>, w);
+  return typeof a === 'number' && typeof b === 'number'
+    ? mix(float(b), float(a), w)
+    : mix(b as Node<'vec3'>, a as Node<'vec3'>, w);
 }
 
 type F = Node<'float'>;
@@ -243,11 +252,7 @@ export function createRunwayMaterial(t: SurfaceTextures): MeshStandardNodeMateri
     paint = max(paint, arrows);
     // Aiming point.
     const aimOn = smoothstep(0.5, 1, p2.y);
-    const inner = pick(
-      aimOn.greaterThan(0.5),
-      p2.w.mul(0.5),
-      pick(W.greaterThanEqual(30), 9, 4.5),
-    );
+    const inner = pick(aimOn.greaterThan(0.5), p2.w.mul(0.5), pick(W.greaterThanEqual(30), 9, 4.5));
     paint = max(
       paint,
       box(a, p2.x, p2.x.add(p2.y), fs)
@@ -289,11 +294,7 @@ export function createRunwayMaterial(t: SurfaceTextures): MeshStandardNodeMateri
     );
     const halfNumber = GLYPH_WIDTH + GLYPH_GAP / 2;
     const glyph = floor(pick(letterRow, p3.z, pick(x.lessThan(0), p3.x, p3.y)).add(0.5));
-    const x0 = pick(
-      letterRow,
-      -GLYPH_WIDTH / 2,
-      pick(x.lessThan(0), -halfNumber, GLYPH_GAP / 2),
-    );
+    const x0 = pick(letterRow, -GLYPH_WIDTH / 2, pick(x.lessThan(0), -halfNumber, GLYPH_GAP / 2));
     const a0 = pick(letterRow, float(DESIGNATOR_START), numberStart);
     const gx = clamp(x.sub(x0), -ATLAS_PAD, GLYPH_WIDTH + ATLAS_PAD);
     const gy = clamp(a.sub(a0), -ATLAS_PAD, GLYPH_HEIGHT + ATLAS_PAD);
@@ -417,11 +418,7 @@ export function createGroundMaterial(t: SurfaceTextures): MeshStandardNodeMateri
     0,
     1,
   );
-  const alpha = pick(
-    isHold,
-    0,
-    pick(isApron, 1, pick(isTaxi, edgeTaxi, edgeGrass.mul(0.22))),
-  );
+  const alpha = pick(isHold, 0, pick(isApron, 1, pick(isTaxi, edgeTaxi, edgeGrass.mul(0.22))));
   m.colorNode = vec4(albedo, alpha);
   m.roughnessNode = pick(isGrass, 0.95, 0.9);
   return m;

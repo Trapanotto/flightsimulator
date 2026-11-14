@@ -119,11 +119,18 @@ try {
     await page.waitForTimeout(1200);
     const file = path.join(outDir, `${scene.name}.png`);
     await page.screenshot({ path: file });
+    if (scene.query.includes('rebase=1')) {
+      // 4 km east and 3 km north: the picture must not change.
+      await page.evaluate(() => window.__demo.rebase(4000, 3000));
+      await page.waitForTimeout(800);
+      await page.screenshot({ path: path.join(outDir, `${scene.name}-after.png`) });
+    }
     const stats = await page.evaluate(() => ({
       ...window.__demo,
       papi: window.__demo.papi().filter((p) => p.distance < 8000),
       bench: undefined,
       site: undefined,
+      rebase: undefined,
     }));
     let benchMs;
     if (bench)

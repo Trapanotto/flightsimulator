@@ -1612,7 +1612,7 @@ export const AIRPORT_DATA: AirportInfo[] = [
     lon: 8.7575,
     lat: 47.3764,
     elevation: 532.8,
-    detail: true,
+    detail: false,
     runways: [
       {
         width: 20,
@@ -1896,7 +1896,7 @@ export const AIRPORT_DATA: AirportInfo[] = [
     lon: 9.00306,
     lat: 47.524399,
     elevation: 469.1,
-    detail: true,
+    detail: false,
     runways: [
       {
         width: 29.3,
@@ -1919,7 +1919,7 @@ export const AIRPORT_DATA: AirportInfo[] = [
     lon: 8.3025,
     lat: 47.264702,
     elevation: 723,
-    detail: true,
+    detail: false,
     runways: [
       {
         width: 80,

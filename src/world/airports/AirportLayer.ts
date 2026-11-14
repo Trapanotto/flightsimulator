@@ -31,9 +31,9 @@ import {
 } from '@geo';
 import type { DeviceClass, LayerContext, WorldConditions, WorldLayer } from '../layers';
 import { type AirportDetail, decodeDetail, detailUrl } from './detail';
-import { type Draped, buildGround, buildRunways } from './geometry';
+import { type Draped, type Steps, groundSteps, runwaySteps } from './geometry';
 import { createLightGeometry, createLightMaterial, lightUniforms } from './lightMaterial';
-import { buildLights } from './lights';
+import { lightSteps } from './lights';
 import { AIRPORT_PRESETS, type AirportPreset } from './presets';
 import { type PropPlace, PropKit, placeProp, propPlaces } from './props';
 import {
@@ -53,6 +53,10 @@ export function lightsOnFor(c: WorldConditions): number {
 
 /** Seconds an airport may keep the loading screen up before it is shown as it is. */
 const LOADING_TIMEOUT = 12;
+/** Milliseconds per frame for building geometry (a big airport takes a few dozen frames). */
+const BUILD_MS = 4;
+/** Milliseconds per frame for seating on the terrain. */
+const SEAT_MS = 3;
 /** A probe whose ground moved more than this triggers a new seating pass. */
 const PROBE_TOLERANCE = 0.01;
 
@@ -189,28 +193,56 @@ class Site {
   }
 
   /** One build step; false if waiting (for the detail file). */
-  step(): boolean {
+  /** The build in progress and when this frame's share of time is up. */
+  private steps?: Steps<unknown>;
+
+  /** Advances the stage's build until `deadline`; its result once it has finished. */
+  private advance<T>(make: () => Steps<T>, deadline: number): T | undefined {
+    const steps = (this.steps ??= make()) as Steps<T>;
+    for (;;) {
+      const r = steps.next();
+      if (r.done) {
+        this.steps = undefined;
+        return r.value;
+      }
+      if (performance.now() >= deadline) return undefined;
+    }
+  }
+
+  /** Builds for at most `budgetMs`; false if waiting (for the detail file). */
+  step(budgetMs: number): boolean {
+    const deadline = performance.now() + budgetMs;
     const opt = { step: this.preset.step, across: this.preset.across };
     switch (this.stage) {
       case 'runways': {
-        const d = buildRunways(this.frame, this.airport, opt);
+        const d = this.advance(() => runwaySteps(this.frame, this.airport, opt), deadline);
+        if (!d) return true;
         if (d.index.length) this.addDraped(d, [this.kit.runway], 3);
         this.stage = 'ground';
         return true;
       }
       case 'ground': {
         if (this.detailState === 'loading') return false;
-        const d = buildGround(this.frame, this.airport, this.detail, opt);
+        const d = this.advance(
+          () => groundSteps(this.frame, this.airport, this.detail, opt),
+          deadline,
+        );
+        if (!d) return true;
         if (d.index.length) this.addDraped(d, [this.kit.ground, this.kit.lines], 1);
         this.stage = 'lights';
         return true;
       }
       case 'lights': {
-        const b = buildLights(this.frame, this.airport, this.detail, {
-          centreSpacing: this.preset.centreSpacing,
-          touchdownZone: this.preset.touchdownZone,
-          taxiSpacing: this.preset.taxiSpacing,
-        });
+        const b = this.advance(
+          () =>
+            lightSteps(this.frame, this.airport, this.detail, {
+              centreSpacing: this.preset.centreSpacing,
+              touchdownZone: this.preset.touchdownZone,
+              taxiSpacing: this.preset.taxiSpacing,
+            }),
+          deadline,
+        );
+        if (!b) return true;
         if (b.count > 0) {
           const positions = new Float32Array(b.count * 4);
           for (let i = 0; i < b.count; i++) positions[i * 4 + 3] = b.size[i]!;
@@ -279,7 +311,11 @@ class Site {
     const positions = new Float32Array(d.lon.length * 3);
     const position = new BufferAttribute(positions, 3);
     geometry.setAttribute('position', position);
-    geometry.setAttribute('normal', new BufferAttribute(new Float32Array(d.lon.length * 3), 3));
+    // Normals straight up: airports are flat to a few per cent, and recomputing normals of a
+    // 60 000 vertex mesh after every re-seat would cost a frame's worth of time.
+    const normals = new Float32Array(d.lon.length * 3);
+    for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
+    geometry.setAttribute('normal', new BufferAttribute(normals, 3));
     // All other attributes interleaved in one buffer: WebGPU allows only 8 vertex buffers, and
     // a runway has 30 floats of parameters per vertex.
     const entries = Object.entries(d.attributes);
@@ -316,7 +352,6 @@ class Site {
       stride: 3,
       done: () => {
         position.needsUpdate = true;
-        geometry.computeVertexNormals();
       },
     });
   }
@@ -348,6 +383,7 @@ class Site {
 
   /** Seats up to `budget` points; returns how many it used. */
   seat(ground: LayerContext['groundHeight'], budget: number): number {
+    const t0 = performance.now();
     if (!this.cursor) {
       if (!this.dirty) return 0;
       this.dirty = false;
@@ -362,6 +398,11 @@ class Site {
       const s = this.seatables[c.item]!;
       const n = s.lon.length;
       while (used < budget && c.point < n) {
+        // Never more than a few milliseconds, however slow the height queries are here.
+        if ((used & 255) === 255 && performance.now() - t0 > SEAT_MS) {
+          budget = used;
+          break;
+        }
         const i = c.point++;
         let h = ground(s.lon[i]!, s.lat[i]!);
         if (h === undefined) {
@@ -427,7 +468,15 @@ export class AirportLayer implements WorldLayer {
 
   /** Numbers for the demo page and performance notes. */
   stats() {
-    const out = { airports: 0, shown: 0, vertices: 0, triangles: 0, lights: 0, draws: 0 };
+    const out = {
+      airports: 0,
+      shown: 0,
+      vertices: 0,
+      triangles: 0,
+      lights: 0,
+      draws: 0,
+      worstUpdateMs: this.worstMs,
+    };
     for (const s of this.sites.values()) {
       out.airports++;
       if (s.group.visible) out.shown++;
@@ -444,7 +493,18 @@ export class AirportLayer implements WorldLayer {
     return [...this.sites.keys()];
   }
 
+  /** Worst and latest CPU time of update(), ms (for the demo page). */
+  private worstMs = 0;
+  private frames = 0;
+
   update(ctx: LayerContext) {
+    const t0 = performance.now();
+    this.updateInner(ctx);
+    // The first frames create the kit and its textures: not a hitch in flight.
+    if (++this.frames > 30) this.worstMs = Math.max(this.worstMs, performance.now() - t0);
+  }
+
+  private updateInner(ctx: LayerContext) {
     const u = lightUniforms;
     const cam = ctx.camera as LayerContext['camera'] & { fov?: number };
     u.screenHeight.value = ctx.screenHeight;
@@ -468,7 +528,7 @@ export class AirportLayer implements WorldLayer {
     ctx.frame.toEcef(this.camera, this.ecef);
     for (const s of sites) s.setCamera(this.ecef);
     // One build step per frame, nearest airport first.
-    for (const s of sites) if (s.stage !== 'done' && s.step()) break;
+    for (const s of sites) if (s.stage !== 'done' && s.step(BUILD_MS)) break;
 
     const revisionChanged = sites.some((s) => s.revision !== ctx.groundRevision);
     if (revisionChanged)

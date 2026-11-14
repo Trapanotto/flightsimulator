@@ -745,13 +745,17 @@ for (const ap of out) {
   const o = [round6(ap.pos[0]), round6(ap.pos[1])];
   const large = ap.oa.type === 'large_airport';
   const medium = ap.oa.type === 'medium_airport';
-  const taxiways = ap.taxiways.map(({ line, tags }) => ({
-    w: round1(
-      Number.parseFloat(tags.width) ||
-        (tags.aeroway === 'taxilane' ? 10 : large ? 23 : medium ? 15 : 10.5),
-    ),
-    c: enc(o, line),
-  }));
+  // At a grass airfield an untagged taxiway is grass too: only paved ones are drawn.
+  const hasPaved = ap.runways.some((r) => paved(r.surface));
+  const taxiways = ap.taxiways
+    .filter(({ tags }) => hasPaved || paved(normSurface(tags.surface)))
+    .map(({ line, tags }) => ({
+      w: round1(
+        Number.parseFloat(tags.width) ||
+          (tags.aeroway === 'taxilane' ? 10 : large ? 23 : medium ? 15 : 10.5),
+      ),
+      c: enc(o, line),
+    }));
   const aprons = ap.aprons.map(({ ring }) => ({ c: enc(o, ring.slice(0, -1)) }));
   const detail = {
     v: 1,

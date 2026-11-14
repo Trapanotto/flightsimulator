@@ -5,7 +5,7 @@
  */
 import { type AirportInfo, LocalFrame, isPaved } from '@geo';
 import type { AirportDetail } from './detail';
-import { type RunwayAxes, runwayAxes, runwayPoint } from './geometry';
+import { type RunwayAxes, type Steps, runToEnd, runwayAxes, runwayPoint } from './geometry';
 import { LIGHT_COLOURS, type Light, LightKind, runwayLights } from './layout';
 
 export interface LightOptionsAll {
@@ -89,6 +89,15 @@ export function buildLights(
   detail: AirportDetail | undefined,
   opt: LightOptionsAll,
 ): LightBuffers {
+  return runToEnd(lightSteps(frame, airport, detail, opt));
+}
+
+export function* lightSteps(
+  frame: LocalFrame,
+  airport: AirportInfo,
+  detail: AirportDetail | undefined,
+  opt: LightOptionsAll,
+): Steps<LightBuffers> {
   const c = new Collector(frame);
   const axesAll: RunwayAxes[] = [];
   for (const r of airport.runways) {
@@ -98,10 +107,11 @@ export function buildLights(
       const [x, z] = runwayPoint(axes, l.s, l.t);
       c.add(x, z, l, axes.dx * l.axis, axes.dz * l.axis);
     }
+    yield;
   }
   const lit = airport.runways.some((r) => r.lighted);
   if (lit && detail && opt.taxiSpacing > 0)
-    taxiwayLights(c, frame, detail, axesAll, airport, opt.taxiSpacing);
+    yield* taxiwayLights(c, frame, detail, axesAll, airport, opt.taxiSpacing);
   if (lit) {
     // The aerodrome beacon: on the tower if the map has one, else over the reference point.
     const at = detail?.towers[0];
@@ -135,7 +145,7 @@ export function buildLights(
  * Blue edge lights on both sides of every taxiway, left out where they would stand on other
  * pavement: inside a runway (and its strip), on another taxiway, or on an apron.
  */
-function taxiwayLights(
+function* taxiwayLights(
   c: Collector,
   frame: LocalFrame,
   detail: AirportDetail,
@@ -215,7 +225,9 @@ function taxiwayLights(
     axis: 1,
     param: 0,
   };
-  lines.forEach(({ pts, half }, li) => {
+  for (let li = 0; li < lines.length; li++) {
+    const { pts, half } = lines[li]!;
+    if (li % 20 === 19) yield;
     let carry = spacing / 2;
     for (let i = 0; i + 1 < pts.length; i++) {
       const [ax, az] = pts[i]!;
@@ -236,7 +248,7 @@ function taxiwayLights(
       }
       carry = d - len;
     }
-  });
+  }
 }
 
 function insideRing(x: number, z: number, ring: Array<[number, number]>): boolean {
