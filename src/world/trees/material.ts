@@ -1,7 +1,8 @@
-import { MeshPhysicalNodeMaterial, type Node, Vector4 } from 'three/webgpu';
+import { MeshPhysicalNodeMaterial, type Node, Vector3, Vector4 } from 'three/webgpu';
 import {
   Discard,
   Fn,
+  If,
   attribute,
   cameraPosition,
   cameraViewMatrix,
@@ -35,6 +36,7 @@ import {
 import { BROADLEAF_CROWN_BASE, CONIFER_CROWN_BASE } from './geometry';
 import { LOD_BAND, LOD_JITTER, THIN_POWER } from './presets';
 import { PALETTE_STRIDE, summerColor } from './season';
+import { LEAF, LOOK } from './leaf';
 import { Form, SPECIES_COUNT, Species } from './species';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- TSL's node types do not follow swizzles
@@ -82,6 +84,10 @@ export class TreeUniforms {
    * small gain on the crown albedo keeps a lit forest as bright as the photo it stands on.
    */
   readonly crownGain = uniform(1.1);
+  /** Towards the sun (or the moon), render space: light through the leaves. */
+  readonly lightDir = uniform(new Vector3(0, 1, 0));
+  /** 0 by day .. 1: how much colour the eye has lost (scotopicLoss). */
+  readonly scotopic = uniform(0);
   /** Two vec4 per species: colour A + bareness, colour B + spare (season.ts). */
   readonly palette: N;
   /** Per species: summer reference colour (what the photo is compared with). */
@@ -89,6 +95,9 @@ export class TreeUniforms {
   /** Per species: crown base, trunk radius per metre, mesh crown base of its form, unused. */
   readonly shape: N;
   readonly bark: N;
+  /** Per species: LEAF and LOOK. */
+  readonly leaf: N;
+  readonly leafLook: N;
 
   constructor() {
     const v4 = (n: number) => Array.from({ length: n }, () => new Vector4());
@@ -112,6 +121,14 @@ export class TreeUniforms {
     this.summer = uniformArray(summer, 'vec4');
     this.shape = uniformArray(shape, 'vec4');
     this.bark = uniformArray(bark, 'vec4');
+    this.leaf = uniformArray(
+      Array.from({ length: SPECIES_COUNT }, (_, s) => new Vector4(...LEAF[s as Species])),
+      'vec4',
+    );
+    this.leafLook = uniformArray(
+      Array.from({ length: SPECIES_COUNT }, (_, s) => new Vector4(...LOOK[s as Species], 0)),
+      'vec4',
+    );
   }
 
   setPalette(p: Float32Array) {
@@ -149,12 +166,16 @@ const perChunk = (key: keyof ChunkUniforms, fallback: number) =>
 
 export type Lod = 0 | 1 | 2;
 
+/** Hash of a float to [0, 1): enough for picking per-cluster variations in the vertex stage. */
+const hash1 = (x: N): N => fract(sin(x.mul(12.9898).add(4.1414)).mul(43758.5453));
+
 /**
  * Builds the node graph of one level of detail for one form. The vertex stage places, scales,
  * turns and sways the tree from its instance data, decides whether this level draws it at all
  * (collapsing it to a point if not) and hands the fragment stage the range of the screen-door
  * threshold in which it draws: two levels in transition split the pixels between them.
- * `detail`: 2 = tufts in colour and normal and a ragged outline, 1 = tufts only, 0 = plain.
+ * `detail`: 2 = leaves (near level: per-tree crowns, leaf-scale shading and gaps, light through
+ * the crown's edge), 1 = tufts in colour and normal, 0 = plain.
  */
 export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 | 1 | 2) {
   const iPos = attribute('iPos', 'vec4') as N;
@@ -164,11 +185,13 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
   const iGroundPrev = attribute('iGroundPrev', 'float') as N;
   const part = attribute('part', 'float') as N;
   const ao = attribute('ao', 'float') as N;
-  const position = attribute('position', 'vec3') as N;
+  const meshPosition = attribute('position', 'vec3') as N;
   const normal = attribute('normal', 'vec3') as N;
   const groundBlend = perChunk('blend', 1) as N;
   const undulation = perChunk('undulation', 50) as N;
   const farFrom = perChunk('farFrom', 0) as N;
+  const leafy = detail > 1;
+  const conifer = form === Form.Conifer;
 
   const rank = iPos.w;
   const height = iShape.x;
@@ -183,6 +206,49 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
   const base = vec3(iPos.x, iPos.y.add(ground), iPos.z);
   const baseWorld = (modelWorldMatrix as N).mul(vec4(base, 1)).xyz;
   const d = distance(baseWorld, cameraPosition) as N;
+  const leaf = u.leaf.element(species) as N;
+  const leafLook = u.leafLook.element(species) as N;
+  const isTrunk = part.lessThan(0.5);
+  const isCrownPart = part.greaterThan(0.5).and(part.lessThan(1.5));
+
+  // ---- Every near tree its own crown: clusters (or whorls) grown, shrunk, moved, left out ----
+  let position = meshPosition;
+  let clusterPick: N = float(0);
+  let outer: N = float(0);
+  let clusterNormal: N = normal;
+  if (leafy) {
+    const cl = attribute('cluster', 'vec4') as N;
+    const has = cl.w.greaterThanEqual(0);
+    const key = cl.w.mul(61.7).add(seed.mul(17.3));
+    const h1 = hash1(key);
+    const h2 = hash1(key.add(1.31));
+    const scale = float(1).add(h1.sub(0.5).mul(2).mul(leaf.y));
+    if (conifer) {
+      // A whorl a little wider or narrower than its neighbours: a ragged, individual cone.
+      const s = select(has.and(isCrownPart), scale, float(1));
+      position = vec3(meshPosition.x.mul(s), meshPosition.y, meshPosition.z.mul(s));
+      outer = select(has, meshPosition.xz.length().div(cl.x.max(0.01)), float(0));
+    } else {
+      const centre = cl.xyz;
+      const kept = select(h2.lessThan(leaf.x), float(0), scale) as N;
+      const shift = vec3(
+        hash1(key.add(2.7)).sub(0.5),
+        hash1(key.add(3.9)).sub(0.5).mul(0.5),
+        hash1(key.add(5.3)).sub(0.5),
+      ).mul(leaf.z.mul(2));
+      const rel = meshPosition.sub(centre);
+      const grown = centre.add(rel.mul(vec3(kept, kept.mul(leafLook.x), kept))).add(shift);
+      // Branches follow their cluster's move at the tip and stay put at the fork.
+      const follow = clamp(float(1).sub(rel.length().div(0.5)), 0, 1);
+      const bent = meshPosition.add(shift.mul(follow));
+      position = select(has, select(isCrownPart, grown, bent), meshPosition);
+      // Crowns turn unevenly in autumn: each cluster leans to one end of the tree's range.
+      clusterPick = select(has, hash1(key.add(7.1)).sub(0.5).mul(0.7), float(0));
+      // The cluster's own surface normal (its ellipsoid is squashed like the crown).
+      const hy = (1 - BROADLEAF_CROWN_BASE) / 2;
+      clusterNormal = select(has.and(isCrownPart), vec3(rel.x, rel.y.div(hy * hy), rel.z), normal);
+    }
+  }
 
   // ---- How much of the forest is shown at this distance, and is this tree part of it ----
   const thinned = select(d.lessThan(u.thin), float(1), pow(u.thin.div(d), THIN_POWER)) as N;
@@ -222,7 +288,6 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
   // Forest-edge and solitary trees keep their branches far down.
   const open = float(1).sub(smoothstep(2, 12, edge));
   const crownBase = shape.x.mul(mix(float(1), float(0.45), open));
-  const isTrunk = part.lessThan(0.5);
   const y = position.y;
   // Remap the mesh's crown base to the species' own: crown above it, trunk below.
   const yCrown = crownBase.add(
@@ -241,13 +306,14 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
   const trunkR = shape.y.mul(height).add(0.08);
   const crownR = width.mul(0.5).mul(comp);
   const sxz = select(isTrunk, trunkR, crownR).mul(presence);
-  let local = vec3(position.x.mul(sxz), yTree.mul(hScale), position.z.mul(sxz)) as N;
+  const metric = vec3(position.x.mul(sxz), yTree.mul(hScale), position.z.mul(sxz)) as N;
+  let local = metric;
   // Sway: the crown top moves most; only near the camera, where it can be seen.
   const sway = u.wind
     .mul(float(1).sub(smoothstep(120, 260, d)))
     .mul(pow(clamp(yTree, 0, 1), 2))
     .mul(height)
-    .mul(form === Form.Conifer ? 0.006 : 0.01);
+    .mul(conifer ? 0.006 : 0.01);
   const phase = u.time.mul(1.3).add(seed.mul(40));
   const swayX = sin(phase)
     .add(sin(phase.mul(2.3).add(1.7)).mul(0.4))
@@ -262,19 +328,19 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
   );
   local = select(drawn, base.add(rotated), vec3(0, 0, 0));
 
-  // Normal: inverse of the non-uniform scale, then the turn.
-  const nScaled = normalize(
-    vec3(normal.x.div(sxz.max(1e-3)), normal.y.div(sy.max(1e-3)), normal.z.div(sxz.max(1e-3))),
-  );
-  const nRot = vec3(
-    nScaled.x.mul(c).sub(nScaled.z.mul(s)),
-    nScaled.y,
-    nScaled.x.mul(s).add(nScaled.z.mul(c)),
-  );
-  const nWorld = varying(
-    normalize((modelWorldMatrix as N).mul(vec4(nRot, 0)).xyz),
-    'vTreeNormal',
-  ) as N;
+  // Normals: inverse of the non-uniform scale, then the turn.
+  const toWorld = (n: N): N => {
+    const scaled = normalize(
+      vec3(n.x.div(sxz.max(1e-3)), n.y.div(sy.max(1e-3)), n.z.div(sxz.max(1e-3))),
+    );
+    const turned = vec3(
+      scaled.x.mul(c).sub(scaled.z.mul(s)),
+      scaled.y,
+      scaled.x.mul(s).add(scaled.z.mul(c)),
+    );
+    return normalize((modelWorldMatrix as N).mul(vec4(turned, 0)).xyz);
+  };
+  const nWorld = varying(toWorld(normal), 'vTreeNormal') as N;
 
   const vLo = varying(lo, 'vTreeLo') as N;
   const vHi = varying(hi, 'vTreeHi') as N;
@@ -286,6 +352,54 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
     'vTreeWorld',
   ) as N;
 
+  // ---- Leaves (near level): shading, gaps and light at leaf scale, in metres ----
+  const view = normalize(cameraPosition.sub(vWorld)) as N;
+  let leaves: N = float(0);
+  let leafTilt: N = vec3(0);
+  let gapEdge: N = float(0);
+  let trans: N = float(0);
+  let fine: N = float(1);
+  let vLeaf: N = vec3(0);
+  if (leafy) {
+    vLeaf = varying(metric.add(seed.mul(53)), 'vTreeLeaf') as N;
+    const vPick = varying(clusterPick, 'vTreePick') as N;
+    clusterPick = vPick;
+    // The finest octave flickers once a leaf is smaller than a pixel: it fades out with distance.
+    fine = float(1).sub(smoothstep(45, 160, vDist));
+    const f = float(1).div(leaf.w);
+    // Three octaves: clumps of sprays, sprays, single leaves.
+    const n0 = mx_noise_float(vLeaf.mul(f.div(3.5))) as N;
+    const n1 = mx_noise_float(vLeaf.mul(f).add(3.1)) as N;
+    const n2 = mx_noise_float(vLeaf.mul(f.mul(2.7)).add(7.3)) as N;
+    leafTilt = vec3(n1.sub(n2.mul(0.5)), n0, n2.mul(fine).sub(n1.mul(0.5)));
+    leaves = n0
+      .mul(0.55)
+      .add(n1.mul(mix(float(0.25), float(0.5), fine)))
+      .add(n2.mul(0.3).mul(fine));
+    const facing = abs(dot(nWorld, view));
+    // The crown's silhouette, and (broadleaf) the edges of its clusters, open between leaves.
+    const silhouette = smoothstep(0.45, 0.05, facing);
+    let thin: N;
+    if (conifer) {
+      // Needle sprays: a fringe of tips at the outer edge of each whorl.
+      const vOuter = varying(outer, 'vTreeOuter') as N;
+      gapEdge = smoothstep(0.62, 1.0, vOuter).mul(0.9).max(silhouette.mul(0.5));
+      thin = smoothstep(0.4, 1.0, vOuter).max(float(1).sub(facing));
+    } else {
+      const vClusterN = varying(toWorld(clusterNormal), 'vTreeClusterN') as N;
+      const clusterRim = float(1).sub(abs(dot(normalize(vClusterN), view)));
+      gapEdge = smoothstep(0.15, 0.8, clusterRim).max(silhouette);
+      thin = clamp(clusterRim.mul(1.6), 0, 1);
+    }
+    gapEdge = gapEdge.mul(leafLook.z);
+    // Light through the leaves: looking towards the sun, the whole crown lets some through and
+    // its thin outer layers most.
+    const L = normalize(u.lightDir) as N;
+    const towards = pow(clamp(dot(view, L).negate().add(0.15), 0, 1), 1.5);
+    thin = thin.mul(0.75).add(0.25);
+    trans = towards.mul(thin).mul(leafLook.y);
+  }
+
   // ---- Colour ----
   const colorNode = Fn(() => {
     // Screen door between two levels of detail (no blending: depth and haze stay exact).
@@ -295,54 +409,58 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
     const a = u.palette.element(species.mul(2)) as N;
     const b = u.palette.element(species.mul(2).add(1)) as N;
     const bare = a.w;
-    const pick = fract(seed.mul(7.31).add(0.13));
-    const leaf = mix(a.xyz, b.xyz, pick);
+    const pick = clamp(fract(seed.mul(7.31).add(0.13)).add(clusterPick), 0, 1);
+    const leafColor = mix(a.xyz, b.xyz, pick);
     const summer = (u.summer.element(species) as N).xyz;
     // Near: the species' colour, as much darker or lighter as the photo is under this tree
     // compared with the forest around (dark spruce among light beech stays dark). Far: the
     // photo's own colour, recoloured by the season, so the trees melt into the ground.
     const hasPhoto = iPhoto.x.greaterThanEqual(0);
     const own = vec3(seed.sub(0.5).mul(0.3).add(1), seed.sub(0.5).mul(0.2).add(1), 1);
-    const nearColor = leaf.mul(select(hasPhoto, vec3(pow(clamp(bright, 0.3, 3), 0.8)), own));
-    const season = leaf.div(summer.max(1e-3));
+    const nearColor = leafColor.mul(select(hasPhoto, vec3(pow(clamp(bright, 0.3, 3), 0.8)), own));
+    const season = leafColor.div(summer.max(1e-3));
     // Leafless crowns cannot be recoloured by a ratio to the summer green (grey-brown over
     // green has far more red and blue: the wood would turn violet). They take the twig
     // colour, as light or dark as the photo is there.
     const luma = (c: N) => c.x.mul(0.3).add(c.y.mul(0.59)).add(c.z.mul(0.11)) as N;
-    const bareFar = leaf.mul(luma(iPhoto.xyz).div(luma(summer).max(1e-3)).clamp(0.4, 2.5));
+    const bareFar = leafColor.mul(luma(iPhoto.xyz).div(luma(summer).max(1e-3)).clamp(0.4, 2.5));
     const farColor = mix(iPhoto.xyz.mul(season), bareFar, bare);
     const w = smoothstep(u.near.mul(1.5), u.thin, vDist).mul(select(hasPhoto, float(1), float(0)));
-    const tint = vec3(1);
-    let crown = mix(nearColor, farColor, w).mul(tint).mul(u.crownGain) as N;
-    if (detail > 0) {
-      // Leaf and needle clumps: lit tufts and dark hollows between them.
-      const clump = mx_noise_float(vTreePos.mul(vec3(6, 16, 6)).add(seed.mul(17))) as N;
-      crown = crown.mul(clump.mul(0.45).add(0.95));
-    }
-    if (detail > 1) {
-      // A finer octave of leaf clusters close up.
-      const leaves = mx_noise_float(vTreePos.mul(vec3(17, 45, 17)).add(seed.mul(5))) as N;
-      crown = crown.mul(leaves.mul(0.3).add(1));
-      const clump = mx_noise_float(vTreePos.mul(vec3(6, 16, 6)).add(seed.mul(17))).add(
-        leaves.mul(0.4),
-      ) as N;
-      // A ragged outline: at the crown's silhouette, gaps open between the tufts.
-      const view = normalize(cameraPosition.sub(vWorld)) as N;
-      const rim = smoothstep(0.45, 0.05, abs(dot(nWorld, view)));
-      const isLeaf = part.greaterThan(0.5).and(part.lessThan(1.5));
-      Discard(isLeaf.and(clump.mul(0.5).add(0.5).lessThan(rim.mul(0.75))));
-    }
-    // Bare crowns in winter: a lacy net of twigs through which the ground shows.
-    const isCrown = part.greaterThan(0.5).and(part.lessThan(1.5));
-    if (detail > 1) {
-      // Close up: a net of thin twigs (the ridges of a noise) through which the ground shows.
-      const lace = mx_noise_float(vTreePos.mul(vec3(11, 30, 11)).add(seed.mul(31))) as N;
-      Discard(isCrown.and(abs(lace).greaterThan(mix(float(2), float(0.11), bare))));
+    let crown = mix(nearColor, farColor, w).mul(u.crownGain) as N;
+    const isCrown = isCrownPart;
+    if (leafy) {
+      // Bare crowns: a fine net of twigs (the ridges of a noise, in metres) around the
+      // branches; the lines widen with distance until they merge into a grey-brown haze.
+      // First, and only for bare crowns: most of their pixels go, before the leaves are paid for.
+      If(isCrown.and(bare.greaterThan(0.01)), () => {
+        const lace = mx_noise_float(vLeaf.mul(conifer ? 2.2 : 1.6).add(seed.mul(31))) as N;
+        const twig = mix(float(0.2), float(0.075), fine);
+        Discard(abs(lace).greaterThan(mix(float(2), twig, bare)));
+      });
+      // Sprays of leaves stand out lit against the dark hollows between them.
+      const sprays = smoothstep(-0.25, 0.3, leaves);
+      // Light through a leaf comes out yellower than the light it reflects.
+      crown = crown
+        .mul(mix(float(0.55), float(1.2), sprays))
+        .mul(vec3(0.9, 1.1, 0.5).mul(trans).add(1));
+      // Gaps: at the cluster edges and the silhouette, and a few inside close up.
+      const open = leaves.mul(0.5).add(0.5);
+      Discard(
+        isCrown.and(bare.lessThan(0.5)).and(open.lessThan(gapEdge.mul(0.85).add(fine.mul(0.05)))),
+      );
     } else {
-      // Further out the twigs merge into a thin grey-brown haze with holes.
+      if (detail > 0) {
+        // Leaf and needle clumps: lit tufts and dark hollows between them.
+        const clump = mx_noise_float(vTreePos.mul(vec3(6, 16, 6)).add(seed.mul(17))) as N;
+        crown = crown.mul(clump.mul(0.45).add(0.95));
+      }
+      // Bare crowns far out: the twigs merge into a thin grey-brown haze with holes.
       const lace = mx_noise_float(vTreePos.mul(vec3(5, 14, 5)).add(seed.mul(31))) as N;
       Discard(isCrown.and(lace.mul(0.5).add(0.5).lessThan(bare.mul(0.6))));
     }
+    // Moonlight is seen without colour (rod vision): crowns lose theirs as the ground does,
+    // or an autumn crown glows red against a grey night.
+    crown = mix(crown, vec3(luma(crown)), u.scotopic);
 
     const barkColor = (u.bark.element(species) as N).xyz;
     const occlusion = mix(float(0.42), float(1), ao);
@@ -357,7 +475,15 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
   })();
 
   let nShade = nWorld;
-  if (detail > 0) {
+  if (leafy) {
+    // Sprays of leaves tilt every which way; the edges the sun shines through take its light.
+    // The octaves already at hand, crossed into a direction: a vector noise costs three more.
+    const tilt = leafTilt.mul(0.7);
+    nShade = normalize(nWorld.add(select(isCrownPart, tilt, vec3(0))));
+    const L = normalize(u.lightDir) as N;
+    const bend = select(isCrownPart, trans.mul(0.85), float(0)) as N;
+    nShade = normalize(mix(nShade, L, bend) as N);
+  } else if (detail > 0) {
     // Tufts tilt the normal: light and shade within the crown, not one smooth ball.
     const tilt = (mx_noise_vec3(vTreePos.mul(vec3(5, 13, 5)).add(seed.mul(9))) as N).mul(0.55);
     nShade = normalize(nWorld.add(select(part.greaterThan(0.5), tilt, vec3(0))));

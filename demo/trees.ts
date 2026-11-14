@@ -10,6 +10,7 @@
  *   device=mobile   webgl=1   trees=0 (hide the trees)   clean=1 (no text)
  *   speed=60        metres per second for view=fly
  *   still=1         no sway (pixel comparisons)
+ *   lon= lat= h= heading= pitch=   override the preset's camera (asl=1 / agl=1: h above sea level / ground)
  *
  * window.__demo exposes stats and a bench for tools/world/trees-shots.mjs.
  */
@@ -67,7 +68,17 @@ const SEASON_DATES: Record<Season, string> = {
 const SNOW_LINE: Record<Season, number> = { winter: 900, spring: 1800, summer: 2900, autumn: 2300 };
 
 const q = new URLSearchParams(location.search);
-const view = VIEWS[q.get('view') ?? 'belpberg'] ?? VIEWS.belpberg!;
+const preset = VIEWS[q.get('view') ?? 'belpberg'] ?? VIEWS.belpberg!;
+// Any field of the preset can be overridden, to stand at eye height in front of one tree.
+const num = (k: string, fallback: number) => (q.has(k) ? Number(q.get(k)) : fallback);
+const view: View = {
+  lon: num('lon', preset.lon),
+  lat: num('lat', preset.lat),
+  h: num('h', preset.h),
+  agl: q.has('asl') ? false : q.has('agl') ? true : preset.agl,
+  heading: num('heading', preset.heading),
+  pitch: num('pitch', preset.pitch),
+};
 const season = (q.get('season') ?? 'summer') as Season;
 const mobile = q.get('device') === 'mobile';
 const night = q.has('night');

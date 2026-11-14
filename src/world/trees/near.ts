@@ -60,7 +60,7 @@ export class NearSet {
       const base = geometries[form]!;
       const g = new InstancedBufferGeometry();
       g.setIndex(base.index);
-      for (const name of ['position', 'normal', 'part', 'ao'])
+      for (const name of ['position', 'normal', 'part', 'ao', 'cluster'])
         g.setAttribute(name, base.getAttribute(name));
       const inter = new InstancedInterleavedBuffer(new Float32Array(capacity * STRIDE), STRIDE);
       inter.setUsage(DynamicDrawUsage);
