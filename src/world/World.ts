@@ -162,6 +162,7 @@ export class World {
     snowLine: 2900,
     lightDirection: new Vector3(0.4, 0.8, 0.4).normalize(),
     time: 0,
+    wind: { fromDeg: 250, speed: 0 },
   };
   private lastUpdate = 0;
   private readonly layerContext: LayerContext;

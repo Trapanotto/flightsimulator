@@ -333,7 +333,11 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   };
 
   let weatherRequest: AbortController | undefined;
+  /** The wind as the things on the ground show it (windsocks). */
+  const worldWind = { fromDeg: 250, speed: 0 };
   const applyWeather = (weather: Weather) => {
+    worldWind.fromDeg = weather.windFromDeg;
+    worldWind.speed = weather.windSpeed;
     sky.setWeather(weather);
     game.weather.value = weather;
     env.air_ = {
@@ -764,6 +768,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       snowLine: SNOW_LINE[season],
       lightDirection: sky.state.lightDirection,
       time: appTime,
+      wind: worldWind,
     });
     updateWorld();
     const camGeo = frame.toGeodetic(camera.position, geo);

@@ -345,6 +345,7 @@ renderer.setAnimationLoop((now: number) => {
     snowLine: 2900,
     lightDirection: sky.state.lightDirection,
     time: appTime,
+    wind: { fromDeg: 250, speed: 3 },
   });
   const tu = performance.now();
   world.update(camera);

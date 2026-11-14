@@ -26,6 +26,11 @@ export interface WorldConditions {
   lightDirection: Vector3;
   /** Seconds since the app started, for anything that moves by itself (flashing lights). */
   time: number;
+  /**
+   * The wind near the ground: the true direction it blows from in degrees (270 = from the
+   * west) and its speed in m/s.
+   */
+  wind: { fromDeg: number; speed: number };
 }
 
 /** What a layer gets every frame. */

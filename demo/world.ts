@@ -320,6 +320,7 @@ const conditions = {
   snowLine: query.has('snowline') ? Number(query.get('snowline')) : SNOW_LINE[season],
   lightDirection: sky.state.lightDirection,
   time: 0,
+  wind: { fromDeg: 250, speed: 3 },
 };
 const geo = { lon: 0, lat: 0, h: 0 };
 const local = new Vector3();

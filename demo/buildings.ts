@@ -291,6 +291,7 @@ function step(dt: number) {
     snowLine: SNOW_LINE[season],
     lightDirection: sky.state.lightDirection,
     time: appTime,
+    wind: { fromDeg: 250, speed: 3 },
   });
   world.update(camera);
   const origin = anchor.fromGeodetic(frame.origin.lon, frame.origin.lat, 0, new Vector3());
