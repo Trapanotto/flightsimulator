@@ -16,6 +16,9 @@
  *                          thr      140 m above, just before the threshold, looking down at it
  *   ?fov=8                 vertical field of view in degrees (binoculars for the PAPI at 5 km)
  *   ?time=13               Swiss local hour (decimal), today's date in June (default 13)
+ *   ?wind=250,3            surface wind: true direction it blows from (degrees), speed (m/s)
+ *   ?noshadow=1            no shadow map (the app has one around the aircraft; here around
+ *                          the camera)
  *   ?device=mobile         mobile presets
  *   ?webgl=1               force the WebGL 2 fallback
  *   ?noairports=1          hide the airport layer (for comparing frame times)
@@ -57,6 +60,8 @@ const runwayEnd =
   findRunwayEnd(airport, rwyIdent) ?? findRunwayEnd(airport, airport.runways[0]!.ends[0].ident)!;
 const viewName = query.get('view') ?? 'eye';
 const hour = Number(query.get('time') ?? '13');
+const [windFrom = 250, windSpeed = 3] = (query.get('wind') ?? '250,3').split(',').map(Number);
+const wind = { fromDeg: windFrom, speed: windSpeed };
 
 // ---- renderer, like the app ----
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
@@ -75,6 +80,9 @@ const backend = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBack
   : 'WebGL 2';
 renderer.toneMapping = ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1;
+// The app's shadow map: small and around the aircraft (src/app/App.ts).
+const shadowMapSize = query.has('noshadow') ? 0 : mobile ? 1024 : 2048;
+renderer.shadowMap.enabled = shadowMapSize > 0;
 
 const quality = WORLD_QUALITY[mobile ? 'mobile' : 'desktop'];
 const scene = new Scene();
@@ -183,7 +191,7 @@ if (viewName === 'taxi' && airport.detail) {
       }
     }
 }
-const view = (VIEWS[viewName] ?? VIEWS.eye!)();
+let view = (VIEWS[viewName] ?? VIEWS.eye!)();
 
 // ---- world and sky, like the app ----
 const date = new Date(Date.UTC(2026, 5, 21, 0, 0, 0) + (hour - 2) * 3600_000);
@@ -193,6 +201,17 @@ sky.setWeather(WEATHER_PRESETS.clear);
 const world = new World(frame, quality);
 scene.add(sky.object, world.object);
 scene.environment = sky.environment;
+if (shadowMapSize > 0) {
+  const sh = sky.sun.shadow;
+  sky.sun.castShadow = true;
+  sh.mapSize.set(shadowMapSize, shadowMapSize);
+  sh.camera.left = sh.camera.bottom = -16;
+  sh.camera.right = sh.camera.top = 16;
+  sh.camera.near = 1;
+  sh.camera.far = 400;
+  sh.bias = -0.0005;
+  sh.normalBias = 0.03;
+}
 const scenePass = pass(scene, camera);
 const pipeline = new RenderPipeline(renderer);
 pipeline.outputNode = sky.post(
@@ -299,6 +318,31 @@ const stats = {
     }
     return out;
   },
+  /**
+   * Puts the camera `h` metres above the ground at lon/lat, looking at the ground at
+   * lookLon/lookLat, and moves the render origin there (for flying across several airports).
+   */
+  place: (lon: number, lat: number, h: number, lookLon: number, lookLat: number, lookH = 0) => {
+    view = { lon, lat, h, agl: true, look: { lon: lookLon, lat: lookLat, h: lookH, agl: true } };
+    frame = new LocalFrame(lon, lat, seaLevelToEllipsoid(lon, lat, elevation));
+    world.setFrame(frame);
+  },
+  /**
+   * Looks at the airport's first windsock from `dist` metres at compass `bearing` (seen from
+   * the sock) and `h` metres up, aiming at the top of its pole.
+   */
+  lookAtWindsock: (dist: number, bearing: number, h: number) => {
+    const site = airportsGroup.getObjectByName(`Airport ${airport.icao}`);
+    const socks = site?.getObjectByName('Windsocks') as
+      (Object3D & { geometry: { getAttribute(n: string): { array: Float32Array } } }) | undefined;
+    const s = (site?.userData.site as { frame: LocalFrame } | undefined)?.frame;
+    if (!socks || !s) return false;
+    const a = socks.geometry.getAttribute('iPlace').array;
+    const g = s.toGeodetic({ x: a[0]!, y: a[1]!, z: a[2]! });
+    const from = offsetPoint(g, bearing, dist);
+    stats.place(from.lon, from.lat, h, g.lon, g.lat, 5.5);
+    return true;
+  },
   /** Moves the render origin by (east, north) metres; the picture must not change. */
   rebase: (east: number, north: number) => {
     const o = frame.toGeodetic({ x: east, y: 0, z: -north });
@@ -345,7 +389,7 @@ renderer.setAnimationLoop((now: number) => {
     snowLine: 2900,
     lightDirection: sky.state.lightDirection,
     time: appTime,
-    wind: { fromDeg: 250, speed: 3 },
+    wind,
   });
   const tu = performance.now();
   world.update(camera);
