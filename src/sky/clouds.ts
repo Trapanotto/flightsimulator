@@ -121,7 +121,7 @@ function weatherTexture(size: number, data?: Uint8Array): DataTexture {
 }
 
 /** Ray against a sphere of height hs (m) from a camera at height hc: both roots (near, far). */
-function shell(rc: F, mu: F, hc: F, hs: F | number) {
+export function shell(rc: F, mu: F, hc: F, hs: F | number) {
   const hsn = typeof hs === 'number' ? float(hs) : hs;
   const b = rc.mul(mu);
   // c = rc² - Rs² written with heights (no cancellation).

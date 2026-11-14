@@ -2,7 +2,7 @@
  * The per-frame and per-hour inputs every sky shader shares (one set of uniforms, so the
  * dome, the aerial perspective, the clouds and the environment can never disagree).
  */
-import { Matrix3, Vector2, Vector3 } from 'three/webgpu';
+import { Matrix3, Vector2, Vector3, Vector4 } from 'three/webgpu';
 import { uniform } from 'three/tsl';
 
 export class SkyUniforms {
@@ -60,4 +60,42 @@ export class SkyUniforms {
   /** Share of the light on the ground that is not direct sun (fills cloud shadows). */
   readonly diffuseShare = uniform(0.3);
   readonly frame = uniform(0);
+
+  // Stratus deck (stratus.ts has the profile these knots describe).
+  /** 1 while a deck exists; 0 leaves every pixel as it was without one. */
+  readonly stratusOn = uniform(0);
+  /** Heights of the first four knots of the profile, and the last one. */
+  readonly stratusH = uniform(new Vector4());
+  readonly stratusH4 = uniform(0);
+  /** Extinction at the first four knots, 1/m (the last is zero). */
+  readonly stratusS = uniform(new Vector4());
+  readonly stratusBase = uniform(0);
+  readonly stratusTop = uniform(0);
+  /** How far the billows rise and fall around the top, and the scud hangs below the base. */
+  readonly stratusAmplitude = uniform(0);
+  readonly stratusScud = uniform(0);
+  /** Height of the top right above the camera (the CPU reads the same billows). */
+  readonly stratusTopAtCamera = uniform(0);
+  /** Drift of the billows with the wind (east, south), metres, wrapped to the texture. */
+  readonly stratusOffset = uniform(new Vector2());
+  /** Pre-exposed radiance inside the deck just under its top and at its base. */
+  readonly stratusLightTop = uniform(new Vector3());
+  readonly stratusLightBase = uniform(new Vector3());
+  /** Pre-exposed radiance of the mist under the deck. */
+  readonly stratusLightMist = uniform(new Vector3());
+  /** Pre-exposed light the top reflects: from the main light at normal incidence, from the sky. */
+  readonly stratusSun = uniform(new Vector3());
+  readonly stratusSky = uniform(new Vector3());
+  /** Pre-exposed forward-scattered glow around the light seen through a thin deck. */
+  readonly stratusAureole = uniform(new Vector3());
+  /** 1 while the camera is below the top (the deck is in front of the cumulus), 0 above. */
+  readonly stratusFront = uniform(0);
+  /**
+   * The environment under, in and over the deck: radiance of the upper and lower hemisphere
+   * and how much each replaces the clear sky (0 = not at all).
+   */
+  readonly envUp = uniform(new Vector3());
+  readonly envUpWeight = uniform(0);
+  readonly envDown = uniform(new Vector3());
+  readonly envDownWeight = uniform(0);
 }

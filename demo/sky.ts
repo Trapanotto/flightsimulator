@@ -10,6 +10,13 @@
  *   depth=reversed|log|standard              fov=55
  *   lapse=600            time-lapse, seconds of sky time per real second
  *   speed=120&turn=3     fly forward (m/s) and turn (deg/s), with floating-origin rebasing
+ *   vz=-40               climb (+) or descend (-), m/s; stops 2 m above the ground
+ *   weather=lowStratus   the Hochnebel preset; stratus=680,1000,4000 sets base, top (m above
+ *                        sea) and the visibility below (m) on any weather, stratus=0 removes it
+ *   precip=0.7&temp=-2   precipitation 0..1 and sea-level temperature (°C, snow below ~1 °C
+ *                        at the camera)
+ *   lights=1             a row of approach lights (20 000 cd each) 300-900 m ahead
+ *   step=0.05            a fixed time step per frame (repeatable flights), seconds
  *   shot=1               hide the text
  */
 import {
@@ -18,6 +25,7 @@ import {
   BufferGeometry,
   Color,
   Mesh,
+  MeshBasicNodeMaterial,
   MeshStandardNodeMaterial,
   PCFShadowMap,
   PerspectiveCamera,
@@ -27,7 +35,7 @@ import {
   Vector3,
   WebGPURenderer,
 } from 'three/webgpu';
-import { pass } from 'three/tsl';
+import { pass, vec3 } from 'three/tsl';
 import { SKY_QUALITY, Sky, WEATHER_PRESETS, type WeatherPreset } from '@sky';
 
 const q = new URLSearchParams(location.search);
@@ -44,6 +52,8 @@ const info = document.getElementById('info')!;
 
 interface DemoDebug {
   ready: boolean;
+  /** Keeps time and the camera still while frames are still drawn (screenshots of a flight). */
+  hold?: boolean;
   frames: number;
   backend: string;
   error?: string;
@@ -166,7 +176,15 @@ async function main() {
   let time = new Date(q.get('t') ?? '2026-06-21T11:30:00Z');
   const sky = new Sky(time, 7.44, 46.95, quality);
   const preset = (q.get('weather') ?? 'clear') as WeatherPreset;
-  sky.setWeather(WEATHER_PRESETS[preset] ?? WEATHER_PRESETS.clear);
+  const weather = { ...(WEATHER_PRESETS[preset] ?? WEATHER_PRESETS.clear) };
+  if (q.has('stratus')) {
+    const [base, top, below] = q.get('stratus')!.split(',').map(Number);
+    if (base && top) weather.stratus = { base, top, visibilityBelow: below ?? 4000 };
+    else delete weather.stratus;
+  }
+  if (q.has('precip')) weather.precipitation = num('precip', 0);
+  if (q.has('temp')) weather.temperature = num('temp', weather.temperature);
+  sky.setWeather(weather);
   scene.add(sky.object);
   (debug as unknown as Record<string, unknown>).sky = sky;
   (debug as unknown as Record<string, unknown>).renderer = renderer;
@@ -211,6 +229,25 @@ async function main() {
     m.castShadow = m.receiveShadow = true;
     scene.add(m);
   }
+  if (q.has('lights')) {
+    // Approach lights: 20 000 cd from a sphere of 0.6 m (subpixel far away, like the real
+    // ones), white, every 30 m along the view, 2 m above the ground.
+    const r = 0.6;
+    const luminance = 20_000 / (Math.PI * r * r) / 128_000;
+    const lamp = new MeshBasicNodeMaterial();
+    lamp.colorNode = vec3(1, 0.95, 0.85).mul(luminance).mul(sky.exposureNode);
+    const geo = new SphereGeometry(r, 12, 8);
+    for (let d = 300; d <= 900; d += 30)
+      for (const side of [-1, 0, 1]) {
+        const m = new Mesh(geo, lamp);
+        m.position
+          .set(0, 0, 0)
+          .addScaledVector(fwd, d)
+          .addScaledVector(right, side * 4);
+        m.position.y = drop(m.position.x, m.position.z) + 2;
+        scene.add(m);
+      }
+  }
   camera.lookAt(
     camera.position
       .clone()
@@ -232,6 +269,7 @@ async function main() {
   const depth = scenePass.getTextureNode('depth');
   const pipeline = new RenderPipeline(renderer);
   (debug as unknown as Record<string, unknown>).scenePass = scenePass;
+  (debug as unknown as Record<string, unknown>).pipeline = pipeline;
   pipeline.outputNode = q.get('debug') === 'scene' ? color : sky.post(color, depth, camera);
 
   const resize = () => {
@@ -249,10 +287,12 @@ async function main() {
   // Fly: the camera moves forward at this speed (m/s) and turns (deg/s), the floating
   // origin is rebased every 2 km like the app will do (scenery stays where it is).
   const speed = num('speed', 0);
+  const vz = num('vz', 0);
   const turn = num('turn', 0) * (Math.PI / 180);
   const origin = { x: 0, z: 0 };
   const scenery = scene.children.filter((o) => o !== sky.object);
   const frame = (dt: number) => {
+    if (vz) camera.position.y = Math.max(camera.position.y + vz * dt, 2);
     if (speed || turn) {
       camera.position.addScaledVector(fwd, speed * dt);
       camera.rotateY(-turn * dt);
@@ -298,7 +338,8 @@ async function main() {
 
   let last = performance.now();
   renderer.setAnimationLoop((now: number) => {
-    const dt = Math.min((now - last) / 1000, 0.1);
+    const step = q.has('step') ? num('step', 1 / 60) : Math.min((now - last) / 1000, 0.1);
+    const dt = debug.hold ? 0 : step;
     last = now;
     frame(dt);
     if (samples) {
@@ -313,7 +354,10 @@ async function main() {
     info.textContent =
       `${debug.backend}  ${device}  depth=${depthMode}\n` +
       `${time.toISOString()}  sun ${s.sunElevation.toFixed(1)}°  moon ${s.moonElevation.toFixed(1)}° (${(s.moonPhase * 100).toFixed(0)}%)\n` +
-      `exposure ${s.exposure.toExponential(2)}  ${s.illuminance.toPrecision(3)} lx  weather ${preset}`;
+      `exposure ${s.exposure.toExponential(2)}  ${s.illuminance.toPrecision(3)} lx  weather ${preset}
+` +
+      `alt ${(camera.position.y + GROUND).toFixed(0)} m  sunlight ${s.sunlight.toFixed(2)}  ` +
+      `visibility ${s.visibility.toFixed(0)} m  snow ${s.snow.toFixed(2)}`;
   });
 }
 
