@@ -67,6 +67,8 @@ export interface AppDebug {
   assist: RudderAssist;
   /** Loudness of the sound output right now (RMS). */
   audioLevel: () => number;
+  /** Test switch: a fixed reach of the shadow map in metres instead of the adaptive one. */
+  shadowReach?: number;
 }
 
 declare global {
@@ -640,6 +642,20 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     // The shadow map covers the aircraft and the ground around it (the moon lights at night).
     sky.sun.target.position.copy(visual.object.position);
     sky.sun.position.copy(visual.object.position).addScaledVector(sky.state.lightDirection, 200);
+    if (sky.sun.castShadow) {
+      // The shadow map must reach the ground below the aircraft. Ground beyond its far plane
+      // counts as shadowed, and the map's whole footprint shows as a dark square from high up.
+      const shadow = sky.sun.shadow;
+      const agl = flight?.aircraft.telemetry.agl ?? 0;
+      const reach = 250 + (agl + 80) / Math.max(sky.state.lightDirection.y, 0.12);
+      const far = debug.shadowReach ?? Math.min(Math.max(reach, 400), 30_000);
+      if (Math.abs(far - shadow.camera.far) > 0.02 * far) {
+        shadow.camera.far = far;
+        shadow.camera.updateProjectionMatrix();
+        // The bias is a share of the depth range: keep it at the same 20 cm.
+        shadow.bias = -0.2 / far;
+      }
+    }
 
     pipeline.render();
 
