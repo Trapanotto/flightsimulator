@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <title>Trees demo</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #9fc2e8;
+        overflow: hidden;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      #hud {
+        position: fixed;
+        left: 8px;
+        top: 8px;
+        font: 12px/1.35 monospace;
+        color: #fff;
+        background: rgb(0 0 0 / 0.45);
+        padding: 6px 8px;
+        white-space: pre;
+        pointer-events: none;
+      }
+      body.clean #hud {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+    <div id="hud"></div>
+    <script type="module" src="./trees.ts"></script>
+  </body>
+</html>
