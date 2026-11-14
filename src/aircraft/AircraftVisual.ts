@@ -5,8 +5,9 @@ import {
   Mesh,
   MeshStandardNodeMaterial,
   type Object3D,
+  type Raycaster,
 } from 'three/webgpu';
-import type { AircraftId, ControlInput, Telemetry } from '@sim';
+import type { AircraftId, Cockpit, ControlInput, Telemetry } from '@sim';
 import type { AircraftLights } from './lights';
 
 export interface Vec3Like {
@@ -39,7 +40,15 @@ export interface AircraftVisual {
    * Per frame: moving parts (control surfaces, propeller, gear, flaps), lights and the cockpit
    * instruments, all from the telemetry. `controls` moves yoke, pedals and levers.
    */
-  update(dt: number, telemetry: Telemetry, controls: ControlInput): void;
+  update(dt: number, telemetry: Telemetry, controls: ControlInput, cockpit?: Cockpit): void;
+  /**
+   * Phase 3: which cockpit control a ray hits (render space, as a Raycaster set up from the
+   * camera and the pointer gives it), or null. Only controls the pilot could reach count:
+   * nothing through a seat or from outside the cabin.
+   */
+  pickControl(raycaster: Raycaster): ControlHit | null;
+  /** Phase 3: marks one control (the checklist's next item), or none with null. */
+  highlightControl(id: string | null): void;
   /** The camera sits in the cockpit: show the interior at full detail, hide what would clip. */
   setCockpitView(inside: boolean): void;
   /**
@@ -59,6 +68,20 @@ export interface AircraftVisual {
    */
   setExposure(exposure: number): void;
   dispose(): void;
+}
+
+/** A cockpit control under the pointer. */
+export interface ControlHit {
+  /** Name of the control, see `C172_CONTROLS` in the sim package. */
+  control: string;
+  /** Distance along the ray, metres. */
+  distance: number;
+  /**
+   * For knobs and selectors with two halves: -1 if the left (or lower) half was hit, 1 for
+   * the right (or upper) one, 0 if the control has no sides. A click on the left half turns
+   * the knob down.
+   */
+  side: -1 | 0 | 1;
 }
 
 export interface AircraftVisualOptions {
@@ -119,6 +142,8 @@ export function createReferenceMarker(): AircraftVisual {
     setCockpitView() {},
     setAltimeterOffset() {},
     setLights() {},
+    pickControl: () => null,
+    highlightControl() {},
     setExposure() {},
     dispose() {
       object.traverse((o) => {

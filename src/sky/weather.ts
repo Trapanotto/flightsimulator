@@ -14,9 +14,16 @@ export interface Weather {
   precipitation: number;
   /** Air temperature at sea level, degrees Celsius. */
   temperature: number;
+  /**
+   * A closed stratus deck below the cumulus layer (phase 3): the high fog of the Swiss
+   * Plateau in autumn and winter, sunshine above it. Base and top in metres above sea level.
+   * `visibilityBelow` is the visibility under the deck, metres (misty); `visibility` holds
+   * above it.
+   */
+  stratus?: { base: number; top: number; visibilityBelow: number };
 }
 
-export type WeatherPreset = 'clear' | 'fair' | 'cloudy' | 'overcast';
+export type WeatherPreset = 'clear' | 'fair' | 'cloudy' | 'overcast' | 'lowStratus';
 
 /**
  * Typical Swiss Plateau weather (ground about 500 m above sea level). Cumulus bases of
@@ -62,6 +69,19 @@ export const WEATHER_PRESETS: Record<WeatherPreset, Weather> = {
     windSpeed: 8,
     precipitation: 0,
     temperature: 11,
+  },
+  // Hochnebel: a deck from about 250 m above the Plateau to 1000 m above sea level, calm and
+  // cold below, clear and mild above. An instrument approach to Zurich breaks out low.
+  lowStratus: {
+    cloudCover: 0,
+    cloudBase: 2500,
+    cloudTop: 3200,
+    visibility: 70_000,
+    windFromDeg: 50,
+    windSpeed: 2,
+    precipitation: 0,
+    temperature: 4,
+    stratus: { base: 680, top: 1000, visibilityBelow: 4000 },
   },
 };
 

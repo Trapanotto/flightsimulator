@@ -8,6 +8,9 @@
  * with the gear and contact points recomputed each sub-step (they are stiff). Semi-implicit
  * Euler, which keeps the phugoid and the gear oscillation from gaining energy.
  */
+import type { Avionics } from './avionicsTypes';
+import { C172_CONTROLS, type Cockpit, CockpitPanel } from './cockpit';
+import type { Failures } from './systemsTypes';
 import {
   sectionCoefficients,
   staticSeparation,
@@ -113,6 +116,15 @@ export class FlightModel implements SimAircraft {
   };
   readonly controls: ControlInput;
   readonly telemetry: Telemetry;
+  // Phase 3 placeholders: the panel holds its values, nothing acts on them yet.
+  readonly cockpit: Cockpit = new CockpitPanel(C172_CONTROLS);
+  readonly failures: Failures = {
+    ids: [],
+    active: () => false,
+    set() {},
+    clear() {},
+  };
+  readonly avionics: Avionics = { setDatabase() {}, setFlightPlan() {}, directTo() {} };
 
   private readonly engine: PistonEngine;
   private fuel: number;

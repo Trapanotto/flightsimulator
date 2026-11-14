@@ -50,7 +50,7 @@ import {
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import type { ControlInput, Telemetry } from '@sim';
-import type { AircraftVisual, AircraftVisualOptions, Vec3Like } from './AircraftVisual';
+import type { AircraftVisual, AircraftVisualOptions, ControlHit, Vec3Like } from './AircraftVisual';
 import { FACES, type FaceId } from './c172Parts';
 import {
   ATLAS_COLS,
@@ -530,6 +530,13 @@ class C172 implements AircraftVisual {
   setLights(lights: Partial<AircraftLights> | 'auto'): void {
     this.lightsOverride = lights === 'auto' ? undefined : { ...this.lightsOverride, ...lights };
   }
+
+  // Phase 3 placeholders.
+  pickControl(): ControlHit | null {
+    return null;
+  }
+
+  highlightControl(): void {}
 
   setExposure(exposure: number): void {
     this.glowVisibility = glowVisibility(exposure);

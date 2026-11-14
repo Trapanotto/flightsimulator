@@ -35,6 +35,7 @@ export const WEATHER_ICONS: Record<WeatherChoice, (size?: number) => JSX.Element
   fair: (s) => <IconFair size={s} />,
   cloudy: (s) => <IconCloud size={s} />,
   overcast: (s) => <IconOvercast size={s} />,
+  lowStratus: (s) => <IconOvercast size={s} />,
 };
 
 /** Keys shown in the briefing: the few that get an aircraft off the ground. */
@@ -172,9 +173,9 @@ export function Briefing() {
   const start = plan?.start;
   const startText = !start
     ? ''
-    : start.kind === 'runway'
-      ? t('briefing.runway', { rwy: start.runway })
-      : t('briefing.air', { h: heightLabel(start.altitude - (airport?.elevation ?? 0)) });
+    : start.kind === 'air'
+      ? t('briefing.air', { h: heightLabel(start.altitude - (airport?.elevation ?? 0)) })
+      : t('briefing.runway', { rwy: start.runway });
   const heading =
     start?.kind === 'air' ? start.headingDeg : start ? parseInt(start.runway, 10) * 10 : NaN;
   const time =

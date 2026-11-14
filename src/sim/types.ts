@@ -3,6 +3,10 @@
  * are structurally compatible, so the render side can pass its own objects in.
  */
 
+import type { Avionics, AvionicsTelemetry } from './avionicsTypes';
+import type { Cockpit } from './cockpit';
+import type { Failures, InstrumentTelemetry, SystemsTelemetry } from './systemsTypes';
+
 export interface Vec3 {
   x: number;
   y: number;
@@ -98,6 +102,13 @@ export interface Environment {
   air(position: Vec3, out: AirSample): AirSample;
   /** Ground below a world position, or undefined while the terrain there is not loaded. */
   ground(position: Vec3): GroundSample | undefined;
+  /**
+   * Height of the geoid (mean sea level) above the ellipsoid at a world position, metres:
+   * height above sea level = altitude(position) - geoidHeight(position). 0 if not given.
+   */
+  geoidHeight?(position: Vec3): number;
+  /** Magnetic declination at a world position, degrees, positive east. 0 if not given. */
+  magneticDeclination?(position: Vec3): number;
 }
 
 /** One engine as instruments, sound and the 3D model see it. */
@@ -155,6 +166,10 @@ export interface Telemetry {
   fuel: number;
   /** Set once the aircraft is destroyed; the reason is a short code like 'ground' or 'overstress'. */
   crashed: string | undefined;
+  /** Phase 3: the systems, what the instruments show, and the avionics. */
+  systems?: SystemsTelemetry;
+  instruments?: InstrumentTelemetry;
+  avionics?: AvionicsTelemetry;
 }
 
 /** Where and how a flight starts. */
@@ -194,6 +209,11 @@ export interface SimAircraft {
   /** Written by the app from the pilot's input before each step. */
   readonly controls: ControlInput;
   readonly telemetry: Telemetry;
+  /** Every switch, knob and lever, by name. */
+  readonly cockpit: Cockpit;
+  readonly failures: Failures;
+  /** The navigation database and the flight plan are handed in here. */
+  readonly avionics: Avionics;
   /** Places the aircraft, trimmed for the condition, and clears everything else. */
   reset(start: InitialCondition, env: Environment): void;
   /** Advances by `dt` seconds (always the fixed step). */

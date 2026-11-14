@@ -46,6 +46,7 @@ const WEATHER_ICON: Record<WeatherChoice, () => preact.JSX.Element> = {
   fair: () => <IconFair size={22} />,
   cloudy: () => <IconCloud size={22} />,
   overcast: () => <IconOvercast size={22} />,
+  lowStratus: () => <IconOvercast size={22} />,
 };
 
 /** Height in the current units, rounded the way a pilot would say it. */

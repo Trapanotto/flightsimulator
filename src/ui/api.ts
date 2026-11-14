@@ -1,15 +1,27 @@
 import { signal } from '@preact/signals';
-import type { AircraftId, Telemetry } from '@sim';
+import type { AircraftId, ControlSpec, FailureId, Telemetry } from '@sim';
 import type { Weather } from '@sky';
 
 /** Where a flight starts. */
 export type StartPlace =
   | { kind: 'runway'; airport: string; runway: string }
   /** `altitude` in metres above sea level; the interface puts it above the chosen airport. */
-  | { kind: 'air'; lon: number; lat: number; altitude: number; headingDeg: number };
+  | { kind: 'air'; lon: number; lat: number; altitude: number; headingDeg: number }
+  /**
+   * On final approach to a runway, `distanceNm` nautical miles out, at the height of a
+   * 3 degree approach path, configured and at approach speed (phase 3).
+   */
+  | { kind: 'approach'; airport: string; runway: string; distanceNm: number };
 
 /** The weather choices of the flight setup. */
-export type WeatherChoice = 'live' | 'clear' | 'fair' | 'cloudy' | 'overcast';
+export type WeatherChoice = 'live' | 'clear' | 'fair' | 'cloudy' | 'overcast' | 'lowStratus';
+
+/** Something that breaks during the flight (phase 3). */
+export interface PlannedFailure {
+  id: FailureId;
+  /** Seconds after the start of the flight, or 'random' for some time in the first 20 minutes. */
+  after: number | 'random';
+}
 
 /** The season of the landscape: the calendar's, or a chosen one. */
 export type SeasonChoice = 'now' | 'spring' | 'summer' | 'autumn' | 'winter';
@@ -30,6 +42,16 @@ export interface FlightPlan {
    * plans built elsewhere.
    */
   airport?: string;
+  /** Phase 3: where the flight is going; fills the GPS flight plan and the radio calls. */
+  destination?: { airport: string; runway?: string };
+  /** Phase 3: waypoints between departure and destination, in order. */
+  route?: { ident: string; lon: number; lat: number }[];
+  /** Phase 3: start with a cold, parked aircraft (the pilot starts the engine). Default false. */
+  coldStart?: boolean;
+  /** Phase 3: simulated air traffic control talks to the pilot. Default true. */
+  atc?: boolean;
+  /** Phase 3: things that break. */
+  failures?: PlannedFailure[];
 }
 
 /** A place a flight can start from, offered by the app to the menu. */
@@ -59,6 +81,52 @@ export interface UiActions {
    * the menu scene (time of day, weather, place). Never starts a flight.
    */
   preview?(plan: FlightPlan): void;
+  /** Phase 3: operates a cockpit control by name (see `game.controls`). */
+  setControl?(id: string, value: number): void;
+  /** Phase 3: the pilot picks one of the radio replies on offer (`game.atc.options`). */
+  atcReply?(optionId: string): void;
+  /** Phase 3: opens a checklist by id, or closes the open one with null. */
+  openChecklist?(id: string | null): void;
+  /** Phase 3: ticks the current checklist item by hand (items the app can see tick themselves). */
+  checkItem?(): void;
+}
+
+/** One line of radio traffic. */
+export interface RadioMessage {
+  from: 'atc' | 'pilot';
+  /** The station speaking or spoken to, e.g. 'Bern Tower'. */
+  station: string;
+  text: string;
+  /** Seconds since the start of the flight. */
+  time: number;
+}
+
+/** The radio as the interface shows it (phase 3). */
+export interface AtcView {
+  /** The station on the active COM 1 frequency, or null if nobody is listening there. */
+  station: string | null;
+  /** kHz */
+  frequency: number;
+  /** Newest last; the app keeps the last twenty or so. */
+  log: RadioMessage[];
+  /** What the pilot can say now. Empty while there is nothing to say. */
+  options: { id: string; text: string }[];
+  /** A hint when the next call needs another frequency, e.g. 'Bern Tower 121.025'. */
+  hint: string | null;
+}
+
+/** A checklist being worked through (phase 3). */
+export interface ChecklistView {
+  id: string;
+  title: string;
+  items: {
+    /** What to check and the expected state, e.g. 'Mixture' and 'RICH'. */
+    label: string;
+    expect: string;
+    state: 'done' | 'current' | 'todo';
+    /** The cockpit control the item is about, if any (highlighted in the 3D cockpit). */
+    control?: string;
+  }[];
 }
 
 /** Which screen is up. The app writes it; the interface renders it. */
@@ -105,6 +173,15 @@ export const game = {
    * app may set it too (for a flight started another way).
    */
   plan: signal<FlightPlan | null>(null),
+  /** Phase 3: the controls of the aircraft being flown (names, kinds, ranges). */
+  controls: signal<readonly ControlSpec[]>([]),
+  /** Phase 3: the value of every control by name, refreshed about ten times a second. */
+  cockpit: signal<Readonly<Record<string, number>> | null>(null),
+  /** Phase 3: the radio; null when the flight has no air traffic control. */
+  atc: signal<AtcView | null>(null),
+  /** Phase 3: the checklists on offer for the aircraft, and the open one. */
+  checklists: signal<{ id: string; title: string }[]>([]),
+  checklist: signal<ChecklistView | null>(null),
 };
 
 /**

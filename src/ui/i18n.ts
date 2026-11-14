@@ -67,6 +67,7 @@ const de = {
   'weather.fair': 'Heiter',
   'weather.cloudy': 'Bewölkt',
   'weather.overcast': 'Bedeckt',
+  'weather.lowStratus': 'Hochnebel',
 
   'setup.season': 'Jahreszeit',
   'season.now': 'Aktuell',
@@ -299,6 +300,7 @@ const en: Record<MessageKey, string> = {
   'weather.fair': 'Fair',
   'weather.cloudy': 'Cloudy',
   'weather.overcast': 'Overcast',
+  'weather.lowStratus': 'Low stratus',
 
   'setup.season': 'Season',
   'season.now': 'Current',

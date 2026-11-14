@@ -27,3 +27,27 @@ export {
   ecefToGeodetic,
   type TestEnvironmentOptions,
 } from './testEnvironment';
+export {
+  C172_CONTROLS,
+  CockpitPanel,
+  limit as limitControl,
+  type Cockpit,
+  type ControlKind,
+  type ControlSpec,
+} from './cockpit';
+export type { FailureId, Failures, InstrumentTelemetry, SystemsTelemetry } from './systemsTypes';
+export type {
+  AutopilotCommand,
+  AutopilotLateral,
+  AutopilotTelemetry,
+  AutopilotVertical,
+  Avionics,
+  AvionicsInput,
+  AvionicsTelemetry,
+  AvionicsUnit,
+  GpsTelemetry,
+  NavDatabase,
+  NavReceiverTelemetry,
+  NavStation,
+  Waypoint,
+} from './avionicsTypes';
