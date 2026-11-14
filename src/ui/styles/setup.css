@@ -690,3 +690,315 @@
     flex-basis: 100%;
   }
 }
+
+/* Phase 3 ----------------------------------------------------------------------------------- */
+
+/* Own flight / scenarios: a quiet switch at the right end of the header. */
+.setup-mode {
+  margin-left: auto;
+}
+
+.setup-mode .seg-option {
+  flex: none;
+  min-height: 34px;
+  padding-inline: var(--s-3);
+}
+
+.setup-body--scenarios {
+  display: block;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--s-4) var(--s-5) var(--s-5);
+}
+
+.setup-foot[hidden] {
+  display: none;
+}
+
+.scenarios {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.scenario-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-3);
+}
+
+.scenario {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    'icon text'
+    'icon meta';
+  align-items: center;
+  column-gap: var(--s-4);
+  row-gap: var(--s-2);
+  min-height: 112px;
+  padding: var(--s-4) var(--s-5);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  background: var(--c-fill);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease-out),
+    border-color var(--t-fast) var(--ease-out),
+    transform var(--t-fast) var(--ease-out);
+}
+
+.scenario:hover {
+  background: var(--c-fill-hover);
+  border-color: var(--c-line-strong);
+}
+
+.scenario:active {
+  transform: scale(0.99);
+}
+
+.scenario.is-featured {
+  border-color: rgb(143 211 255 / 0.4);
+  background: linear-gradient(135deg, rgb(143 211 255 / 0.14), transparent 65%), var(--c-fill);
+}
+
+.scenario-icon {
+  grid-area: icon;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 1px solid var(--c-line-strong);
+  color: var(--c-ink-2);
+}
+
+.scenario.is-featured .scenario-icon {
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+}
+
+.scenario-text {
+  grid-area: text;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.scenario-title {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: var(--fs-6);
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+}
+
+.scenario-sub {
+  color: var(--c-ink-2);
+  font-size: var(--fs-2);
+}
+
+.scenario-meta {
+  grid-area: meta;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-1);
+}
+
+.scenario-icao {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: var(--fs-2);
+  letter-spacing: 0.06em;
+  color: var(--c-ink-2);
+}
+
+.scenario-dot {
+  margin: 0 2px;
+}
+
+.summary-dest {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: var(--fs-5);
+  letter-spacing: 0.06em;
+  color: var(--c-accent);
+}
+
+/* Advanced: one row until opened. */
+.adv {
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  background: rgb(0 0 0 / 0.12);
+}
+
+.adv-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  width: 100%;
+  min-height: 56px;
+  padding: var(--s-2) var(--s-4);
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease-out);
+}
+
+.adv-head:hover {
+  background: var(--c-fill);
+}
+
+.adv-head .icon {
+  color: var(--c-ink-3);
+  transition: transform var(--t-base) var(--ease-out);
+}
+
+.adv.is-open .adv-head .icon {
+  transform: rotate(180deg);
+}
+
+.adv-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.adv-title {
+  color: var(--c-ink-2);
+}
+
+.adv-sub {
+  color: var(--c-ink-3);
+  font-size: var(--fs-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adv-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: var(--s-2) var(--s-4) var(--s-4);
+  border-top: 1px solid var(--c-line);
+}
+
+.adv-body > .field:first-child {
+  padding-top: var(--s-2);
+}
+
+.adv-map .swissmap svg {
+  max-height: 180px;
+}
+
+.adv-toggles {
+  margin: 0 calc(-1 * var(--s-3));
+}
+
+.toggle[disabled] {
+  cursor: default;
+}
+
+.toggle[disabled] :is(.toggle-label, .switch) {
+  opacity: 0.45;
+}
+
+.dest-seg {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+}
+
+.dest-seg .seg-label {
+  font-family: var(--f-display);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.dest-seg .seg-option:first-child {
+  grid-column: span 2;
+}
+
+.dest-seg .seg-option:first-child .seg-label {
+  font-family: var(--f-text);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.failure-seg {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.failure-seg .seg-option {
+  justify-content: flex-start;
+}
+
+/* The route on the map: dashed, in the accent, under the dots. */
+.swissmap-route {
+  stroke: var(--c-accent);
+  stroke-width: 1.4;
+  stroke-dasharray: 4 3;
+  stroke-linecap: round;
+  opacity: 0.85;
+}
+
+.swissmap-apt.is-end .swissmap-dot {
+  fill: var(--c-accent);
+  stroke: var(--c-ink);
+}
+
+.swissmap-apt.is-end .swissmap-label {
+  fill: var(--c-ink);
+}
+
+@media (max-height: 560px) {
+  .setup-mode .seg-option {
+    min-height: 34px;
+  }
+  .scenario {
+    min-height: 0;
+    padding: var(--s-3) var(--s-4);
+  }
+  .scenario-title {
+    font-size: var(--fs-5);
+  }
+  .setup-body--scenarios {
+    padding: var(--s-3) var(--s-4);
+  }
+}
+
+@media (max-width: 700px) {
+  .setup-head {
+    flex-wrap: wrap;
+  }
+  .scenario-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .setup-body--scenarios {
+    padding: var(--s-4);
+  }
+}
+
+@media (max-width: 480px) {
+  /* The header has room for the back button and the switch; the title says nothing new here. */
+  .setup-head .setup-title {
+    display: none;
+  }
+  .scenario {
+    padding: var(--s-3) var(--s-4);
+    column-gap: var(--s-3);
+  }
+  .scenario-icon {
+    width: 40px;
+    height: 40px;
+  }
+}

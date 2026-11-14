@@ -4,12 +4,12 @@ import { settings } from '../api';
 import { Field, Segmented, Slider, Toggle } from '../components/controls';
 import { IconClose, IconMute, IconSound } from '../components/icons';
 import { arrowNav, useDialog } from '../focus';
-import { type Lang, lang, setLang, t } from '../i18n';
+import { type Lang, type MessageKey, lang, setLang, t } from '../i18n';
 import { nav, showTouch } from '../nav';
 import { KEY_ROWS, KeyCombo } from './Briefing';
 
-type Tab = 'general' | 'sound' | 'controls';
-const TABS: Tab[] = ['general', 'sound', 'controls'];
+type Tab = 'general' | 'display' | 'sound' | 'controls';
+const TABS: Tab[] = ['general', 'display', 'sound', 'controls'];
 
 /**
  * Turning tilt steering on is a tap, which is what iOS needs to ask for motion access.
@@ -68,6 +68,41 @@ function General() {
     </>
   );
 }
+
+/** What the HUD shows in flight beyond the basics; everything new can be switched off. */
+function Display() {
+  return (
+    <Field label={t('settings.hud')} id="set-hud">
+      <div class="toggle-list">
+        <Toggle
+          label={t('settings.navStrip')}
+          hint={t('settings.navStrip.hint')}
+          checked={settings.navStrip.value}
+          onChange={(v) => (settings.navStrip.value = v)}
+        />
+        <Toggle
+          label={t('settings.radioText')}
+          hint={t('settings.radioText.hint')}
+          checked={settings.radioText.value}
+          onChange={(v) => (settings.radioText.value = v)}
+        />
+        <Toggle
+          label={t('settings.checklistHints')}
+          hint={t('settings.checklistHints.hint')}
+          checked={settings.checklistHints.value}
+          onChange={(v) => (settings.checklistHints.value = v)}
+        />
+      </div>
+    </Field>
+  );
+}
+
+/** How the 3D cockpit is operated with a mouse. */
+const COCKPIT_ROWS: { label: MessageKey; keys: (string | MessageKey)[][] }[] = [
+  { label: 'settings.cockpit.click', keys: [['key.click']] },
+  { label: 'settings.cockpit.wheel', keys: [['key.wheel']] },
+  { label: 'settings.cockpit.drag', keys: [['key.drag']] },
+];
 
 function Sound() {
   const v = settings.volume.value;
@@ -152,6 +187,21 @@ function Controls() {
         </dl>
         <p class="field-hint">{t('settings.keys.hint')}</p>
       </Field>
+      <Field label={t('settings.cockpit')} id="set-cockpit">
+        {!showTouch.value && (
+          <dl class="key-list">
+            {COCKPIT_ROWS.map((row) => (
+              <div class="key-row" key={row.label}>
+                <dt>{t(row.label)}</dt>
+                <dd>
+                  <KeyCombo keys={row.keys} />
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        <p class="field-hint">{t('settings.cockpit.hint')}</p>
+      </Field>
     </>
   );
 }
@@ -218,6 +268,7 @@ export function SettingsDialog() {
           aria-labelledby={`settings-tab-${tab.value}`}
         >
           {tab.value === 'general' && <General />}
+          {tab.value === 'display' && <Display />}
           {tab.value === 'sound' && <Sound />}
           {tab.value === 'controls' && <Controls />}
         </div>

@@ -66,12 +66,14 @@ export function Toggle(props: {
   checked: boolean;
   onChange: (v: boolean) => void;
   icon?: VNode;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={props.checked}
+      disabled={props.disabled}
       class={`toggle${props.checked ? ' is-on' : ''}`}
       onClick={() => props.onChange(!props.checked)}
     >

@@ -415,3 +415,78 @@
     grid-column: auto;
   }
 }
+
+/* Phase 3: route, stratus, frequencies, flags ----------------------------------------------- */
+
+.brief-route {
+  color: var(--c-ink-2);
+  font-size: var(--fs-2);
+}
+
+.brief-stratus {
+  margin-top: 2px;
+  color: var(--c-ink-2);
+  font-size: var(--fs-2);
+}
+
+.brief-freqs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px var(--s-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.brief-freqs li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-2);
+  min-width: 0;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--c-line);
+  font-size: var(--fs-2);
+}
+
+.brief-freq-name {
+  color: var(--c-ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brief-freq {
+  flex: none;
+  font-weight: 600;
+}
+
+.brief-flags {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.brief-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--c-line-strong);
+  border-radius: var(--r-pill);
+  font-size: var(--fs-2);
+}
+
+.brief-flag--failure {
+  border-color: rgb(255 181 58 / 0.55);
+}
+
+.brief-flag--failure .icon {
+  color: var(--c-caution);
+}
+
+@media (max-width: 700px) {
+  .brief-freqs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

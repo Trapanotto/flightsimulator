@@ -1,17 +1,23 @@
 import { useSignal } from '@preact/signals';
-import { AIRCRAFT, type AircraftInfo } from '@sim';
+import { AIRCRAFT, type AircraftInfo, type FailureId } from '@sim';
 import { useEffect, useMemo, useRef } from 'preact/hooks';
 import { type AirportOption, type SeasonChoice, type WeatherChoice, game, settings } from '../api';
-import { Field, Segmented, Slider } from '../components/controls';
+import { Field, Segmented, Slider, Toggle } from '../components/controls';
 import {
+  IconApproach,
   IconBack,
+  IconChevronDown,
+  IconCircuit,
   IconClimb,
   IconCloud,
   IconFair,
   IconLive,
+  IconMountain,
+  IconNight,
   IconOvercast,
   IconPlane,
   IconRunway,
+  IconStratus,
   IconSun,
 } from '../components/icons';
 import { arrowNav, useDialog } from '../focus';
@@ -29,13 +35,22 @@ import { actions, nav } from '../nav';
 import { browserStorage, readJson, writeJson } from '../persist';
 import {
   AIR_START_HEIGHTS,
+  APPROACH_DISTANCES,
   DRAFT_KEY,
+  FAILURE_IDS,
+  FAILURE_MINUTES,
+  type FailureMode,
+  type Scenario,
+  type ScenarioId,
   type SetupDraft,
   SEASON_CHOICES,
+  type StartKind,
   WEATHER_CHOICES,
+  availableScenarios,
   draftToPlan,
   planProblem,
   sanitizeDraft,
+  scenarioDraft,
 } from '../plan';
 import { dayGradient, sunTimes, swissNowHours } from '../sun';
 import { SwissMap } from './SwissMap';
@@ -46,7 +61,7 @@ const WEATHER_ICON: Record<WeatherChoice, () => preact.JSX.Element> = {
   fair: () => <IconFair size={22} />,
   cloudy: () => <IconCloud size={22} />,
   overcast: () => <IconOvercast size={22} />,
-  lowStratus: () => <IconOvercast size={22} />,
+  lowStratus: () => <IconStratus size={22} />,
 };
 
 /** Height in the current units, rounded the way a pilot would say it. */
@@ -281,6 +296,203 @@ function TimePicker(props: {
   );
 }
 
+const SCENARIO_ICON: Record<ScenarioId, () => preact.JSX.Element> = {
+  ilsZurich: () => <IconStratus size={22} />,
+  bernCircuit: () => <IconCircuit size={22} />,
+  alpsSamedan: () => <IconMountain size={22} />,
+  nightGeneva: () => <IconNight size={22} />,
+};
+
+/** Ready-made flights: one click and the briefing starts. */
+function ScenarioGrid(props: { onStart: (s: Scenario) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const list = availableScenarios(game.airports.value);
+  const airports = game.airports.value;
+  return (
+    <div class="scenarios">
+      <p class="field-hint">{t('setup.scenarios.hint')}</p>
+      <div
+        ref={ref}
+        class="scenario-grid"
+        onKeyDown={(e) => arrowNav(e, ref.current, '.scenario', 'both')}
+      >
+        {list.map((s, i) => {
+          const d = s.draft;
+          const apt = airports.find((a) => a.icao === d.airport);
+          const dest = d.destination && d.destination !== d.airport ? d.destination : null;
+          return (
+            <button
+              type="button"
+              key={s.id}
+              class={`scenario${i === 0 ? ' is-featured' : ''}`}
+              data-autofocus={i === 0 ? '' : undefined}
+              onClick={() => props.onStart(s)}
+            >
+              <span class="scenario-icon">{SCENARIO_ICON[s.id]()}</span>
+              <span class="scenario-text">
+                <span class="scenario-title">{t(`scenario.${s.id}`)}</span>
+                <span class="scenario-sub">{t(`scenario.${s.id}.sub`)}</span>
+              </span>
+              <span class="scenario-meta num">
+                <span class="scenario-icao">{apt?.icao}</span>
+                {dest && <span aria-hidden="true">→</span>}
+                {dest && <span class="scenario-icao">{dest}</span>}
+                <span class="scenario-dot" aria-hidden="true">
+                  ·
+                </span>
+                {typeof d.time === 'number' && formatClock(d.time)}
+                <span class="scenario-dot" aria-hidden="true">
+                  ·
+                </span>
+                {d.weather && t(`weather.${d.weather}`)}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Destination, ATC, cold start and failures: closed until asked for. */
+function Advanced(props: {
+  draft: SetupDraft;
+  airports: AirportOption[];
+  set: (patch: Partial<SetupDraft>) => void;
+}) {
+  const open = useSignal(false);
+  const { draft: d, airports, set } = props;
+  const dest = airports.find((a) => a.icao === d.destination);
+  const extras = advancedSummary(d);
+  return (
+    <section class={`adv${open.value ? ' is-open' : ''}`}>
+      <button
+        type="button"
+        class="adv-head"
+        aria-expanded={open.value}
+        aria-controls="setup-advanced"
+        onClick={() => (open.value = !open.value)}
+      >
+        <span class="adv-text">
+          <span class="caps adv-title">{t('setup.advanced')}</span>
+          <span class="adv-sub">{extras || t('setup.advanced.sub')}</span>
+        </span>
+        <IconChevronDown size={18} />
+      </button>
+      {open.value && (
+        <div id="setup-advanced" class="adv-body fade-in">
+          <Field label={t('setup.destination')} id="setup-dest">
+            <div class="setup-map-wrap adv-map">
+              <SwissMap
+                airports={airports}
+                selected={d.destination}
+                route={dest ? { from: d.airport, to: d.destination } : undefined}
+                onSelect={(icao) => set({ destination: icao, destinationRunway: '' })}
+                label={t('setup.destination.map')}
+              />
+            </div>
+            <Segmented<string>
+              label={t('setup.destination')}
+              class="dest-seg"
+              value={d.destination}
+              onChange={(v) => set({ destination: v, destinationRunway: '' })}
+              options={[
+                { value: '', label: t('setup.destination.none') },
+                ...airports.map((a) => ({ value: a.icao, label: a.icao })),
+              ]}
+            />
+            {dest && dest.runways.length > 0 && (
+              <div class="sub-field">
+                <span class="sub-label" id="setup-dest-rwy">
+                  {t('setup.destination.runway')}
+                </span>
+                <Segmented<string>
+                  label={t('setup.destination.runway')}
+                  class="rwy-seg"
+                  value={d.destinationRunway}
+                  onChange={(v) => set({ destinationRunway: v })}
+                  options={dest.runways.map((r) => ({
+                    value: r,
+                    label: r,
+                    sub: `${String(runwayHeading(r)).padStart(3, '0')}°`,
+                  }))}
+                />
+              </div>
+            )}
+          </Field>
+          <div class="toggle-list adv-toggles">
+            <Toggle
+              label={t('setup.atc')}
+              hint={t('setup.atc.hint')}
+              checked={d.atc}
+              onChange={(v) => set({ atc: v })}
+            />
+            <Toggle
+              label={t('setup.coldStart')}
+              hint={
+                d.start === 'runway' ? t('setup.coldStart.hint') : t('setup.coldStart.runwayOnly')
+              }
+              checked={d.coldStart && d.start === 'runway'}
+              disabled={d.start !== 'runway'}
+              onChange={(v) => set({ coldStart: v })}
+            />
+          </div>
+          <Field label={t('setup.failures')} id="setup-failures">
+            <Segmented<FailureMode>
+              label={t('setup.failures')}
+              value={d.failureMode}
+              onChange={(v) => set({ failureMode: v })}
+              options={(['none', 'random', 'chosen'] as const).map((m) => ({
+                value: m,
+                label: t(`setup.failures.${m}`),
+              }))}
+            />
+            {d.failureMode === 'random' && (
+              <p class="field-hint">{t('setup.failures.random.hint')}</p>
+            )}
+            {d.failureMode === 'chosen' && (
+              <>
+                <div class="sub-field">
+                  <span class="sub-label">{t('setup.failures.which')}</span>
+                  <Segmented<FailureId>
+                    label={t('setup.failures.which')}
+                    class="seg--wrap failure-seg"
+                    value={d.failureId}
+                    onChange={(v) => set({ failureId: v })}
+                    options={FAILURE_IDS.map((f) => ({ value: f, label: t(`failure.${f}`) }))}
+                  />
+                </div>
+                <div class="sub-field">
+                  <span class="sub-label">{t('setup.failures.when')}</span>
+                  <Segmented<number>
+                    label={t('setup.failures.when')}
+                    value={d.failureAfterMin}
+                    onChange={(v) => set({ failureAfterMin: v })}
+                    options={FAILURE_MINUTES.map((m) => ({
+                      value: m,
+                      label: t('setup.minutes', { n: m }),
+                    }))}
+                  />
+                </div>
+              </>
+            )}
+          </Field>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** What the advanced part changes from the defaults, as a short line ('' when nothing). */
+function advancedSummary(d: SetupDraft): string {
+  const parts: string[] = [];
+  if (d.destination) parts.push(`${t('setup.destination')} ${d.destination}`);
+  if (!d.atc) parts.push(t('setup.summary.atcOff'));
+  if (d.coldStart && d.start === 'runway') parts.push(t('setup.summary.cold'));
+  if (d.failureMode !== 'none') parts.push(t('setup.summary.failure'));
+  return parts.join(' · ');
+}
+
 /** The flight setup: where, how, with what, when and in which weather, on one page. */
 export function FlightSetup() {
   const ref = useRef<HTMLDivElement>(null);
@@ -290,6 +502,7 @@ export function FlightSetup() {
   const draft = useSignal<SetupDraft>(
     sanitizeDraft(readJson(storage, DRAFT_KEY), airports, aircraft),
   );
+  const mode = useSignal<'free' | 'scenarios'>('free');
   const back = () => (nav.page.value = 'main');
   useDialog(ref, back);
 
@@ -316,17 +529,31 @@ export function FlightSetup() {
     return () => clearTimeout(id);
   }, [planKey]);
 
-  const start = () => {
-    if (!plan) return;
-    game.plan.value = plan;
-    actions.startFlight(plan);
+  const fly = (from: SetupDraft) => {
+    // A random failure is drawn anew for every flight.
+    const rolled = { ...from, failureSeed: Math.floor(Math.random() * 1_000_000) };
+    const p = draftToPlan(rolled, airports, aircraft);
+    if (!p) return;
+    draft.value = rolled;
+    writeJson(storage, DRAFT_KEY, rolled);
+    game.plan.value = p;
+    actions.startFlight(p);
+  };
+  const start = () => fly(d);
+  const startScenario = (s: Scenario) => {
+    const sd = scenarioDraft(s, d, airports, aircraft);
+    if (sd) fly(sd);
   };
 
   const timeText = d.time === 'now' ? t('setup.time.now') : formatClock(d.time);
   const startText =
     d.start === 'air'
       ? t('briefing.air', { h: heightLabel(AIR_START_HEIGHTS[d.airHeight] ?? 0) })
-      : t('briefing.runway', { rwy: d.runway });
+      : d.start === 'approach'
+        ? `${t('briefing.runway', { rwy: d.runway })} · ${t('briefing.approach', { d: t('setup.nm', { n: d.approachNm }) })}`
+        : t('briefing.runway', { rwy: d.runway });
+  const extras = advancedSummary(d);
+  const scenarios = mode.value === 'scenarios';
 
   return (
     <div
@@ -349,125 +576,180 @@ export function FlightSetup() {
         <h1 id="setup-title" class="setup-title">
           {t('setup.title')}
         </h1>
+        {availableScenarios(airports).length > 0 && (
+          <Segmented<'free' | 'scenarios'>
+            label={t('setup.mode')}
+            class="setup-mode"
+            value={mode.value}
+            onChange={(v) => (mode.value = v)}
+            options={[
+              { value: 'free', label: t('setup.mode.free') },
+              { value: 'scenarios', label: t('setup.mode.scenarios') },
+            ]}
+          />
+        )}
       </header>
 
-      <div class="setup-body">
-        <div class="setup-col setup-where">
-          <Field label={t('setup.departure')} id="setup-departure">
-            <div class="setup-map-wrap">
-              <SwissMap
+      {scenarios ? (
+        <div class="setup-body setup-body--scenarios">
+          <ScenarioGrid onStart={startScenario} />
+        </div>
+      ) : (
+        <div class="setup-body">
+          <div class="setup-col setup-where">
+            <Field
+              label={d.start === 'approach' ? t('setup.airport') : t('setup.departure')}
+              id="setup-departure"
+            >
+              <div class="setup-map-wrap">
+                <SwissMap
+                  airports={airports}
+                  selected={d.airport}
+                  route={d.destination ? { from: d.airport, to: d.destination } : undefined}
+                  onSelect={(icao) => set({ airport: icao, runway: '' })}
+                  label={t('setup.map')}
+                />
+                {airport && (
+                  <div class="map-callout" aria-hidden="true">
+                    <span class="map-callout-icao">{airport.icao}</span>
+                    <span class="map-callout-name">{airport.name}</span>
+                  </div>
+                )}
+              </div>
+              <AirportList
                 airports={airports}
                 selected={d.airport}
                 onSelect={(icao) => set({ airport: icao, runway: '' })}
-                label={t('setup.map')}
               />
-              {airport && (
-                <div class="map-callout" aria-hidden="true">
-                  <span class="map-callout-icao">{airport.icao}</span>
-                  <span class="map-callout-name">{airport.name}</span>
+            </Field>
+          </div>
+
+          <div class="setup-col setup-how">
+            <div class="start-grid">
+              <Field label={t('setup.start')} id="setup-start">
+                <Segmented<StartKind>
+                  label={t('setup.start')}
+                  class="start-seg"
+                  value={d.start}
+                  onChange={(v) => set({ start: v })}
+                  options={[
+                    {
+                      value: 'runway',
+                      label: t('setup.start.runway'),
+                      icon: <IconRunway size={18} />,
+                    },
+                    { value: 'air', label: t('setup.start.air'), icon: <IconClimb size={18} /> },
+                    {
+                      value: 'approach',
+                      label: t('setup.start.approach'),
+                      icon: <IconApproach size={18} />,
+                    },
+                  ]}
+                />
+              </Field>
+              {airport && airport.runways.length > 0 && (
+                <Field label={t('setup.runway')} id="setup-runway">
+                  <Segmented<string>
+                    label={t('setup.runway')}
+                    class="rwy-seg"
+                    value={d.runway}
+                    onChange={(v) => set({ runway: v })}
+                    options={airport.runways.map((r) => ({
+                      value: r,
+                      label: r,
+                      sub: `${String(runwayHeading(r)).padStart(3, '0')}°`,
+                    }))}
+                  />
+                </Field>
+              )}
+              {d.start === 'air' && (
+                <div class="start-height">
+                  <Field label={t('setup.height')} id="setup-height">
+                    <Segmented<number>
+                      label={t('setup.height')}
+                      value={d.airHeight}
+                      onChange={(v) => set({ airHeight: v })}
+                      options={AIR_START_HEIGHTS.map((h, i) => ({
+                        value: i,
+                        label: heightLabel(h),
+                      }))}
+                    />
+                  </Field>
+                </div>
+              )}
+              {d.start === 'approach' && (
+                <div class="start-height">
+                  <Field label={t('setup.approachDistance')} id="setup-approach">
+                    <Segmented<number>
+                      label={t('setup.approachDistance')}
+                      value={d.approachNm}
+                      onChange={(v) => set({ approachNm: v })}
+                      options={APPROACH_DISTANCES.map((n) => ({
+                        value: n,
+                        label: t('setup.nm', { n }),
+                      }))}
+                    />
+                  </Field>
                 </div>
               )}
             </div>
-            <AirportList
-              airports={airports}
-              selected={d.airport}
-              onSelect={(icao) => set({ airport: icao, runway: '' })}
-            />
-          </Field>
-        </div>
 
-        <div class="setup-col setup-how">
-          <div class="start-grid">
-            <Field label={t('setup.start')} id="setup-start">
-              <Segmented<'runway' | 'air'>
-                label={t('setup.start')}
-                class="start-seg"
-                value={d.start}
-                onChange={(v) => set({ start: v })}
-                options={[
-                  {
-                    value: 'runway',
-                    label: t('setup.start.runway'),
-                    icon: <IconRunway size={18} />,
-                  },
-                  { value: 'air', label: t('setup.start.air'), icon: <IconClimb size={18} /> },
-                ]}
+            <Field label={t('setup.aircraft')} id="setup-aircraft">
+              <AircraftPicker
+                aircraft={aircraft}
+                selected={d.aircraft}
+                onSelect={(id) => set({ aircraft: id })}
               />
             </Field>
-            {airport && airport.runways.length > 0 && (
-              <Field label={t('setup.runway')} id="setup-runway">
-                <Segmented<string>
-                  label={t('setup.runway')}
-                  class="rwy-seg"
-                  value={d.runway}
-                  onChange={(v) => set({ runway: v })}
-                  options={airport.runways.map((r) => ({
-                    value: r,
-                    label: r,
-                    sub: `${String(runwayHeading(r)).padStart(3, '0')}°`,
-                  }))}
-                />
-              </Field>
-            )}
-            {d.start === 'air' && (
-              <div class="start-height">
-                <Field label={t('setup.height')} id="setup-height">
-                  <Segmented<number>
-                    label={t('setup.height')}
-                    value={d.airHeight}
-                    onChange={(v) => set({ airHeight: v })}
-                    options={AIR_START_HEIGHTS.map((h, i) => ({ value: i, label: heightLabel(h) }))}
-                  />
-                </Field>
-              </div>
-            )}
+
+            <TimePicker draft={d} airport={airport} onChange={(time) => set({ time })} />
+
+            <Field label={t('setup.weather')} id="setup-weather">
+              <Segmented<WeatherChoice>
+                label={t('setup.weather')}
+                variant="tiles"
+                value={d.weather}
+                onChange={(v) => set({ weather: v })}
+                options={WEATHER_CHOICES.map((w) => ({
+                  value: w,
+                  label: t(`weather.${w}`),
+                  icon: WEATHER_ICON[w](),
+                }))}
+              />
+            </Field>
+
+            <Field label={t('setup.season')} id="setup-season">
+              <Segmented<SeasonChoice>
+                label={t('setup.season')}
+                value={d.season}
+                onChange={(v) => set({ season: v })}
+                options={SEASON_CHOICES.map((v) => ({ value: v, label: t(`season.${v}`) }))}
+              />
+            </Field>
+
+            <Advanced draft={d} airports={airports} set={set} />
           </div>
-
-          <Field label={t('setup.aircraft')} id="setup-aircraft">
-            <AircraftPicker
-              aircraft={aircraft}
-              selected={d.aircraft}
-              onSelect={(id) => set({ aircraft: id })}
-            />
-          </Field>
-
-          <TimePicker draft={d} airport={airport} onChange={(time) => set({ time })} />
-
-          <Field label={t('setup.weather')} id="setup-weather">
-            <Segmented<WeatherChoice>
-              label={t('setup.weather')}
-              variant="tiles"
-              value={d.weather}
-              onChange={(v) => set({ weather: v })}
-              options={WEATHER_CHOICES.map((w) => ({
-                value: w,
-                label: t(`weather.${w}`),
-                icon: WEATHER_ICON[w](),
-              }))}
-            />
-          </Field>
-
-          <Field label={t('setup.season')} id="setup-season">
-            <Segmented<SeasonChoice>
-              label={t('setup.season')}
-              value={d.season}
-              onChange={(v) => set({ season: v })}
-              options={SEASON_CHOICES.map((v) => ({ value: v, label: t(`season.${v}`) }))}
-            />
-          </Field>
         </div>
-      </div>
+      )}
 
-      <footer class="setup-foot">
+      <footer class="setup-foot" hidden={scenarios}>
         <div class="setup-summary" aria-live="polite">
           {airport ? (
             <>
               <span class="summary-main">
                 <span class="summary-icao">{airport.icao}</span>
+                {d.destination && d.destination !== airport.icao && (
+                  <span class="summary-dest">
+                    <span aria-hidden="true">→ </span>
+                    <span class="visually-hidden">{t('setup.destination')} </span>
+                    {d.destination}
+                  </span>
+                )}
                 <span class="summary-name">{airport.name}</span>
               </span>
               <span class="summary-sub">
                 {startText} · {timeText} · {t(`weather.${d.weather}`)}
+                {extras && ` · ${extras}`}
               </span>
             </>
           ) : (

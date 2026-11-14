@@ -16,6 +16,9 @@ import {
 } from '../format';
 import { type MessageKey, isMessageKey, lang, t } from '../i18n';
 import { actions, showTouch } from '../nav';
+import { autopilotModes } from './AvionicsPanels';
+import { ChecklistHint } from './ChecklistPanel';
+import { FlightPanels, RadioCaption, ToolsButton, showChecklistHint } from './FlightPanels';
 
 /** Pixels per degree on the heading tape. */
 const PX_PER_DEG = 4;
@@ -260,6 +263,91 @@ function Warnings() {
   );
 }
 
+/** Full scale of the needles in pixels, from the centre. */
+const CDI_PX = 34;
+const GS_PX = 9;
+
+/**
+ * NAV 1 at a glance: the station, both needles, the DME and the autopilot's modes. Like the
+ * rest of the HUD it never re-renders with the telemetry: text nodes and transforms only,
+ * every part a fixed width.
+ */
+function NavStrip() {
+  const tel = game.telemetry;
+  const av = useComputed(() => {
+    const a = tel.value?.avionics;
+    return a?.powered ? a : undefined;
+  });
+  const ident = useComputed(() => (av.value?.nav1.valid ? av.value.nav1.ident || '–––' : '–––'));
+  const cdiClass = useComputed(() => `nav-bar nav-cdi${av.value?.nav1.valid ? '' : ' is-off'}`);
+  const gsClass = useComputed(
+    () => `nav-bar nav-gs${av.value?.nav1.glideSlope === undefined ? ' is-off' : ''}`,
+  );
+  const dme = useComputed(() => {
+    const d = av.value?.dme.distanceNm;
+    return d === undefined ? '–.–' : d >= 100 ? d.toFixed(0) : d.toFixed(1);
+  });
+  // Green modes already say the autopilot is engaged: 'AP' itself would only take room.
+  const apActive = useComputed(() => autopilotModes(av.value?.autopilot).active.slice(1).join(' '));
+  const apArmed = useComputed(() => autopilotModes(av.value?.autopilot).armed.join(' '));
+  const cdi = useRef<HTMLElement>(null);
+  const gs = useRef<HTMLElement>(null);
+  useSignalEffect(() => {
+    const n = av.value?.nav1;
+    const clamp = (v: number | undefined) => Math.max(-1, Math.min(1, v ?? 0));
+    if (cdi.current)
+      cdi.current.style.transform = `translate3d(${(clamp(n?.valid ? n.deviation : 0) * CDI_PX).toFixed(1)}px,0,0)`;
+    if (gs.current)
+      gs.current.style.transform = `translate3d(0,${(-clamp(n?.glideSlope) * GS_PX).toFixed(1)}px,0)`;
+  });
+  return (
+    <div class="hud-data nav-strip hud-card" role="group" aria-label={t('nav.strip')}>
+      <span class="nav-src caps">NAV 1</span>
+      <span class="nav-ident">{ident}</span>
+      <span class={cdiClass} role="img" aria-label={t('nav.cdi')}>
+        <i class="nav-needle" ref={cdi} />
+      </span>
+      <span class={gsClass} role="img" aria-label={t('nav.gs')}>
+        <i class="nav-needle" ref={gs} />
+      </span>
+      <span class="nav-dme num">
+        {dme}
+        <small>NM</small>
+      </span>
+      <span class="nav-ap num" aria-label={t('nav.ap')}>
+        {apActive}
+        <span class="nav-ap-armed">{apArmed}</span>
+      </span>
+    </div>
+  );
+}
+
+const ANNUNCIATORS = [
+  'lowVolts',
+  'lowFuelLeft',
+  'lowFuelRight',
+  'lowVacuum',
+  'oilPressure',
+] as const;
+
+/** The annunciator panel's lamps that are lit, as quiet amber tags. */
+function Annunciators() {
+  const lit = useComputed(() => {
+    const a = game.telemetry.value?.systems?.annunciators;
+    return a ? ANNUNCIATORS.filter((k) => a[k]).join(' ') : '';
+  });
+  const keys = lit.value ? (lit.value.split(' ') as (typeof ANNUNCIATORS)[number][]) : [];
+  return (
+    <div class="annun" role="status" aria-label={t('annun.label')}>
+      {keys.map((k) => (
+        <span class="annun-tag" key={k}>
+          {t(`annun.${k}`)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 const CRASH_TEXT: Record<string, MessageKey> = {
   ground: 'crash.ground',
   terrain: 'crash.terrain',
@@ -319,6 +407,8 @@ export function Hud() {
   const cockpit = game.view.value === 'cockpit';
   const touch = showTouch.value;
   const crashed = useComputed(() => game.telemetry.value?.crashed);
+  const hasAvionics = useComputed(() => !!game.telemetry.value?.avionics);
+  const nav = hasAvionics.value && settings.navStrip.value;
   const viewLabel = t(cockpit ? 'hud.view.cockpit' : 'hud.view.outside');
 
   // Keep focus off the flight buttons, also when the pause dialog hands focus back: Space or
@@ -331,7 +421,7 @@ export function Hud() {
 
   return (
     <div
-      class={`hud${cockpit ? ' is-cockpit' : ''}${touch ? ' is-touch' : ''}${paused ? ' is-paused' : ''}`}
+      class={`hud${cockpit ? ' is-cockpit' : ''}${touch ? ' is-touch' : ''}${paused ? ' is-paused' : ''}${nav ? ' has-nav' : ''}`}
       inert={paused}
     >
       <div class="hud-top">
@@ -357,7 +447,9 @@ export function Hud() {
         >
           <IconPause />
         </button>
+        {touch && <ToolsButton />}
       </div>
+      {nav && <NavStrip />}
 
       <div class="hud-data hud-side hud-side--left">
         <SpeedCard />
@@ -373,9 +465,13 @@ export function Hud() {
 
       <div class="hud-alerts">
         <Warnings />
+        <Annunciators />
         <Notice />
+        <RadioCaption />
+        {touch && showChecklistHint() && <ChecklistHint />}
       </div>
 
+      {!crashed.value && <FlightPanels />}
       {crashed.value && !paused && <CrashPanel reason={crashed.value} />}
     </div>
   );

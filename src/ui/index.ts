@@ -19,11 +19,17 @@ import './styles/setup.css';
 import './styles/briefing.css';
 import './styles/hud.css';
 import './styles/touch.css';
+import './styles/panels.css';
 import './styles/dialogs.css';
 
 export { status } from './state';
 export {
   type AirportOption,
+  type AtcView,
+  type ChecklistView,
+  type FrequencyInfo,
+  type PlannedFailure,
+  type RadioMessage,
   type FlightPlan,
   type Levers,
   type Screen,
@@ -37,6 +43,8 @@ export {
 } from './api';
 export { ALL_MESSAGES, type Lang, type MessageKey, lang, setLang, t } from './i18n';
 export { nav } from './nav';
+/** Which in-flight panels are open (interface state; the demo and tests open them directly). */
+export { panels } from './panels';
 export { validatePlan } from './plan';
 
 /** Mounts the interface into `root` and returns a function that removes it. */

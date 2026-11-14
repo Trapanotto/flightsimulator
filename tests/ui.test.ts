@@ -209,6 +209,9 @@ describe('flight plan', () => {
       weather: 'live',
       season: 'now',
       airport: 'LSZB',
+      coldStart: false,
+      atc: true,
+      failures: [],
     });
   });
 

@@ -89,6 +89,12 @@ export interface UiActions {
   openChecklist?(id: string | null): void;
   /** Phase 3: ticks the current checklist item by hand (items the app can see tick themselves). */
   checkItem?(): void;
+  /**
+   * Phase 3 (added by the interface): fails or repairs something now, for practice (the pause
+   * menu's "trigger a failure"). The app passes it to the aircraft's `Failures.set` and keeps
+   * `game.failures` up to date. Without it the pause menu offers no failures.
+   */
+  setFailure?(id: FailureId, failed: boolean): void;
 }
 
 /** One line of radio traffic. */
@@ -182,7 +188,28 @@ export const game = {
   /** Phase 3: the checklists on offer for the aircraft, and the open one. */
   checklists: signal<{ id: string; title: string }[]>([]),
   checklist: signal<ChecklistView | null>(null),
+  /**
+   * Phase 3 (added by the interface): the frequencies the coming flight will need, in the order
+   * they are used (ATIS, ground, tower, approach, the ILS …), for the briefing. Frequencies in
+   * kHz (a NAV or ADF frequency is fine too). Empty when the app has none: the briefing then
+   * leaves the list out.
+   */
+  frequencies: signal<readonly FrequencyInfo[]>([]),
+  /**
+   * Phase 3 (added by the interface): the failures active right now, so the pause menu can
+   * show which ones it has triggered. The app writes it whenever a failure starts or is
+   * repaired (planned failures included); empty without failures.
+   */
+  failures: signal<readonly FailureId[]>([]),
 };
+
+/** A frequency to expect on the flight (phase 3, briefing). */
+export interface FrequencyInfo {
+  /** What it is, e.g. 'Zürich ATIS', 'Zürich Tower' or 'ILS 14 IZH'. Display text. */
+  name: string;
+  /** kHz */
+  frequency: number;
+}
 
 /**
  * Input from on-screen controls (touch). The interface writes, the app reads every frame and
@@ -216,4 +243,14 @@ export const settings = {
   /** Steer by tilting the device (mobile). */
   tiltSteering: signal(false),
   units: signal<'metric' | 'aviation'>('aviation'),
+  /** Phase 3: the navigation strip under the heading tape (NAV 1, needles, DME, autopilot). */
+  navStrip: signal(true),
+  /** Phase 3: a new radio message shows as a line of text when the radio panel is closed. */
+  radioText: signal(true),
+  /**
+   * Phase 3: checklist hints: the current item shows on the HUD while the checklist panel is
+   * closed. The app may read it too and highlight the item's control in the 3D cockpit only
+   * while it is true.
+   */
+  checklistHints: signal(true),
 };

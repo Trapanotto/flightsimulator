@@ -87,6 +87,19 @@ scenes.push({
   url: `${base}?screen=flight&still&debug&lang=en`,
   vp: SIZES.hd,
 });
+// Phase 3: the panels, the navigation strip and the new briefing, on a large screen and a phone.
+for (const [name, query] of [
+  ['p3-radio-stack', 'screen=flight&still&p3&panel=radio,stack,checklist&checklist=approach'],
+  ['p3-autopilot', 'screen=flight&still&p3&panel=autopilot&ap&annun=lowVolts'],
+  ['p3-switches', 'screen=flight&still&p3&panel=switches'],
+  ['p3-briefing-ils', 'screen=briefing&progress=0.4&plan=ils&p3'],
+])
+  for (const size of ['hd', 'land', 'port'])
+    scenes.push({
+      name: `${name}-${size}-de`,
+      url: `${base}?${query}&lang=de${SIZES[size].mobile ? '&device=mobile' : ''}&shot`,
+      vp: SIZES[size],
+    });
 
 async function launch() {
   for (const channel of ['msedge', 'chrome']) {
