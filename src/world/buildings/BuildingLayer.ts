@@ -3,6 +3,8 @@ import {
   BufferGeometry,
   Group,
   Matrix4,
+  type Object3D,
+  type Scene,
   Sphere,
   Vector3,
   type MeshStandardNodeMaterial,
@@ -34,6 +36,7 @@ import {
 } from './grid';
 import { GroundGrid } from './groundGrid';
 import { BuildingMaterials, BuildingMesh, MASK_SIZE } from './material';
+import { type MeshData, Q16, quantise } from './mesh';
 import { BuildingWorkers, type JobHandle, type JobResult } from './pool';
 import { BUILDING_PRESETS, type BuildingPreset, type FootprintLod, footprintLod } from './presets';
 import type { BuildingJob, JobOutput } from './protocol';
@@ -80,14 +83,18 @@ export interface BuildingStats {
   queued: number;
   inFlight: number;
   pendingUploads: number;
-  /** Geometry and textures on the GPU, bytes (estimate). */
+  /** Geometry on the GPU, bytes (as the renderer allocates it). */
   gpuBytes: number;
+  /** What the layer keeps on the CPU for its tiles (ground grids, data for re-seating), bytes. */
+  cpuBytes: number;
   /** Downloaded since the start, bytes. */
   downloaded: number;
   absentCells: number;
   failed: number;
   evicted: number;
   buildMs: number;
+  /** Tiles built by the workers since the start (buildMs / built: mean per tile). */
+  built: number;
   updateMs: number;
   updateMaxMs: number;
 }
@@ -153,7 +160,7 @@ export class BuildingLayer implements WorldLayer {
   private loadingSince = 0;
   private stuckWarned = false;
   private readonly view: ViewPoint = { lon: 0, lat: 0, agl: 0 };
-  private readonly counters = { downloaded: 0, failed: 0, evicted: 0, buildMs: 0 };
+  private readonly counters = { downloaded: 0, failed: 0, evicted: 0, buildMs: 0, built: 0 };
   private wantedPending = 0;
   /** Main-thread time of update(): smoothed mean and worst after the first second, ms. */
   private readonly timing = { mean: 0, max: 0 };
@@ -404,6 +411,7 @@ export class BuildingLayer implements WorldLayer {
     t.bytes = r.output.bytes;
     this.counters.downloaded += r.output.bytes;
     this.counters.buildMs += r.output.buildMs;
+    this.counters.built++;
     t.state = 'built';
     if (r.output.cells && t.kind === 'footprints') {
       this.knownCells.set(t.id, r.output.cells);
@@ -455,7 +463,7 @@ export class BuildingLayer implements WorldLayer {
       }
       const m = t.output.mesh;
       if (!t.ground) {
-        if (m.positions.length === 0) {
+        if (m.vertexCount === 0) {
           // An empty tile (no buildings): nothing to draw, but it counts as done.
           this.uploads.splice(i, 1);
           this.show(t, undefined);
@@ -482,36 +490,34 @@ export class BuildingLayer implements WorldLayer {
       this.uploads.splice(i, 1);
       this.show(t, this.createMesh(t));
       count++;
-      bytes += m.positions.byteLength + m.meta.byteLength + m.indices.byteLength;
+      bytes += t.mesh!.userData.bytes as number;
     }
   }
 
   private createMesh(t: Tile): BuildingMesh {
     const m = t.output!.mesh;
     const g = new BufferGeometry();
-    g.setAttribute('position', new BufferAttribute(m.positions, 3));
-    const lift = new BufferAttribute(t.lifting!.out, 1);
-    t.lifting = undefined;
-    g.setAttribute('bLift', lift);
-    g.setAttribute('bRoof', new BufferAttribute(m.roof, 4, true));
-    g.setAttribute('bWall', new BufferAttribute(m.wall, 4, true));
-    g.setAttribute('bInfo', new BufferAttribute(m.info, 4, true));
-    g.setIndex(new BufferAttribute(m.indices, 1));
+    g.setAttribute('position', new BufferAttribute(m.position, 4, true));
+    g.setAttribute('bLook', new BufferAttribute(m.look, 4, true));
+    g.setIndex(indexAttribute(m.indices));
     // A material per tile: one shared node graph (so one shader), its own render state.
     const mesh = new BuildingMesh(g, this.materials.create(t.kind === 'cell'));
     mesh.name = `buildings ${t.kind} ${t.id}`;
     mesh.matrixAutoUpdate = false;
     mesh.receiveShadow = true;
+    mesh.posMin.set(m.minX, m.minY, m.minZ);
+    mesh.posRange.set(m.maxX - m.minX, m.maxY - m.minY, m.maxZ - m.minZ);
+    mesh.cellOrigin.set(m.cellX, m.cellY);
+    storeLift(mesh, m, t.lifting!.out);
+    t.lifting = undefined;
     mesh.userData.triangles = m.indices.length / 3;
     mesh.userData.buildings = m.buildingCount;
-    mesh.userData.bytes =
-      m.positions.byteLength +
-      lift.array.byteLength +
-      m.roof.byteLength +
-      m.wall.byteLength +
-      m.info.byteLength +
-      m.indices.byteLength;
+    mesh.userData.bytes = m.position.byteLength + m.look.byteLength + m.indices.byteLength;
     mesh.geoid = geoidUndulation(t.frame.origin.lon, t.frame.origin.lat);
+    releaseAfterUpload(mesh, ['bLook']);
+    // The tile keeps the positions (re-seating rewrites their w) and the seating data only.
+    m.look = new Uint16Array(0);
+    m.indices = m.indices instanceof Uint16Array ? new Uint16Array(0) : new Uint32Array(0);
     t.mesh = mesh;
     this.bound(t);
     this.place(t);
@@ -577,10 +583,9 @@ export class BuildingLayer implements WorldLayer {
         if (!t.ground!.fill(ctx.groundHeight, 400).completed) continue;
       }
       if (this.advanceLift(t, this.liftSlice())) {
-        const lift = t.mesh!.geometry.getAttribute('bLift') as BufferAttribute;
-        (lift.array as Float32Array).set(t.lifting!.out);
+        storeLift(t.mesh!, t.output!.mesh, t.lifting!.out);
         t.lifting = undefined;
-        lift.needsUpdate = true;
+        t.mesh!.geometry.getAttribute('position').needsUpdate = true;
         this.bound(t);
       }
     }
@@ -594,11 +599,11 @@ export class BuildingLayer implements WorldLayer {
   /** Continues the lift of a tile's vertices onto its (complete) ground; true when done. */
   private advanceLift(t: Tile, count: number): boolean {
     const m = t.output!.mesh;
-    const n = m.positions.length / 3;
+    const n = m.vertexCount;
     t.lifting ??= { out: new Float32Array(n), cursor: 0 };
     const job = t.lifting;
     const end = Math.min(n, job.cursor + count);
-    t.ground!.lift(m.positions, m.meta, m.buildings, job.out, job.cursor, end);
+    t.ground!.lift(m, job.out, job.cursor, end);
     job.cursor = end;
     return end >= n;
   }
@@ -631,6 +636,7 @@ export class BuildingLayer implements WorldLayer {
     }
     for (const t of this.cellTiles.values()) {
       if (t.state !== 'shown' || !t.mesh) continue;
+      t.mesh.castShadow = t.distance < this.preset.shadowRange;
       if (t.fade < 1) {
         t.fade = Math.min(1, t.fade + step);
         this.maskDirty = true;
@@ -731,17 +737,19 @@ export class BuildingLayer implements WorldLayer {
     let triangles = 0;
     let drawn = 0;
     let gpuBytes = 0;
+    let cpuBytes = 0;
     let footprintTiles = 0;
     let cells = 0;
     let absent = 0;
     for (const t of this.allTiles()) {
       if (t.state === 'absent') absent++;
+      cpuBytes += tileCpuBytes(t);
       if (!t.mesh) continue;
       if (t.kind === 'cell') cells++;
       else footprintTiles++;
       buildings += t.mesh.userData.buildings as number;
       triangles += t.mesh.userData.triangles as number;
-      gpuBytes += (t.mesh.userData.bytes as number) + (t.ground?.size ?? 0) * 4;
+      gpuBytes += t.mesh.userData.bytes as number;
       drawn++;
     }
     return {
@@ -754,11 +762,13 @@ export class BuildingLayer implements WorldLayer {
       inFlight: this.workers?.inFlight ?? 0,
       pendingUploads: this.uploads.length,
       gpuBytes,
+      cpuBytes,
       downloaded: this.counters.downloaded,
       absentCells: absent,
       failed: this.counters.failed,
       evicted: this.counters.evicted,
       buildMs: this.counters.buildMs,
+      built: this.counters.built,
       updateMs: this.timing.mean,
       updateMaxMs: this.timing.max,
     };
@@ -782,4 +792,91 @@ export function parseReleaseFolder(json: unknown): string {
     if (m) return m[1]!;
   }
   throw new Error('buildings tileset.json: no release folder');
+}
+
+/**
+ * A 16-bit index buffer that stays 16 bits on the GPU. three's WebGPU backend widens every
+ * Uint16 buffer that is not normalised to 32 bits (for vertex formats without a uint16x1),
+ * index buffers included; the flag means nothing to an index buffer, but it skips the copy.
+ */
+export function indexAttribute(indices: Uint16Array | Uint32Array): BufferAttribute {
+  return new BufferAttribute(indices, 1, indices instanceof Uint16Array);
+}
+
+/** Writes the lift into position.w, quantised to its own range (kept on the mesh). */
+export function storeLift(
+  mesh: Pick<BuildingMesh, 'liftMin' | 'liftRange'>,
+  m: Pick<MeshData, 'position' | 'vertexCount'>,
+  lift: Float32Array,
+) {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let i = 0; i < m.vertexCount; i++) {
+    const v = lift[i]!;
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  if (lo > hi) lo = hi = 0;
+  const range = hi - lo;
+  for (let i = 0; i < m.vertexCount; i++) m.position[4 * i + 3] = quantise(lift[i]!, lo, range);
+  mesh.liftMin = lo;
+  mesh.liftRange = range;
+}
+
+/** The lift of vertex i as the shader decodes it. */
+export function decodeLift(
+  mesh: Pick<BuildingMesh, 'liftMin' | 'liftRange'>,
+  m: Pick<MeshData, 'position'>,
+  i: number,
+): number {
+  return mesh.liftMin + (m.position[4 * i + 3]! / Q16) * mesh.liftRange;
+}
+
+/**
+ * Drops the CPU copy of attributes that never change once the GPU has them. The first draw
+ * in a pass with the mesh's own material has uploaded every attribute it reads (a shadow
+ * pass draws with a material of its own, which may read fewer). An empty array of the same
+ * type keeps what the renderer still looks at later: the element type, and `count`, which
+ * BufferAttribute sets once in its constructor.
+ */
+export function releaseAfterUpload(mesh: Object3D & { geometry: BufferGeometry }, names: string[]) {
+  mesh.onAfterRender = (_renderer, scene) => {
+    if ((scene as Scene).overrideMaterial) return;
+    const g = mesh.geometry;
+    const empty = (a: BufferAttribute) => {
+      a.array =
+        a.array instanceof Uint8Array
+          ? new Uint8Array(0)
+          : a.array instanceof Uint16Array
+            ? new Uint16Array(0)
+            : new Uint32Array(0);
+    };
+    for (const n of names) {
+      const a = g.getAttribute(n);
+      if (a instanceof BufferAttribute) empty(a);
+    }
+    if (g.index) empty(g.index);
+    mesh.onAfterRender = () => {};
+  };
+}
+
+/** Bytes a tile holds on the CPU, three's copies of its attributes included. */
+function tileCpuBytes(t: Tile): number {
+  const seen = new Set<ArrayBufferLike>();
+  let n = 0;
+  const add = (a?: { buffer: ArrayBufferLike; byteLength: number }) => {
+    if (!a || seen.has(a.buffer)) return;
+    seen.add(a.buffer);
+    n += a.byteLength;
+  };
+  const m = t.output?.mesh;
+  if (m) for (const a of [m.position, m.look, m.indices, m.starts, m.anchors, m.ground]) add(a);
+  add(t.output?.cells);
+  add(t.lifting?.out);
+  const g = t.mesh?.geometry;
+  if (g) {
+    for (const a of Object.values(g.attributes)) add(a.array as Uint8Array);
+    if (g.index) add(g.index.array as Uint8Array);
+  }
+  return n + (t.ground?.bytes ?? 0);
 }

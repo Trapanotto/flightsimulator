@@ -1,5 +1,5 @@
 import { type LocalFrame, geodeticToEcef } from '@geo';
-import { BUILDING_FLOATS, FLAG_GROUND } from './mesh';
+import { type MeshData, buildingOf, isGround, vertexPosition } from './mesh';
 
 /**
  * The terrain under a building tile, sampled on a regular grid in the tile's frame (heights as
@@ -16,10 +16,17 @@ export class GroundGrid {
   readonly dz: number;
   /** Tile-frame heights, row-major (z rows). */
   readonly values: Float32Array;
-  /** The next fill; swapped in when complete so a half-filled grid is never shown. */
-  private readonly next: Float32Array;
-  private readonly lon: Float64Array;
-  private readonly lat: Float64Array;
+  /**
+   * The fill under way, swapped in when complete so a half-filled grid is never shown. Only
+   * held while filling: most tiles sit still most of the time.
+   */
+  private next?: Float32Array;
+  /**
+   * Longitude and latitude of the grid's four corners (west-north, east-north, west-south,
+   * east-south in the tile frame). Over a tile of 1.7 km, the samples in between are
+   * bilinear in these to a few centimetres, so they need not be stored per sample.
+   */
+  private readonly corners: Float64Array;
   private cursor = 0;
   private missing = 0;
   /** True once the grid has been filled completely at least once. */
@@ -49,22 +56,42 @@ export class GroundGrid {
     this.z0 = minZ;
     this.dx = (maxX - minX) / (this.nx - 1);
     this.dz = (maxZ - minZ) / (this.nz - 1);
-    const n = this.nx * this.nz;
-    this.values = new Float32Array(n);
-    this.next = new Float32Array(n);
-    this.lon = new Float64Array(n);
-    this.lat = new Float64Array(n);
+    this.values = new Float32Array(this.nx * this.nz);
+    this.corners = new Float64Array(8);
     const g = { lon: 0, lat: 0, h: 0 };
-    for (let j = 0; j < this.nz; j++)
-      for (let i = 0; i < this.nx; i++) {
-        frame.toGeodetic({ x: this.x0 + i * this.dx, y: 0, z: this.z0 + j * this.dz }, g);
-        this.lon[j * this.nx + i] = g.lon;
-        this.lat[j * this.nx + i] = g.lat;
-      }
+    [
+      [minX, minZ],
+      [maxX, minZ],
+      [minX, maxZ],
+      [maxX, maxZ],
+    ].forEach(([x, z], k) => {
+      frame.toGeodetic({ x: x!, y: 0, z: z! }, g);
+      this.corners[2 * k] = g.lon;
+      this.corners[2 * k + 1] = g.lat;
+    });
   }
 
   get size() {
     return this.nx * this.nz;
+  }
+
+  /** Bytes held on the CPU. */
+  get bytes() {
+    return this.values.byteLength + (this.next?.byteLength ?? 0) + this.corners.byteLength;
+  }
+
+  /** Longitude and latitude of sample k. */
+  samplePoint(k: number, out = { lon: 0, lat: 0 }): { lon: number; lat: number } {
+    const c = this.corners;
+    const u = (k % this.nx) / (this.nx - 1);
+    const v = Math.floor(k / this.nx) / (this.nz - 1);
+    const w00 = (1 - u) * (1 - v);
+    const w10 = u * (1 - v);
+    const w01 = (1 - u) * v;
+    const w11 = u * v;
+    out.lon = c[0]! * w00 + c[2]! * w10 + c[4]! * w01 + c[6]! * w11;
+    out.lat = c[1]! * w00 + c[3]! * w10 + c[5]! * w01 + c[7]! * w11;
+    return out;
   }
 
   /** Bilinear height at tile-frame x/z (clamped to the grid). */
@@ -88,26 +115,22 @@ export class GroundGrid {
    * below the terrain right under them, so walls on a slope reach into it instead of
    * floating.
    */
-  lift(
-    positions: Float32Array,
-    meta: Uint16Array,
-    buildings: Float32Array,
-    out: Float32Array,
-    start = 0,
-    end = positions.length / 3,
-  ) {
-    let lastBuilding = -1;
-    let gA = 0;
+  lift(m: MeshData, out: Float32Array, start = 0, end = m.vertexCount) {
+    if (start >= end) return;
+    const p = { x: 0, y: 0, z: 0 };
+    let b = buildingOf(m, start);
+    let next = m.starts[b + 1]!;
+    let gA = this.sample(m.anchors[2 * b]!, m.anchors[2 * b + 1]!);
     for (let i = start; i < end; i++) {
-      const b = meta[2 * i]!;
-      if (b !== lastBuilding) {
-        lastBuilding = b;
-        gA = this.sample(buildings[b * BUILDING_FLOATS]!, buildings[b * BUILDING_FLOATS + 1]!);
+      while (i >= next) {
+        b++;
+        next = m.starts[b + 1]!;
+        gA = this.sample(m.anchors[2 * b]!, m.anchors[2 * b + 1]!);
       }
-      if (meta[2 * i + 1]! & FLAG_GROUND) {
-        const y = positions[3 * i + 1]!;
-        const own = this.sample(positions[3 * i]!, positions[3 * i + 2]!) - 0.4;
-        out[i] = Math.min(y + gA, own) - y;
+      if (isGround(m, i)) {
+        vertexPosition(m, i, p);
+        const own = this.sample(p.x, p.z) - 0.4;
+        out[i] = Math.min(p.y + gA, own) - p.y;
       } else out[i] = gA;
     }
   }
@@ -127,21 +150,24 @@ export class GroundGrid {
   ): { samples: number; completed: boolean } {
     if (!this.dirty) return { samples: 0, completed: false };
     const n = this.size;
+    const next = (this.next ??= new Float32Array(n));
     const up = this.frame.dirToEcef({ x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 0 });
     const o = this.frame.originEcef({ x: 0, y: 0, z: 0 });
     const e = { x: 0, y: 0, z: 0 };
+    const ll = { lon: 0, lat: 0 };
     let taken = 0;
     while (this.cursor < n && taken < maxSamples) {
       const k = this.cursor++;
       taken++;
-      const h = groundHeight(this.lon[k]!, this.lat[k]!);
+      this.samplePoint(k, ll);
+      const h = groundHeight(ll.lon, ll.lat);
       if (h === undefined) {
-        this.next[k] = NaN;
+        next[k] = NaN;
         this.missing++;
         continue;
       }
-      geodeticToEcef(this.lon[k]!, this.lat[k]!, h, e);
-      this.next[k] = (e.x - o.x) * up.x + (e.y - o.y) * up.y + (e.z - o.z) * up.z;
+      geodeticToEcef(ll.lon, ll.lat, h, e);
+      next[k] = (e.x - o.x) * up.x + (e.y - o.y) * up.y + (e.z - o.z) * up.z;
     }
     if (this.cursor < n) return { samples: taken, completed: false };
     this.cursor = 0;
@@ -150,9 +176,10 @@ export class GroundGrid {
       this.missing = 0;
       return { samples: taken, completed: false };
     }
-    if (this.missing) fillGaps(this.next, this.nx, this.nz);
+    if (this.missing) fillGaps(next, this.nx, this.nz);
     this.missing = 0;
-    this.values.set(this.next);
+    this.values.set(next);
+    this.next = undefined;
     let min = Infinity;
     let max = -Infinity;
     for (const v of this.values) {

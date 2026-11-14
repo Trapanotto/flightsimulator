@@ -36,13 +36,12 @@ export type WorkerResponse =
 export function transferables(o: JobOutput): ArrayBuffer[] {
   const m = o.mesh;
   const list = [
-    m.positions.buffer,
-    m.meta.buffer,
-    m.roof.buffer,
-    m.wall.buffer,
-    m.info.buffer,
+    m.position.buffer,
+    m.look.buffer,
     m.indices.buffer,
-    m.buildings.buffer,
+    m.starts.buffer,
+    m.anchors.buffer,
+    m.ground.buffer,
   ];
   if (o.cells) list.push(o.cells.buffer);
   return list as ArrayBuffer[];

@@ -14,8 +14,9 @@ import {
   cellIdAt,
   cellPath,
 } from '../../src/world/buildings/grid';
-import { FLAG_GROUND, KIND } from '../../src/world/buildings/mesh';
+import { KIND, unpackLook } from '../../src/world/buildings/mesh';
 import { buildDetailTile, kindOf } from '../../src/world/buildings/tile3d';
+import { unpack } from './buildings.helpers';
 
 const require = createRequire(import.meta.url);
 const fixture = (name: string) =>
@@ -58,10 +59,11 @@ describe('swissBUILDINGS3D tiles', () => {
     // Highest vertex per building above its terrain point: DACH_MAX - GELAENDEPUNKT.
     const top = [-Infinity, -Infinity];
     let ground = 0;
-    for (let i = 0; i < m.positions.length / 3; i++) {
-      const b = m.meta[2 * i]!;
-      top[b] = Math.max(top[b]!, m.positions[3 * i + 1]!);
-      if (m.meta[2 * i + 1]! & FLAG_GROUND) ground++;
+    const u = unpack(m);
+    for (let i = 0; i < m.vertexCount; i++) {
+      const b = u.building[i]!;
+      top[b] = Math.max(top[b]!, u.positions[3 * i + 1]!);
+      if (u.ground[i]) ground++;
     }
     expect(top[0]).toBeCloseTo(550.27 - 543.79, 1);
     expect(top[1]).toBeCloseTo(552.05 - 545.13, 1);
@@ -70,7 +72,7 @@ describe('swissBUILDINGS3D tiles', () => {
     expect(Math.max(Math.abs(m.minX), Math.abs(m.maxX))).toBeLessThan(110);
     expect(Math.max(Math.abs(m.minZ), Math.abs(m.maxZ))).toBeLessThan(80);
     // Shared corners: far fewer vertices than three per triangle.
-    expect(m.positions.length / 3).toBeLessThan(m.indices.length * 0.7);
+    expect(m.vertexCount).toBeLessThan(m.indices.length * 0.7);
   });
 
   it('tells churches, towers and walls apart', () => {
@@ -198,10 +200,12 @@ describe('footprint tiles', () => {
     expect(t.cells.length).toBeGreaterThan(0);
     for (const c of t.cells) expect(c).toBeLessThan(2048 * 2048);
     // The canopy (class "roof") floats: none of its vertices are on the ground.
-    const canopy = Array.from({ length: t.mesh.positions.length / 3 }, (_, i) => i).filter(
-      (i) => t.mesh.meta[2 * i] === 0,
+    const u = unpack(t.mesh);
+    const canopy = Array.from({ length: t.mesh.vertexCount }, (_, i) => i).filter(
+      (i) => u.building[i] === 0,
     );
-    expect(canopy.every((i) => (t.mesh.meta[2 * i + 1]! & FLAG_GROUND) === 0)).toBe(true);
+    expect(canopy.length).toBeGreaterThan(0);
+    expect(canopy.every((i) => !u.ground[i])).toBe(true);
   });
 
   it('builds far tiles leaner', () => {
@@ -213,12 +217,24 @@ describe('footprint tiles', () => {
     });
     const far = buildFootprintTile(bytes, {
       key,
-      lod: 2,
+      lod: 3,
       elevation: [],
       grid: SWISSBUILDINGS_GRID,
     });
     expect(far.mesh.indices.length).toBeLessThan(near.mesh.indices.length);
     expect(far.mesh.maxY).toBeLessThan(near.mesh.maxY + 1e-6);
+  });
+
+  it('keeps the look of a building whatever the build', () => {
+    const builds = ([0, 1, 2] as const).map(
+      (lod) =>
+        buildFootprintTile(bytes, { key, lod, elevation: [], grid: SWISSBUILDINGS_GRID }).mesh,
+    );
+    const looks = builds.map((m) =>
+      Array.from(m.starts.subarray(0, m.buildingCount), (v) => unpackLook(m.look, 4 * v)),
+    );
+    expect(looks[0]!.length).toBe(4);
+    for (const l of looks.slice(1)) expect(l).toEqual(looks[0]);
   });
 
   it('places buildings in the tile frame where the tile says', () => {

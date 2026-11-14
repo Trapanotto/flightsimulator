@@ -8,6 +8,7 @@ import {
   RedFormat,
   UnsignedByteType,
   Vector2,
+  Vector3,
 } from 'three/webgpu';
 import {
   abs,
@@ -35,7 +36,6 @@ import {
   modelViewMatrix,
   modelWorldMatrixInverse,
   normalize,
-  positionGeometry,
   positionView,
   pow,
   screenCoordinate,
@@ -50,7 +50,7 @@ import {
   vec4,
 } from 'three/tsl';
 import type { Node } from 'three/webgpu';
-import { KIND } from './mesh';
+import { KIND, NO_CELL } from './mesh';
 
 /** Side of the window of swissBUILDINGS3D cells whose fade-in hides footprint buildings. */
 export const MASK_SIZE = 64;
@@ -65,6 +65,14 @@ export class BuildingMesh extends Mesh {
   fadeHi = 0;
   /** Geoid undulation at the tile (tile-frame y is above the ellipsoid; snow is by sea level). */
   geoid = 50;
+  /** The extent the 16-bit positions are quantised to: lowest corner and size, metres. */
+  readonly posMin = new Vector3();
+  readonly posRange = new Vector3();
+  /** The range the 16-bit lift (position.w) is quantised to, metres. */
+  liftMin = 0;
+  liftRange = 0;
+  /** Lowest swissBUILDINGS3D cell column and row of the tile (the look's cells are relative). */
+  readonly cellOrigin = new Vector2();
 }
 
 /**
@@ -72,9 +80,9 @@ export class BuildingMesh extends Mesh {
  * glass by day, a varied share lit warm or cool at night), roofs a hint of tile courses and
  * snow above the snow line. Faces are flat, their normal taken from screen-space derivatives.
  *
- * Vertex attributes (see MeshData): position (y above the building's ground point), lift
- * (metres that put the vertex onto the drawn terrain, refreshed on the CPU when the terrain
- * changes), roof and wall colour with kind and seed, and the 3D cell, eave height and flags.
+ * Vertex attributes (see MeshData): position (y above the building's ground point) with the
+ * lift in w (metres that put the vertex onto the drawn terrain, refreshed on the CPU when the
+ * terrain changes), roof and wall colour with kind and seed, and the 3D cell and eave height.
  */
 export class BuildingMaterials {
   readonly uniforms = {
@@ -126,19 +134,41 @@ export class BuildingMaterials {
     const fadeLo = perMesh((m) => m.fadeLo);
     const fadeHi = perMesh((m) => m.fadeHi);
     const geoid = perMesh((m) => m.geoid);
+    const liftMin = perMesh((m) => m.liftMin);
+    const liftRange = perMesh((m) => m.liftRange);
+    const posMin = uniform(new Vector3()).onObjectUpdate(
+      ({ object }) => (object as BuildingMesh).posMin,
+    );
+    const posRange = uniform(new Vector3()).onObjectUpdate(
+      ({ object }) => (object as BuildingMesh).posRange,
+    );
+    const cellOrigin = uniform(new Vector2()).onObjectUpdate(
+      ({ object }) => (object as BuildingMesh).cellOrigin,
+    );
 
     // ---- vertex stage ----
-    const p = positionGeometry;
-    const lift = attribute('bLift', 'float');
-    const roofAttr = attribute('bRoof', 'vec4');
-    const wallAttr = attribute('bWall', 'vec4');
-    const info = attribute('bInfo', 'vec4').mul(65535);
+    // 16-bit attributes (see mesh.ts), back to tile-frame metres.
+    const q = attribute('position', 'vec4');
+    const p = posMin.add(q.xyz.mul(posRange));
+    const lift = liftMin.add(q.w.mul(liftRange));
+    // The look's 16-bit words (see packLook); rounded, as the normalised value times 65535
+    // can land a hair below the integer.
+    const look = floor(attribute('bLook', 'vec4').mul(65535).add(0.5));
+    const bits = (v: Node<'float'>, shift: number, count: number) =>
+      floor(v.div(2 ** shift)).mod(2 ** count);
+    const rgb565 = (v: Node<'float'>) =>
+      vec3(bits(v, 11, 5).div(31), bits(v, 5, 6).div(63), bits(v, 0, 5).div(31));
+    const cellCol = bits(look.z, 0, 5);
+    const cellRow = bits(look.z, 5, 5);
+    const kindCode = bits(look.z, 10, 4);
+    const eaveCode = bits(look.w, 0, 8);
+    const seedCode = bits(look.w, 8, 8);
 
     // Footprint buildings in a cell whose swissBUILDINGS3D model is shown step aside.
-    const mx = info.x.sub(u.maskOrigin.x);
-    const my = info.y.sub(u.maskOrigin.y);
-    const inMask = info.x
-      .lessThan(65000)
+    const mx = cellOrigin.x.add(cellCol).sub(u.maskOrigin.x);
+    const my = cellOrigin.y.add(cellRow).sub(u.maskOrigin.y);
+    const inMask = bits(look.z, 0, 10)
+      .lessThan(NO_CELL - 0.5)
       .and(mx.greaterThanEqual(0))
       .and(my.greaterThanEqual(0))
       .and(mx.lessThan(MASK_SIZE))
@@ -153,10 +183,16 @@ export class BuildingMaterials {
     const vLocal = varying(placed, 'bLocal');
     const vRel = varying(p.y, 'bRel');
     const vHide = varying(hide, 'bHide');
-    // Colours arrive as sRGB bytes; the shader works in linear light.
-    const vRoof = varying(vec4(pow(roofAttr.xyz, vec3(2.2)), roofAttr.w.mul(255)), 'bRoofV');
-    const vWall = varying(vec4(pow(wallAttr.xyz, vec3(2.2)), wallAttr.w), 'bWallV');
-    const vEave = varying(info.z.div(10), 'bEave');
+    // Colours arrive as sRGB 5:6:5; the shader works in linear light.
+    const vRoof = varying(vec4(pow(rgb565(look.x), vec3(2.2)), kindCode), 'bRoofV');
+    const vWall = varying(vec4(pow(rgb565(look.y), vec3(2.2)), seedCode.div(255)), 'bWallV');
+    // As unpackEave: half metres to 100 m, then 4 m steps; 255 for none.
+    const eaveM = select(
+      eaveCode.lessThan(199.5),
+      eaveCode.div(2),
+      select(eaveCode.greaterThan(254.5), float(1000), eaveCode.sub(200).mul(4).add(100)),
+    );
+    const vEave = varying(eaveM, 'bEave');
 
     // ---- fragment stage ----
     const lp = vLocal;
