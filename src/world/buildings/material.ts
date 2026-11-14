@@ -167,8 +167,11 @@ export class BuildingMaterials {
       .toVar();
     const kind = vRoof.w;
     const seed = vWall.w;
-    const roofColour = vRoof.xyz;
-    const wallColour = vWall.xyz;
+    // Palette colours are as named (sRGB swatches); seen from the air, through haze and
+    // weathering, plaster reflects about 0.5 and old tiles are browner than new ones.
+    const roofLuma = dot(vRoof.xyz, vec3(0.2126, 0.7152, 0.0722));
+    const roofColour = mix(vec3(roofLuma), vRoof.xyz, 0.78).mul(0.85);
+    const wallColour = vWall.xyz.mul(0.75);
     const eave = vEave;
     const roofness = smoothstep(0.3, 0.45, n.y);
     const isKind = (k: number) => abs(kind.sub(k)).lessThan(0.5);

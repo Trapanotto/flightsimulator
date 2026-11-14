@@ -55,8 +55,9 @@ export async function createDraco(
   nodeRequire?: unknown,
 ): Promise<DracoModule> {
   // The wrapper is a plain script, not a module: evaluate it in its own function scope.
-  const factory = new Function('require', `${wrapper}\nreturn DracoDecoderModule;`)(
+  const factory = new Function('require', '__dirname', `${wrapper}\nreturn DracoDecoderModule;`)(
     nodeRequire,
+    '',
   ) as (opts: object) => Promise<DracoModule>;
   return factory({ wasmBinary: wasm });
 }
