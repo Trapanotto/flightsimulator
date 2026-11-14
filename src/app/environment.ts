@@ -1,5 +1,21 @@
-import { type Geodetic, type LocalFrame, ecefToGeodetic, ellipsoidToSeaLevel, upAt } from '@geo';
-import { type AirSample, type Environment, type GroundSample, type Vec3, isa } from '@sim';
+import {
+  type Geodetic,
+  type LocalFrame,
+  ecefToGeodetic,
+  ellipsoidToSeaLevel,
+  geoidUndulation,
+  magneticDeclination,
+  upAt,
+} from '@geo';
+import {
+  AirModel,
+  type AirSample,
+  type AirTerrain,
+  type Environment,
+  type GroundSample,
+  type Vec3,
+  isa,
+} from '@sim';
 
 const RAD = Math.PI / 180;
 
@@ -26,6 +42,19 @@ export interface AirState {
   isaDeviation: number;
   /** 0 dry .. 1 soaked ground. */
   wetness: number;
+  /** Cumulus: share of the sky covered and the layer's base and top, metres above sea level. */
+  cloudCover?: number;
+  cloudBase?: number;
+  cloudTop?: number;
+  /** A closed stratus deck, metres above sea level. */
+  stratus?: { base: number; top: number };
+  /** 0 dry .. 1 heavy rain or snow. */
+  precipitation?: number;
+  /** Air temperature at sea level, degrees Celsius. */
+  temperature?: number;
+  /** Where the sun stands, degrees (elevation above the horizon, azimuth from north). */
+  sunElevationDeg?: number;
+  sunAzimuthDeg?: number;
 }
 
 /**
@@ -33,7 +62,58 @@ export interface AirState {
  * the air from the weather. The simulation knows none of those packages.
  */
 export class WorldEnvironment implements Environment {
-  air_: AirState = { windFromDeg: 240, windSpeed: 0, isaDeviation: 0, wetness: 0 };
+  private state: AirState = { windFromDeg: 240, windSpeed: 0, isaDeviation: 0, wetness: 0 };
+  /**
+   * Simulated seconds of the flight: the app sets it before every step (thermals and gusts
+   * drift with it; the simulation's own interface has no clock).
+   */
+  time = 0;
+  /** The moving air: wind with height, terrain flow, thermals, gusts. */
+  readonly airModel = new AirModel();
+  private readonly terrain: AirTerrain = {
+    height: (lon, lat) => {
+      const s = this.world.ground(lon, lat);
+      return s ? ellipsoidToSeaLevel(lon, lat, s.height) : undefined;
+    },
+  };
+  private readonly flow: Vec3 = { x: 0, y: 0, z: 0 };
+
+  get air_(): AirState {
+    return this.state;
+  }
+
+  /** The weather changed (or the sun moved on): blends in over some seconds. */
+  set air_(a: AirState) {
+    this.state = a;
+    this.airModel.setWeather(
+      {
+        windFromDeg: a.windFromDeg,
+        windSpeed: a.windSpeed,
+        sunElevationDeg: a.sunElevationDeg ?? 40,
+        sunAzimuthDeg: a.sunAzimuthDeg,
+        // Under a stratus deck no sun reaches the ground: no thermals.
+        cloudCover: a.stratus ? 1 : (a.cloudCover ?? 0.3),
+        temperature: a.temperature ?? 15,
+        cloudBase: a.cloudBase,
+      },
+      this.time,
+    );
+  }
+
+  /** Finer terrain arrived: the air follows the new shape gently. */
+  terrainChanged() {
+    this.airModel.terrainChanged();
+  }
+
+  geoidHeight(position: Vec3): number {
+    const g = ecefToGeodetic(position, this.g);
+    return geoidUndulation(g.lon, g.lat);
+  }
+
+  magneticDeclination(position: Vec3): number {
+    const g = ecefToGeodetic(position, this.g);
+    return magneticDeclination(g.lon, g.lat);
+  }
   /**
    * Added to every ground height, metres. When finer terrain arrives the ground under the
    * wheels moves; the app puts the difference here and lets it fade, so the aircraft is
@@ -72,26 +152,27 @@ export class WorldEnvironment implements Environment {
   air(position: Vec3, out: AirSample): AirSample {
     const g = ecefToGeodetic(position, this.g);
     // The standard atmosphere is defined over sea level, positions are over the ellipsoid.
-    const a = isa(ellipsoidToSeaLevel(g.lon, g.lat, g.h), this.air_.isaDeviation);
+    const s = this.state;
+    const h = ellipsoidToSeaLevel(g.lon, g.lat, g.h);
+    const a = isa(h, s.isaDeviation);
     out.density = a.density;
     out.temperature = a.temperature;
     out.pressure = a.pressure;
-    // Wind grows with height above the ground (power law), up to about three times the
-    // surface wind at altitude.
-    const ground = this.world.ground(g.lon, g.lat)?.height ?? g.h - 300;
-    const agl = Math.max(g.h - ground, 2);
-    const speed = this.air_.windSpeed * Math.min(3, (agl / 10) ** 0.16);
-    const to = (this.air_.windFromDeg + 180) * RAD;
-    // East and north unit vectors at the place, in ECEF.
+    // In cloud or precipitation: ice builds below freezing.
+    const inStratus = s.stratus !== undefined && h > s.stratus.base && h < s.stratus.top;
+    const inCumulus =
+      (s.cloudCover ?? 0) > 0.5 && h > (s.cloudBase ?? Infinity) && h < (s.cloudTop ?? -Infinity);
+    const below = h < (s.stratus?.top ?? s.cloudTop ?? 0);
+    out.moisture = inStratus || inCumulus ? 1 : below ? (s.precipitation ?? 0) : 0;
+    // East, north and up at the place, in ECEF.
+    const f = this.airModel.sample(g.lon, g.lat, h, this.time, this.terrain, this.flow);
     const sl = Math.sin(g.lon * RAD);
     const cl = Math.cos(g.lon * RAD);
     const sp = Math.sin(g.lat * RAD);
     const cp = Math.cos(g.lat * RAD);
-    const e = Math.sin(to) * speed;
-    const n = Math.cos(to) * speed;
-    out.wind.x = -sl * e - sp * cl * n;
-    out.wind.y = cl * e - sp * sl * n;
-    out.wind.z = cp * n;
+    out.wind.x = -sl * f.x - sp * cl * f.y + cp * cl * f.z;
+    out.wind.y = cl * f.x - sp * sl * f.y + cp * sl * f.z;
+    out.wind.z = cp * f.y + sp * f.z;
     return out;
   }
 

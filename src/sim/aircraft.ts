@@ -1,3 +1,4 @@
+import { createAvionics } from './avionics/avionics';
 import { C172 } from './c172';
 import { FlightModel } from './flightModel';
 import type { AvionicsUnit } from './avionicsTypes';
@@ -8,7 +9,7 @@ export const AIRCRAFT: AircraftInfo[] = [C172.info];
 
 /**
  * A new aircraft of the type, to be placed with reset(). `avionics` is the unit its radios,
- * navigation and autopilot run in; without one the avionics stay dark.
+ * navigation and autopilot run in; by default the type's own.
  */
 export function createAircraft(
   id: AircraftId,
@@ -16,7 +17,7 @@ export function createAircraft(
 ): SimAircraft {
   switch (id) {
     case 'c172':
-      return new FlightModel(C172, options.avionics);
+      return new FlightModel(C172, options.avionics ?? createAvionics());
   }
   throw new Error(`createAircraft('${String(id)}'): unknown type`);
 }

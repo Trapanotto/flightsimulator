@@ -21,6 +21,14 @@ export type {
 export { FixedStep, SIM_DT, SIM_HZ } from './fixedStep';
 export { isa, type IsaSample } from './atmosphere';
 export { AIRCRAFT, createAircraft, neutralControls } from './aircraft';
+export { createAvionics } from './avionics/avionics';
+export {
+  AirModel,
+  type AirComponents,
+  type AirModelOptions,
+  type AirTerrain,
+  type AirWeather,
+} from './air';
 export {
   TestEnvironment,
   geodeticToEcef,
