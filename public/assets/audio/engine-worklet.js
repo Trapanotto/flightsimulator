@@ -1,4 +1,4 @@
-// Engine sound synthesis, sample by sample (AudioWorklet; used by src/audio/FlightAudio.ts).
+// Engine sound synthesis, sample by sample (AudioWorklet; used by src/audio/AircraftSound.ts).
 //
 // Instead of filtered white noise (which sounds like a vacuum cleaner) the sound is built
 // from what makes it in reality:
@@ -11,7 +11,9 @@
 //   fighter    deeper roar; afterburner adds a low rumble and crackle (random impulses)
 //
 // Parameters (k-rate): rps (shaft revolutions per second), load (engine output 0..1),
-// boost (afterburner 0/1), pitch (Doppler factor). The engine kind, blade and cylinder
+// boost (afterburner 0/1), pitch (Doppler factor); for a piston engine also firing (share of
+// strokes that burn: 0 cranking or windmilling, about half while it catches, 1 running) and
+// starter (0/1: the starter motor and its pinion on the ring gear). The engine kind, blade and cylinder
 // counts come by message: { kind, blades, cylinders }.
 
 const TAU = Math.PI * 2;
@@ -63,6 +65,8 @@ class EngineProcessor extends AudioWorkletProcessor {
       { name: 'load', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
       { name: 'boost', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
       { name: 'pitch', defaultValue: 1, minValue: 0.5, maxValue: 2, automationRate: 'k-rate' },
+      { name: 'firing', defaultValue: 1, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
+      { name: 'starter', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
     ];
   }
 
@@ -80,6 +84,8 @@ class EngineProcessor extends AudioWorkletProcessor {
     this.blade = 0;
     this.whine = 0;
     this.fanBuzz = 0;
+    this.gear = 0;
+    this.motor = 0;
     // Piston: current exhaust burst.
     this.burst = 0;
     this.burstAmp = 0;
@@ -154,6 +160,8 @@ class EngineProcessor extends AudioWorkletProcessor {
     const rps = params.rps[0] * pitch;
     const load = params.load[0];
     const boost = params.boost[0];
+    const firing = params.firing[0];
+    const starter = params.starter[0];
     const running = rps > 0.5;
     const k = this.kind;
     const n = out.length;
@@ -182,15 +190,23 @@ class EngineProcessor extends AudioWorkletProcessor {
       this.shaft = (this.shaft + shaftInc) % 1;
 
       if (k === 'piston') {
+        // Without combustion every compression stroke brakes the crank and the next one lets
+        // it run on: the uneven chug of a cranking or windmilling engine.
+        const speed = 1 - 0.4 * (1 - firing) * Math.cos(TAU * this.fire);
         // Exhaust pulses: cylinders/2 per revolution, with a little timing jitter.
-        const firing = (rps * this.cylinders) / 2;
-        this.fire += (firing / fs) * (1 + 0.012 * this.rand());
+        const strokes = (rps * this.cylinders) / 2;
+        this.fire += ((strokes * speed) / fs) * (1 + 0.012 * this.rand());
         if (this.fire >= 1) {
           this.fire -= 1;
           this.cyl = (this.cyl + 1) % this.cylinders;
-          // Idle is lumpy, full power even; louder with load.
-          const lump = 1 + (1 - load) * 0.35 * this.rand();
-          this.burstAmp = (0.35 + 0.65 * load) * this.cylGain[this.cyl] * lump;
+          if (firing >= 1 || (this.rand() + 1) / 2 < firing) {
+            // Idle is lumpy, full power even; louder with load.
+            const lump = 1 + (1 - load) * 0.35 * this.rand();
+            this.burstAmp = (0.35 + 0.65 * load) * this.cylGain[this.cyl] * lump;
+          } else {
+            // A stroke that does not burn only puffs compressed air through the exhaust.
+            this.burstAmp = 0.15 * this.cylGain[this.cyl];
+          }
           this.burst = 1;
         }
         // The burst: a sharp kick plus a short noise puff, decaying in ~4 ms.
@@ -200,11 +216,23 @@ class EngineProcessor extends AudioWorkletProcessor {
         const exhaust = this.pipeLo.step(exc) * 1.3 + this.pipeHi.step(exc) * 0.7;
         s += this.lp.step(exhaust + exc * 0.18);
         // Propeller: blade pass, sharper and louder with tip speed and load.
-        this.blade = (this.blade + (rps * this.blades) / fs) % 1;
+        this.blade = (this.blade + (rps * this.blades * speed) / fs) % 1;
         const tip = Math.min(1, rps / 45);
         const prop = this.pulse(this.blade, 6) * (0.15 + 0.35 * load) * tip * tip;
         s += this.propLp.step(prop) * 0.9;
         s += this.body.step(this.brownNoise()) * 0.08 * (0.3 + load);
+        if (starter > 0) {
+          // Starter: the pinion meshing with the 149-tooth ring gear whines at 149 x the crank
+          // speed; the motor itself turns about 16 times faster than the crank and hums.
+          this.gear = (this.gear + (rps * 149 * speed) / fs) % 1;
+          this.motor = (this.motor + (rps * 16 * speed) / fs) % 1;
+          const st = starter * Math.min(1, rps / 3);
+          s +=
+            st *
+            (this.pulse(this.gear, 4) * 0.15 +
+              Math.sin(TAU * this.motor) * 0.1 +
+              this.rand() * 0.025);
+        }
       } else if (k === 'turboprop') {
         // Propeller first: the big 5-blade prop saws (it dominates a PT6 aircraft).
         this.blade = (this.blade + (rps * this.blades) / fs) % 1;
