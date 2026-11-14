@@ -32,7 +32,7 @@ export class WorkerPool {
   constructor(
     factory: () => Worker,
     size: number,
-    private readonly maxInFlight: number,
+    private maxInFlight: number,
   ) {
     for (let i = 0; i < size; i++) {
       const w = factory();
@@ -40,6 +40,13 @@ export class WorkerPool {
       this.workers.push(w);
       this.load.push(0);
     }
+  }
+
+  /** Jobs running at the same time; raising it starts waiting jobs at once. */
+  set limit(n: number) {
+    if (n === this.maxInFlight) return;
+    this.maxInFlight = n;
+    this.pump();
   }
 
   get queued() {

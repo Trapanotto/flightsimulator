@@ -58,6 +58,18 @@ const ROOT_ZOOM = 8;
 const ROOT_RANGE = { x0: 263, x1: 271, y0: 192, y1: 196 };
 /** A download failing this often (not 403/404) is given up for the session. */
 const MAX_ERRORS = 3;
+/** Behind a loading screen this many times the tiles are built at once. */
+const HURRY_IN_FLIGHT = 2;
+
+let blank: OffscreenCanvas | undefined;
+/** A 1 x 1 image that can always be uploaded. */
+function blankPixel(): OffscreenCanvas {
+  if (!blank) {
+    blank = new OffscreenCanvas(1, 1);
+    blank.getContext('2d');
+  }
+  return blank;
+}
 
 /** Sampling of the orthophoto: sRGB, mipmapped, anisotropic. */
 export function tileImageTexture(t: Texture, anisotropy: number): Texture {
@@ -166,6 +178,8 @@ export class TerrainStreamer implements TileProvider<TileData> {
   private readonly uploads: Upload[] = [];
   private frame: LocalFrame;
   private readonly ground: GroundSettings;
+  /** Behind a loading screen: more downloads at once, and no limit on uploads per frame. */
+  hurry = false;
   /** Counters for the demo and the performance report. */
   readonly counters = {
     uploaded: 0,
@@ -233,12 +247,14 @@ export class TerrainStreamer implements TileProvider<TileData> {
   }
 
   update(view: ViewState) {
+    this.tree.eager = this.hurry;
     this.tree.update(view);
     for (const [node, job] of this.jobs) job.handle.setPriority(node.priority);
 
     if (this.uploads.length > 1) this.uploads.sort((a, b) => b.node.priority - a.node.priority);
-    for (let i = 0; i < this.settings.uploadsPerFrame && this.uploads.length > 0; i++)
-      this.upload(this.uploads.shift()!);
+    this.pool.limit = this.settings.tilesInFlight * (this.hurry ? HURRY_IN_FLIGHT : 1);
+    const uploads = this.hurry ? Infinity : this.settings.uploadsPerFrame;
+    for (let i = 0; i < uploads && this.uploads.length > 0; i++) this.upload(this.uploads.shift()!);
 
     for (const node of this.tree.evictionCandidates(this.settings.maxTiles)) this.free(node);
 
@@ -349,6 +365,7 @@ export class TerrainStreamer implements TileProvider<TileData> {
 
     const image = tileImageTexture(new Texture(out.image), this.settings.anisotropy);
     // The GPU keeps its own copy; free the decoded bitmap once it is uploaded.
+    image.name = `photo ${tileId(node.key)}`;
     image.onUpdate = () => out.image.close();
 
     const mask = tileMaskTexture(out.mask, out.maskSize);
@@ -409,6 +426,10 @@ export class TerrainStreamer implements TileProvider<TileData> {
       d.mesh.geometry.dispose();
       (d.mesh.material as TerrainNodeMaterial).dispose();
       d.image.dispose();
+      // The renderer shares one shader among all tiles and keeps the textures of the tile it
+      // built it with as a template; it uploads them again for every new tile, also after
+      // that first tile is gone. Its photo is closed by then: leave a pixel in its place.
+      d.image.image = blankPixel();
       d.mask.dispose();
       d.ground.dispose();
       d.horizon.dispose();

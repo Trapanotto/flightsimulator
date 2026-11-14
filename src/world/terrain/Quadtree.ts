@@ -190,6 +190,13 @@ export class Quadtree<T = unknown> {
   };
   private frame = 0;
   private view!: ViewState;
+  /**
+   * Ask for all levels of the view at once instead of each level after its parent has
+   * arrived (ten round trips from the roots to the finest tiles). The tiles below a parent
+   * that is still loading are picked with its height range unknown, so a few too many are
+   * loaded: right behind a loading screen, wasteful while flying.
+   */
+  eager = false;
 
   constructor(
     readonly opts: QuadtreeOptions,
@@ -320,7 +327,10 @@ export class Quadtree<T = unknown> {
         c.lastUsed = this.frame;
         if (!this.inRange(c)) continue;
         const inView = this.visible(c);
-        if (c.state !== 'ready') this.want(c, this.priority(c, inView));
+        if (c.state !== 'ready') {
+          this.want(c, this.priority(c, inView));
+          if (this.eager && inView) this.ahead(c);
+        }
         if (inView && !c.canDraw(this.frame)) drawable = false;
       }
       if (drawable) {
@@ -337,6 +347,19 @@ export class Quadtree<T = unknown> {
       // Not loaded (evicted) but its children are: they stand in, and the node reloads.
       this.want(node, this.priority(node, true));
       for (const c of node.children ?? []) if (this.inRange(c) && this.visible(c)) this.select(c);
+    }
+  }
+
+  /** Asks for the visible tiles below a node that is not loaded yet, by the rule of select. */
+  private ahead(node: TileNode<T>) {
+    const maxZoom = node.inside ? this.opts.maxZoom : this.opts.maxZoomOutside;
+    if (node.key.z >= maxZoom || node.childrenFailed || node.state === 'failed') return;
+    if (this.sse(node) <= this.opts.maxTexelPx) return;
+    for (const c of this.ensureChildren(node)) {
+      c.lastUsed = this.frame;
+      if (c.state === 'ready' || !this.inRange(c) || !this.visible(c)) continue;
+      this.want(c, this.priority(c, true));
+      this.ahead(c);
     }
   }
 

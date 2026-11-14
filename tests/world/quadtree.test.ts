@@ -110,6 +110,27 @@ describe('quadtree selection', () => {
     }
   });
 
+  it('asks for every level at once when eager, and ends up with the same tiles', () => {
+    const v = view(BELP.lon, BELP.lat, 1100);
+    const p = new FakeProvider();
+    const tree = new Quadtree(OPTS, p);
+    tree.eager = true;
+    tree.update(v);
+    for (const n of [...tree.loading]) tree.markReady(n, 500, 1200);
+    // One frame after the roots: tiles down to the finest level are on their way.
+    tree.update(v);
+    expect(Math.max(...p.requested.map((n) => n.key.z))).toBe(OPTS.maxZoom);
+    settle(tree, p, v);
+    tree.eager = false;
+    tree.update(v);
+
+    const q = new FakeProvider();
+    const plain = new Quadtree(OPTS, q);
+    settle(plain, q, v);
+    const ids = (t: Quadtree) => t.rendered.map((n) => `${n.key.z}/${n.key.x}/${n.key.y}`).sort();
+    expect(ids(tree)).toEqual(ids(plain));
+  });
+
   it('keeps the parent until all four children are loaded', () => {
     const p = new FakeProvider();
     const tree = new Quadtree(OPTS, p);

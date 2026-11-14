@@ -8,6 +8,9 @@ import {
   Vector3,
   WebGPURenderer,
 } from 'three/webgpu';
+import type { Object3D } from 'three/webgpu';
+import { SHOWCASE_SPEED, Showcase } from './Showcase';
+import { headingAt } from './showcasePath';
 import { pass } from 'three/tsl';
 import { type AircraftVisual, createReferenceMarker, loadAircraftVisual } from '@aircraft';
 import { AircraftSound, AudioEngine } from '@audio';
@@ -48,6 +51,11 @@ const HOME = { icao: 'LSZB', runway: '32' };
 /** The render origin follows the aircraft; it is moved when it is this far away (metres). */
 const REBASE_DISTANCE = 3000;
 const KT = 0.514444;
+const UP = new Vector3(0, 1, 0);
+/** Shaders built at the same time behind a loading screen. */
+const COMPILE_LANES = 4;
+/** Metres the stand-in aircraft of the loading screen sits above the ground (about its wheels). */
+const STAND_IN_HEIGHT = 1.2;
 
 /** What tests and the screenshot tool can reach from the page (`window.__app`). */
 export interface AppDebug {
@@ -67,6 +75,8 @@ export interface AppDebug {
   assist: RudderAssist;
   /** Loudness of the sound output right now (RMS). */
   audioLevel: () => number;
+  /** What the loading screen is waiting for. */
+  loading: () => { compiling: number; calm: number; modelReady: boolean };
   /** Test switch: a fixed reach of the shadow map in metres instead of the adaptive one. */
   shadowReach?: number;
 }
@@ -84,6 +94,8 @@ interface Pending {
   lat: number;
   /** Height above the ellipsoid for a start in the air. */
   altitude?: number;
+  /** Rough height of the ground there above the ellipsoid, until the terrain knows better. */
+  guess: number;
   start: Omit<InitialCondition, 'position'>;
   since: number;
 }
@@ -145,6 +157,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   /** A fixed frame: the clouds are anchored to it, so they stay over the land. */
   const anchor = new LocalFrame(homeStart.lon, homeStart.lat, 0);
   const world = new World(frame, profile.world);
+  // The terrain's description is fetched while the renderer is still setting up.
+  world.init().catch(() => undefined);
   const env = new WorldEnvironment(world, () => frame);
   scene.add(sky.object, world.object);
   scene.environment = sky.environment;
@@ -157,6 +171,55 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     scenePass.getTextureNode('depth'),
     camera,
   );
+
+  // ---- shaders ----
+  // Drawing an object for the first time builds its shader, one after the other, and the
+  // browser shows no frame until the graphics card is done: seconds for a fresh scene. Behind
+  // a loading screen the scene is not drawn; every new object is handed to the renderer for
+  // building in the background instead, all at once, while the tiles are still on their way.
+  const precompiled = new WeakSet<Object3D>();
+  const toCompile: Object3D[] = [];
+  /** Objects waiting or being built. */
+  let compiling = 0;
+  let lanes = 0;
+  /**
+   * Builds the waiting objects, a few at a time. Each one costs milliseconds of script; a
+   * real pause between two lets the tile workers' messages through, which would otherwise
+   * wait until every shader is done.
+   */
+  const compileLane = async () => {
+    lanes++;
+    for (let o = toCompile.shift(); o; o = toCompile.shift()) {
+      const target = renderer.getRenderTarget();
+      const mrt = renderer.getMRT();
+      // The same target the scene pass draws into: a pipeline is only reused for the same one.
+      renderer.setRenderTarget(scenePass.renderTarget);
+      renderer.setMRT(null);
+      const done = renderer.compileAsync(o, camera, scene);
+      renderer.setRenderTarget(target);
+      renderer.setMRT(mrt);
+      await done.catch((err: unknown) => console.warn(err));
+      compiling--;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    lanes--;
+  };
+  const precompile = () => {
+    // Nothing is drawn meanwhile, so nothing else brings the placements up to date; an object
+    // at a stale place is taken to be out of view and skipped.
+    scene.updateMatrixWorld();
+    camera.updateMatrixWorld();
+    scene.traverseVisible((o) => {
+      const drawn = o as Object3D & { isMesh?: boolean; isPoints?: boolean; isLine?: boolean };
+      if (!(drawn.isMesh || drawn.isPoints || drawn.isLine) || precompiled.has(o)) return;
+      precompiled.add(o);
+      compiling++;
+      toCompile.push(o);
+    });
+    while (lanes < COMPILE_LANES && toCompile.length > lanes) void compileLane();
+  };
+  /** The sky and the post-processing chain have been drawn once (their shaders exist). */
+  let drawnOnce = false;
 
   if (profile.shadowMapSize > 0) {
     const s = sky.sun.shadow;
@@ -212,6 +275,24 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     const g = frame.toGeodetic(local.set(x, 0, z));
     const h = world.groundHeight(g.lon, g.lat);
     return h === undefined ? undefined : frame.fromGeodetic(g.lon, g.lat, h, local).y;
+  };
+  const showcase = new Showcase();
+  /** Height of the menu's aircraft above the terrain, m. */
+  let showcaseAgl = 500;
+  const flyShowcase = (dt: number) => {
+    showcase.update(
+      dt,
+      frame,
+      visual.object,
+      camera,
+      // About the wingspan.
+      visual.view.chaseDistance * 0.65,
+      rig.groundY!,
+      { width: canvas.clientWidth, height: canvas.clientHeight },
+    );
+    const at = visual.object.position;
+    const ground = rig.groundY!(at.x, at.z);
+    if (ground !== undefined) showcaseAgl = Math.max(0, at.y - ground);
   };
   const input = new PilotInput();
   const assist = new RudderAssist();
@@ -281,30 +362,50 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     const icao = p?.airport ?? (p?.start.kind === 'runway' ? p.start.airport : undefined);
     const airport = (icao && findAirport(icao)) || homeAirport;
     const since = performance.now();
-    if (p && p.start.kind === 'air') {
+    if (!p) {
+      // The menu: a flight on rails through the Bernese Oberland.
+      showcase.reset();
+      pending = {
+        plan: null,
+        lon: showcase.geo.lon,
+        lat: showcase.geo.lat,
+        altitude: showcase.geo.h,
+        guess: 0,
+        start: { headingDeg: headingAt(0), speed: SHOWCASE_SPEED, onGround: false },
+        since,
+      };
+    } else if (p.start.kind === 'air') {
       const s = p.start;
       pending = {
         plan: p,
         lon: s.lon,
         lat: s.lat,
         altitude: seaLevelToEllipsoid(s.lon, s.lat, s.altitude),
+        guess: 0,
         start: { headingDeg: s.headingDeg, speed: 100 * KT, onGround: false },
         since,
       };
     } else {
-      const ident = p && p.start.kind === 'runway' ? p.start.runway : HOME.runway;
+      const ident = p.start.kind === 'runway' ? p.start.runway : HOME.runway;
       const at =
         runwayStart(airport, ident) ?? runwayStart(airport, airport.runways[0]!.ends[0].ident)!;
       pending = {
         plan: p,
         lon: at.lon,
         lat: at.lat,
-        // The aircraft of the menu is parked with its engine off.
-        start: { headingDeg: at.headingDeg, speed: 0, onGround: true, enginesRunning: p !== null },
+        guess: seaLevelToEllipsoid(at.lon, at.lat, airport.elevation),
+        start: { headingDeg: at.headingDeg, speed: 0, onGround: true, enginesRunning: true },
         since,
       };
     }
     rebase(pending.lon, pending.lat);
+    // The camera takes its final place now: the terrain that loads is the terrain of that view.
+    if (p) {
+      showcase.release(camera);
+      canvas.style.opacity = '';
+      resize();
+      setView('outside');
+    } else visual.setCockpitView(false);
     calm = 0;
     tilesLoaded = 0;
     reveal = undefined;
@@ -315,9 +416,14 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       sky.setTime(typeof time === 'number' ? dateAtSwissHour(new Date(), time) : new Date());
     }
     // Screenshot tests need a sky that looks the same every time: no drifting clouds.
-    const choice = shot ? 'clear' : (p?.weather ?? 'live');
+    const choice = shot ? 'clear' : (p?.weather ?? 'menu');
     // Live weather arrives a moment later; until then (or without a connection) a fair day.
-    applyWeather(WEATHER_PRESETS[choice === 'live' ? 'fair' : choice]);
+    // The menu flies among the peaks: a fair day whose clouds stay above the route.
+    applyWeather(
+      choice === 'menu'
+        ? { ...WEATHER_PRESETS.fair, cloudCover: 0.25, cloudBase: 3700, cloudTop: 4700 }
+        : WEATHER_PRESETS[choice === 'live' ? 'fair' : choice],
+    );
     weatherRequest?.abort();
     if (choice === 'live') {
       weatherRequest = new AbortController();
@@ -342,9 +448,11 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     // Everything in view is loaded before anything is shown: the aircraft stands on the
     // final terrain (coarse tiles are metres off) and nothing sharpens while one watches.
     // Not forever, though: a slow connection still gets to fly.
-    const fine = under.zoom >= profile.world.maxZoom - 1;
-    if (!(fine && calm > 0.5) && waited < 30) return;
+    // An aircraft in the air stands on nothing: the terrain far below it never gets that fine.
+    const fine = !pending.start.onGround || under.zoom >= profile.world.maxZoom - 1;
+    if (!(fine && calm > 0.3) && waited < 30) return;
     if (!modelReady && waited < 20) return;
+    if (compiling > 0 && waited < 30) return;
     const ground = under.height;
     env.heightOffset = 0;
     groundZoom = under.zoom;
@@ -363,19 +471,12 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     const position = geodeticToEcef(p.lon, p.lat, p.altitude ?? ground, { x: 0, y: 0, z: 0 });
     aircraft.controls.flaps = 0;
     flight = new Flight(aircraft, env, { ...p.start, position });
-    aircraft.controls.parkingBrake = p.plan === null;
     // The reset trims the aircraft: take the throttle it chose.
     input.reset(aircraft.controls.throttle[0] ?? 0, aircraft.controls.flaps, true);
     assist.reset();
     visual.object.visible = true;
-    if (p.plan) setView('outside');
-    else {
-      rig.setMode('menu');
-      visual.setCockpitView(false);
-    }
-    // The first frames with the aircraft compile its shaders and stall; they are drawn
-    // behind the loading screen, which comes down a moment later.
-    reveal = { screen: p.plan ? 'flight' : 'menu', frames: 24 };
+    // A few frames behind the loading screen: the aircraft settles on its wheels.
+    reveal = { screen: p.plan ? 'flight' : 'menu', frames: 10 };
   };
 
   // ---- interface ----
@@ -498,6 +599,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     worstMs: 0,
     assist,
     audioLevel: () => audio.level(),
+    loading: () => ({ compiling, calm, modelReady }),
   };
   window.__app = debug;
 
@@ -512,6 +614,18 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   let worst = 0;
   let hudTime = 0;
   let appTime = 0;
+
+  let worldAt = 0;
+  const updateWorld = () => {
+    worldAt = performance.now();
+    world.hurry = pending !== undefined || reveal !== undefined;
+    world.update(camera);
+  };
+  // While the graphics card builds shaders the browser draws no frame for seconds at a time,
+  // and in a background tab none at all. The world keeps streaming behind the loading screen.
+  setInterval(() => {
+    if (pending && performance.now() - worldAt > 100) updateWorld();
+  }, 50);
 
   renderer.setAnimationLoop((now: number) => {
     const frameMs = now - last;
@@ -537,7 +651,6 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     if (flight) {
       const aircraft = flight.aircraft;
       const flying = plan !== null && game.screen.value === 'flight';
-      // The aircraft of the menu settles on its wheels and then stands still for good.
       if (plan === null) flight.paused = true;
       readTouchButtons();
       const pad = flying ? readGamepad() : null;
@@ -571,18 +684,30 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
         events.flapsDown = events.flapsUp = events.gearToggle = 0;
         assist.apply(stepDt, aircraft.telemetry, aircraft.controls);
       });
-      flight.place(visual.object, frame, alpha);
+      // The menu's aircraft is not simulated: it follows its loop, and so does the camera.
+      const tour = plan === null;
+      if (tour) flyShowcase(shot ? 0 : dt);
+      else flight.place(visual.object, frame, alpha);
 
       // Keep the render origin near the aircraft: single precision is exact to millimetres
       // only within a few kilometres.
       const p = visual.object.position;
       if (p.x * p.x + p.z * p.z > REBASE_DISTANCE * REBASE_DISTANCE) {
-        ecefToGeodetic(aircraft.state.position, geo);
-        rebase(geo.lon, geo.lat);
-        flight.place(visual.object, frame, alpha);
+        if (tour) {
+          rebase(showcase.geo.lon, showcase.geo.lat);
+          flyShowcase(0);
+        } else {
+          ecefToGeodetic(aircraft.state.position, geo);
+          rebase(geo.lon, geo.lat);
+          flight.place(visual.object, frame, alpha);
+        }
       }
       visual.update(dt, aircraft.telemetry, aircraft.controls);
-      rig.update(dt, camera, visual.object, visual.view, flying && !aircraft.telemetry.onGround);
+      if (!tour)
+        rig.update(dt, camera, visual.object, visual.view, flying && !aircraft.telemetry.onGround);
+      // The picture dips to black around the menu's camera cuts.
+      const opacity = tour && game.screen.value === 'menu' ? showcase.fade.toFixed(2) : '';
+      if (canvas.style.opacity !== opacity) canvas.style.opacity = opacity;
 
       hudTime += dt;
       if (plan && hudTime >= 0.05) {
@@ -604,14 +729,23 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     }
 
     if (pending && !flight) {
-      // Nothing to look at yet: wait at the start point, so its terrain loads in full detail.
-      const h = (world.groundHeight(pending.lon, pending.lat) ?? 600) + (pending.altitude ? 0 : 6);
-      frame.fromGeodetic(pending.lon, pending.lat, pending.altitude ?? h, camera.position);
-      const b = (pending.start.headingDeg * Math.PI) / 180;
-      local.copy(camera.position);
-      local.x += Math.sin(b) * 100;
-      local.z -= Math.cos(b) * 100;
-      camera.lookAt(local);
+      // The aircraft stands where it will start and the camera looks at it as it will: exactly
+      // the terrain of the first view loads, and the aircraft's shaders are built while the
+      // tiles are on their way instead of afterwards.
+      if (!pending.plan) flyShowcase(0);
+      else {
+        const h =
+          pending.altitude ??
+          (world.groundHeight(pending.lon, pending.lat) ?? pending.guess) + STAND_IN_HEIGHT;
+        frame.fromGeodetic(pending.lon, pending.lat, h, visual.object.position);
+        // A model looks along its +z; heading 0 is north, render -z.
+        visual.object.quaternion.setFromAxisAngle(
+          UP,
+          Math.PI - (pending.start.headingDeg * Math.PI) / 180,
+        );
+        rig.update(0, camera, visual.object, visual.view, false);
+      }
+      visual.object.visible = true;
     }
 
     audio.setVolume(settings.volume.value);
@@ -631,7 +765,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       lightDirection: sky.state.lightDirection,
       time: appTime,
     });
-    world.update(camera);
+    updateWorld();
     const camGeo = frame.toGeodetic(camera.position, geo);
     anchor.fromGeodetic(frame.origin.lon, frame.origin.lat, 0, local);
     sky.update(camera, {
@@ -646,7 +780,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       // The shadow map must reach the ground below the aircraft. Ground beyond its far plane
       // counts as shadowed, and the map's whole footprint shows as a dark square from high up.
       const shadow = sky.sun.shadow;
-      const agl = flight?.aircraft.telemetry.agl ?? 0;
+      const agl = plan === null ? showcaseAgl : (flight?.aircraft.telemetry.agl ?? 0);
       const reach = 250 + (agl + 80) / Math.max(sky.state.lightDirection.y, 0.12);
       const far = debug.shadowReach ?? Math.min(Math.max(reach, 400), 30_000);
       if (Math.abs(far - shadow.camera.far) > 0.02 * far) {
@@ -657,7 +791,11 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       }
     }
 
-    pipeline.render();
+    if (pending && drawnOnce) precompile();
+    else {
+      pipeline.render();
+      drawnOnce = true;
+    }
 
     debug.frames++;
     if (!debug.ready && flight && game.screen.value === 'menu') debug.ready = true;

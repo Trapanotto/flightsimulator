@@ -97,7 +97,9 @@ async function composeImage(job: TileJob, b: GeoBounds, signal: AbortSignal, clo
     (r.x1 - r.x0 + 1) * MERCATOR_TILE_PX,
     (r.y1 - r.y0 + 1) * MERCATOR_TILE_PX,
   );
-  const mctx = mosaic.getContext('2d')!;
+  // A software canvas (willReadFrequently): a GPU-backed one waits for the graphics process,
+  // which is busy for seconds whenever the renderer builds shaders, and every tile with it.
+  const mctx = mosaic.getContext('2d', { willReadFrequently: true })!;
   mctx.fillStyle = FALLBACK_COLOR;
   mctx.fillRect(0, 0, mosaic.width, mosaic.height);
 
@@ -130,7 +132,7 @@ function warpImage(
   missing: number,
 ) {
   const out = new OffscreenCanvas(job.imageSize, job.imageSize);
-  const ctx = out.getContext('2d')!;
+  const ctx = out.getContext('2d', { willReadFrequently: true })!;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   const sw = plan.sx1 - plan.sx0;

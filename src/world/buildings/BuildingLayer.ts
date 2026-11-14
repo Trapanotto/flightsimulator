@@ -41,6 +41,9 @@ import type { BuildingJob, JobOutput } from './protocol';
 /** swissBUILDINGS3D 3.0 as 3D Tiles; the dated release folder comes from this tileset.json. */
 export const BUILDINGS_3D_BASE = 'https://3d.geo.admin.ch/ch.swisstopo.swissbuildings3d.3d/v1/';
 
+/** Ground work per frame while a loading screen is up, ms. */
+const HURRY_BUDGET_MS = 30;
+
 type TileState = 'queued' | 'built' | 'shown' | 'absent' | 'failed';
 
 interface Tile {
@@ -204,7 +207,8 @@ export class BuildingLayer implements WorldLayer {
     // With a backlog of new tiles waiting for their ground (a fresh view), more time goes
     // to it: the view fills in seconds instead of trickling in.
     const backlog = this.uploads.length > 3 ? 2.5 : 1;
-    this.budgetEnd = start + this.preset.groundBudgetMs * backlog;
+    // Behind a loading screen the ground work takes most of the frame.
+    this.budgetEnd = start + (ctx.hurry ? HURRY_BUDGET_MS : this.preset.groundBudgetMs * backlog);
     if (ctx.groundRevision !== this.lastRevision) {
       const now = performance.now();
       const near = now - this.reseatAt > 1500;
@@ -439,7 +443,11 @@ export class BuildingLayer implements WorldLayer {
     let count = 0;
     let bytes = 0;
     for (let i = 0; i < this.uploads.length;) {
-      if (count >= this.preset.uploadsPerFrame || bytes >= this.preset.uploadBytesPerFrame) break;
+      if (
+        !ctx.hurry &&
+        (count >= this.preset.uploadsPerFrame || bytes >= this.preset.uploadBytesPerFrame)
+      )
+        break;
       const t = this.uploads[i]!;
       if (!this.isLive(t) || !t.output) {
         this.uploads.splice(i, 1);

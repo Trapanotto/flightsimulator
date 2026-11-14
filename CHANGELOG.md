@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.0-alpha.4 – Rundflug im Menü, kürzere Ladezeit (2026-11-14)
+
+- **Rundflug im Menü:** Hinter dem Hauptmenü fliegt die Cessna wieder eine Schleife durchs
+  Berner Oberland (Lauterbrunnental, Kleine Scheidegg, Eigernordwand, Grindelwald), mit
+  wechselnden Kameraeinstellungen wie in der alten Version.
+- **Ladezeit:** Das Menü steht nach etwa 7 statt 14 Sekunden. Die Shader werden während des
+  Ladens im Hintergrund gebaut statt beim ersten Bild, alle Detailstufen der Landschaft laden
+  gleichzeitig statt nacheinander, und die Kacheln warten nicht mehr auf die Grafikkarte.
+- Ein Flug startet aus dem Menü in etwa 3 Sekunden.
+- Behoben: Start in grosser Höhe wartete unnötig lange auf feine Bodenkacheln.
+
 ## 1.0.0-alpha.3 – Phase 2: die Welt (2026-11-14)
 
 - **Wald und Bäume:** 3D-Bäume in den Waldflächen und die einzeln vermessenen Bäume der

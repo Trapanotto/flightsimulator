@@ -48,6 +48,11 @@ export interface LayerContext {
   groundHeight(lon: number, lat: number): number | undefined;
   /** Counts up whenever terrain tiles arrive or leave (heights may have changed). */
   groundRevision: number;
+  /**
+   * A loading screen covers the view: smooth frames do not matter, being done soon does.
+   * Per-frame budgets (uploads, ground work) can be many times larger.
+   */
+  hurry: boolean;
 }
 
 /**

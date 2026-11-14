@@ -165,6 +165,11 @@ export class World {
   };
   private lastUpdate = 0;
   private readonly layerContext: LayerContext;
+  /**
+   * Set while a loading screen covers the view: everything streams as fast as it can, at the
+   * price of uneven frames.
+   */
+  hurry = false;
 
   constructor(
     private frame: LocalFrame,
@@ -187,6 +192,7 @@ export class World {
       screenHeight: this.screenHeight,
       groundHeight: (lon, lat) => this.groundHeight(lon, lat),
       groundRevision: 0,
+      hurry: false,
     };
   }
 
@@ -287,6 +293,7 @@ export class World {
       planes: this.planes,
       pixelsPerRadian: this.screenHeight / (2 * Math.tan((fov * Math.PI) / 180 / 2)),
     };
+    this.terrain.hurry = this.hurry;
     this.terrain.update(view);
 
     const now = performance.now();
@@ -299,6 +306,7 @@ export class World {
     ctx.conditions = this.conditions;
     ctx.dt = this.lastUpdate ? Math.min((now - this.lastUpdate) / 1000, 0.25) : 0;
     ctx.screenHeight = this.screenHeight;
+    ctx.hurry = this.hurry;
     // Tiles arriving or leaving change the heights the layers stand on.
     const c = this.terrain.counters;
     ctx.groundRevision = c.uploaded + c.evicted;
