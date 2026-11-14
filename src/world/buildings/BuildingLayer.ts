@@ -58,6 +58,8 @@ interface Tile {
   mesh?: BuildingMesh;
   ground?: GroundGrid;
   fade: number;
+  /** Per-vertex lift being computed for the current ground, a slice per frame. */
+  lifting?: { out: Float32Array; cursor: number };
   cells?: Uint32Array;
   /** A finer or coarser build of the same tile waiting to take this one's place. */
   successor?: Tile;
@@ -83,6 +85,8 @@ export interface BuildingStats {
   failed: number;
   evicted: number;
   buildMs: number;
+  updateMs: number;
+  updateMaxMs: number;
 }
 
 const AXES = [
@@ -136,6 +140,10 @@ export class BuildingLayer implements WorldLayer {
   private cellBaseRequest?: Promise<void>;
   private cellBaseRetry = 0;
   private lastRevision = -1;
+  private reseatAt = -1e9;
+  private reseatFarAt = -1e9;
+  /** performance.now() by which this frame's ground work has to stop. */
+  private budgetEnd = 0;
   private lastCellPick = { lon: 0, lat: 0, h: 0, frame: -1 };
   private wantedCells: Array<{ key: number; distance: number }> = [];
   private frames = 0;
@@ -144,6 +152,8 @@ export class BuildingLayer implements WorldLayer {
   private readonly view: ViewPoint = { lon: 0, lat: 0, agl: 0 };
   private readonly counters = { downloaded: 0, failed: 0, evicted: 0, buildMs: 0 };
   private wantedPending = 0;
+  /** Main-thread time of update(): smoothed mean and worst after the first second, ms. */
+  private readonly timing = { mean: 0, max: 0 };
   private maskDirty = true;
 
   constructor(
@@ -168,6 +178,7 @@ export class BuildingLayer implements WorldLayer {
   }
 
   update(ctx: LayerContext) {
+    const start = performance.now();
     this.frames++;
     this.workers ??= new BuildingWorkers(
       () => new Worker(new URL('./buildings.worker.ts', import.meta.url), { type: 'module' }),
@@ -188,9 +199,23 @@ export class BuildingLayer implements WorldLayer {
     this.view.lat = ctx.view.lat;
     this.view.agl = ground === undefined ? Math.max(ctx.view.h - 600, 0) : ctx.view.h - ground;
 
+    // Terrain tiles arrive many times a second while flying: tiles near the camera are
+    // re-seated at most every 1.5 s, far ones (metres matter less there) every 8 s.
+    // With a backlog of new tiles waiting for their ground (a fresh view), more time goes
+    // to it: the view fills in seconds instead of trickling in.
+    const backlog = this.uploads.length > 3 ? 2.5 : 1;
+    this.budgetEnd = start + this.preset.groundBudgetMs * backlog;
     if (ctx.groundRevision !== this.lastRevision) {
-      this.lastRevision = ctx.groundRevision;
-      for (const t of this.allTiles()) t.ground?.invalidate();
+      const now = performance.now();
+      const near = now - this.reseatAt > 1500;
+      const far = now - this.reseatFarAt > 8000;
+      if (near) {
+        this.reseatAt = now;
+        if (far) this.reseatFarAt = now;
+        this.lastRevision = far ? ctx.groundRevision : this.lastRevision;
+        for (const t of this.allTiles())
+          if (far || t.distance < this.preset.footprintDetailRange) t.ground?.invalidate();
+      }
     }
 
     this.range = c.night > 0.5 ? this.preset.nightRange : this.preset.footprintRange;
@@ -201,6 +226,9 @@ export class BuildingLayer implements WorldLayer {
     this.fade(ctx.dt);
     this.updateMask();
     this.countPending();
+    const ms = performance.now() - start;
+    this.timing.mean += (ms - this.timing.mean) * 0.05;
+    if (this.frames > 60) this.timing.max = Math.max(this.timing.max, ms);
   }
 
   // ---- what to load ----
@@ -429,15 +457,20 @@ export class BuildingLayer implements WorldLayer {
         t.ground = new GroundGrid(t.frame, m.minX, m.maxX, m.minZ, m.maxZ, step);
       }
       // The ground under a new tile is sampled before it is shown (within the budget).
+      // Ground work shares one time budget per frame (seating included); a tile keeps the
+      // budget until its ground and lift are done, the next one waits.
+      while (!t.ground.ready && performance.now() < this.budgetEnd)
+        t.ground.fill(ctx.groundHeight, 300);
       if (!t.ground.ready) {
-        const budget = Math.max(64, Math.round(this.preset.groundBudgetMs * 600));
-        t.ground.fill(ctx.groundHeight, budget);
-        if (!t.ground.ready) {
-          i++;
-          count++;
-          continue;
-        }
+        // No terrain under it yet (or out of time): try the next tile.
+        if (performance.now() > this.budgetEnd) break;
+        i++;
+        continue;
       }
+      let lifted = false;
+      while (!lifted && performance.now() < this.budgetEnd)
+        lifted = this.advanceLift(t, this.liftSlice());
+      if (!lifted) break;
       this.uploads.splice(i, 1);
       this.show(t, this.createMesh(t));
       count++;
@@ -449,8 +482,8 @@ export class BuildingLayer implements WorldLayer {
     const m = t.output!.mesh;
     const g = new BufferGeometry();
     g.setAttribute('position', new BufferAttribute(m.positions, 3));
-    const lift = new BufferAttribute(new Float32Array(m.positions.length / 3), 1);
-    t.ground!.lift(m.positions, m.meta, m.buildings, lift.array as Float32Array);
+    const lift = new BufferAttribute(t.lifting!.out, 1);
+    t.lifting = undefined;
     g.setAttribute('bLift', lift);
     g.setAttribute('bRoof', new BufferAttribute(m.roof, 4, true));
     g.setAttribute('bWall', new BufferAttribute(m.wall, 4, true));
@@ -527,20 +560,39 @@ export class BuildingLayer implements WorldLayer {
   // ---- the ground under the tiles ----
 
   private seat(ctx: LayerContext) {
-    const t0 = performance.now();
-    const tiles = [...this.allTiles()].filter((t) => t.mesh && t.ground?.dirty);
+    const tiles: Tile[] = [];
+    for (const t of this.allTiles()) if (t.mesh && (t.ground?.dirty || t.lifting)) tiles.push(t);
     tiles.sort((a, b) => a.distance - b.distance);
     for (const t of tiles) {
-      if (performance.now() - t0 > this.preset.groundBudgetMs) break;
-      const r = t.ground!.fill(ctx.groundHeight, 400);
-      if (r.completed) {
-        const m = t.output!.mesh;
+      if (performance.now() > this.budgetEnd) break;
+      if (!t.lifting) {
+        if (!t.ground!.fill(ctx.groundHeight, 400).completed) continue;
+      }
+      if (this.advanceLift(t, this.liftSlice())) {
         const lift = t.mesh!.geometry.getAttribute('bLift') as BufferAttribute;
-        t.ground!.lift(m.positions, m.meta, m.buildings, lift.array as Float32Array);
+        (lift.array as Float32Array).set(t.lifting!.out);
+        t.lifting = undefined;
         lift.needsUpdate = true;
         this.bound(t);
       }
     }
+  }
+
+  /** Vertices whose lift is computed per call (about a millisecond's worth). */
+  private liftSlice() {
+    return 8_000;
+  }
+
+  /** Continues the lift of a tile's vertices onto its (complete) ground; true when done. */
+  private advanceLift(t: Tile, count: number): boolean {
+    const m = t.output!.mesh;
+    const n = m.positions.length / 3;
+    t.lifting ??= { out: new Float32Array(n), cursor: 0 };
+    const job = t.lifting;
+    const end = Math.min(n, job.cursor + count);
+    t.ground!.lift(m.positions, m.meta, m.buildings, job.out, job.cursor, end);
+    job.cursor = end;
+    return end >= n;
   }
 
   // ---- fades ----
@@ -699,6 +751,8 @@ export class BuildingLayer implements WorldLayer {
       failed: this.counters.failed,
       evicted: this.counters.evicted,
       buildMs: this.counters.buildMs,
+      updateMs: this.timing.mean,
+      updateMaxMs: this.timing.max,
     };
   }
 

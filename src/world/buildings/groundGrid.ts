@@ -88,11 +88,17 @@ export class GroundGrid {
    * below the terrain right under them, so walls on a slope reach into it instead of
    * floating.
    */
-  lift(positions: Float32Array, meta: Uint16Array, buildings: Float32Array, out: Float32Array) {
-    const n = positions.length / 3;
+  lift(
+    positions: Float32Array,
+    meta: Uint16Array,
+    buildings: Float32Array,
+    out: Float32Array,
+    start = 0,
+    end = positions.length / 3,
+  ) {
     let lastBuilding = -1;
     let gA = 0;
-    for (let i = 0; i < n; i++) {
+    for (let i = start; i < end; i++) {
       const b = meta[2 * i]!;
       if (b !== lastBuilding) {
         lastBuilding = b;
