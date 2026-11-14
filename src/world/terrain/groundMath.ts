@@ -96,13 +96,23 @@ export function snowCover<T>(o: Ops<T>, s: SnowSite<T>): { cover: T; depth: T } 
     o.add(above, o.mul(s.hollow, o.k(0.6))),
     o.mul(o.sub(o.k(1), holds), o.k(1.5)),
   );
-  const cover = o.mul(
-    o.smooth(-0.45, 0.45, o.add(potential, o.mul(s.noisePatch, o.k(0.6)))),
-    sticks,
+  const closed = o.smooth(-0.45, 0.45, o.add(potential, o.mul(s.noisePatch, o.k(0.6))));
+  // Below the line, old snow lingers in thin patches where the winter sun hardly reaches:
+  // north slopes and hollows, more of it the closer the line. Open and south-facing ground
+  // stays bare, so the lowlands read as a winter without snow, not as a snow line.
+  const near = o.smooth(-LOW_SNOW_BAND, -40, o.sub(s.elevation, s.snowLine));
+  const shade = o.clamp(o.add(o.mul(s.north, o.k(2.5)), s.hollow), 0, 1);
+  const lingering = o.mul(
+    o.mul(shade, o.smooth(0, 0.2, near)),
+    o.smooth(0.3, 0.65, o.mul(o.add(s.noisePatch, near), o.k(0.5))),
   );
+  const cover = o.mul(o.max(closed, o.mul(lingering, o.k(0.8))), sticks);
   const depth = o.mul(o.smooth(0.2, 1.6, potential), sticks);
   return { cover, depth };
 }
+
+/** Metres below the snow line over which thin patches linger in shade (see snowCover). */
+export const LOW_SNOW_BAND = 550;
 
 // ---- Season colours of the land below the snow ----
 
@@ -127,9 +137,11 @@ export interface GroundClass<T> {
   soil: T;
 }
 
-/** Noise -1..1 at the scale of a tree crown and of a patch of land. */
+/** Noise -1..1 at the scale of a tree crown, a field plot and a patch of land. */
 export interface SeasonNoise<T> {
   crown: T;
+  /** Tens of metres, independent of `patch`: which plots are ploughed. */
+  plot: T;
   patch: T;
 }
 
@@ -150,15 +162,18 @@ const mixRGB = <T>(o: Ops<T>, a: RGB<T>, b: RGB<T>, t: T): RGB<T> => [
 
 // Linear-RGB hues of the seasonal ground, from photographs of the Swiss lowlands and Alps.
 const AUTUMN_GRASS: [number, number, number] = [0.42, 0.33, 0.12];
-const WINTER_GRASS: [number, number, number] = [0.25, 0.27, 0.16];
+// Winter meadows without snow: frost-bitten, dull olive where the sward is dense and straw
+// yellow-brown where it is dry; ploughed fields and the floor of bare woods are earth brown.
+const WINTER_GRASS: [number, number, number] = [0.31, 0.3, 0.18];
+const WINTER_STRAW: [number, number, number] = [0.42, 0.34, 0.19];
+const WINTER_EARTH: [number, number, number] = [0.38, 0.28, 0.2];
 const SPRING_GRASS: [number, number, number] = [0.2, 0.38, 0.05];
 const LEAF_YELLOW: [number, number, number] = [0.55, 0.42, 0.08];
 const LEAF_ORANGE: [number, number, number] = [0.55, 0.27, 0.05];
 const LEAF_RUST: [number, number, number] = [0.4, 0.17, 0.07];
 const LARCH_GOLD: [number, number, number] = [0.6, 0.4, 0.06];
-const BARE_WOOD: [number, number, number] = [0.3, 0.26, 0.23];
+const BARE_WOOD: [number, number, number] = [0.33, 0.27, 0.22];
 const SPRING_LEAF: [number, number, number] = [0.22, 0.42, 0.06];
-const WINTER_SOIL: [number, number, number] = [0.3, 0.26, 0.21];
 
 /**
  * The ground of a season from the summer orthophoto. Every change is weighted by what the
@@ -180,21 +195,33 @@ export function seasonColor<T>(
 
   // Open land: meadows and green crops.
   const open = o.mul(c.veg, o.sub(one, c.forest));
+  const plot01 = o.add(o.mul(n.plot, o.k(0.5)), o.k(0.5));
   const autumnGrass = tinted(o, AUTUMN_GRASS, o.mul(lum, o.k(1.05)));
-  const winterGrass = tinted(o, WINTER_GRASS, lum);
   const springGrass = tinted(o, SPRING_GRASS, o.mul(lum, o.k(1.12)));
+  // Winter: the summer green must not survive anywhere; patches go from dull olive to straw,
+  // and about a quarter of the open land (ploughed plots) is bare earth.
+  const winterGrass = mixRGB(
+    o,
+    tinted(o, WINTER_GRASS, o.mul(lum, o.k(0.72))),
+    tinted(o, WINTER_STRAW, o.mul(lum, o.k(0.8))),
+    o.mul(o.smooth(0.4, 0.85, patch01), o.k(0.85)),
+  );
+  const earth = tinted(o, WINTER_EARTH, o.mul(lum, o.k(0.68)));
+  const winterLand = mixRGB(o, winterGrass, earth, o.mul(o.smooth(0.56, 0.74, plot01), o.k(0.85)));
   let land = rgb;
   land = mixRGB(o, land, springGrass, o.mul(w.spring, o.add(o.k(0.45), o.mul(patch01, o.k(0.4)))));
   land = mixRGB(o, land, autumnGrass, o.mul(w.autumn, o.add(o.k(0.2), o.mul(patch01, o.k(0.45)))));
-  land = mixRGB(o, land, winterGrass, o.mul(w.winter, o.add(o.k(0.45), o.mul(patch01, o.k(0.3)))));
-  // Bare and ripe fields: ploughed and darker in autumn, grey-brown in winter, a green haze of
+  // After the maize harvest some plots are already ploughed in October: fewer than in winter.
+  land = mixRGB(o, land, earth, o.mul(w.autumn, o.mul(o.smooth(0.64, 0.78, plot01), o.k(0.8))));
+  land = mixRGB(o, land, winterLand, o.mul(w.winter, o.add(o.k(0.85), o.mul(patch01, o.k(0.12)))));
+  // Bare and ripe fields: ploughed and darker in autumn, earth brown in winter, a green haze of
   // sprouting crops on some of them in spring.
   const soilAutumn = [
     o.mul(rgb[0], o.k(0.8)),
     o.mul(rgb[1], o.k(0.74)),
     o.mul(rgb[2], o.k(0.7)),
   ] as RGB<T>;
-  const soilWinter = tinted(o, WINTER_SOIL, o.mul(lum, o.k(0.95)));
+  const soilWinter = earth;
   const soilSpring = tinted(o, SPRING_GRASS, lum);
   let soil = rgb;
   soil = mixRGB(
@@ -204,7 +231,7 @@ export function seasonColor<T>(
     o.mul(w.spring, o.mul(o.smooth(0.55, 0.85, patch01), o.k(0.6))),
   );
   soil = mixRGB(o, soil, soilAutumn, o.mul(w.autumn, patch01));
-  soil = mixRGB(o, soil, soilWinter, o.mul(w.winter, o.k(0.7)));
+  soil = mixRGB(o, soil, soilWinter, o.mul(w.winter, o.k(0.85)));
 
   // Broadleaf canopy: autumn colours tree by tree (some still green), bare in winter, fresh
   // light green in spring.
@@ -232,7 +259,7 @@ export function seasonColor<T>(
     o.add(o.k(0.45), o.mul(o.smooth(0.1, 0.45, crown01), o.k(0.4))),
   );
   broad = mixRGB(o, broad, autumnLeaf, o.mul(w.autumn, turned));
-  broad = mixRGB(o, broad, bare, o.mul(w.winter, o.k(0.85)));
+  broad = mixRGB(o, broad, bare, o.mul(w.winter, o.k(0.92)));
   // Larch: gold in autumn, bare in winter, pale green in spring.
   const gold = tinted(o, LARCH_GOLD, o.mul(lum, o.k(1.5)));
   let larch = rgb;
