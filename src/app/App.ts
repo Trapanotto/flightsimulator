@@ -12,11 +12,14 @@ import { pass } from 'three/tsl';
 import { type AircraftVisual, createReferenceMarker, loadAircraftVisual } from '@aircraft';
 import { AircraftSound, AudioEngine } from '@audio';
 import {
+  AIRPORTS,
   LocalFrame,
   ecefToGeodetic,
   ellipsoidToSeaLevel,
+  findAirport,
   geodeticToEcef,
   geoidUndulation,
+  runwayStart,
   seaLevelToEllipsoid,
 } from '@geo';
 import {
@@ -31,7 +34,6 @@ import { Sky, WEATHER_PRESETS, type Weather } from '@sky';
 import { SNOW_LINE, nightFactor, seasonOf } from './season';
 import { type FlightPlan, game, mountUi, settings, status, touchInput } from '@ui';
 import { type Season, World } from '@world';
-import { AIRPORTS, findAirport, runwayStart } from './airports';
 import { RudderAssist } from './assist';
 import { CameraRig } from './camera';
 import { PROFILES, detectDevice } from './device';
@@ -272,7 +274,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     // Back to the menu: the loading screen covers the change of place.
     if (!p) game.screen.value = 'loading';
     plan = p;
-    season = !p?.season || p.season === 'now' ? seasonOf(new Date()) : p.season;
+    // Screenshot tests must not change with the calendar.
+    season = shot ? 'summer' : !p?.season || p.season === 'now' ? seasonOf(new Date()) : p.season;
     const icao = p?.airport ?? (p?.start.kind === 'runway' ? p.start.airport : undefined);
     const airport = (icao && findAirport(icao)) || homeAirport;
     const since = performance.now();
@@ -374,17 +377,14 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   };
 
   // ---- interface ----
-  game.airports.value = AIRPORTS.map((a) => {
-    const ends = a.runways[0]!.ends;
-    return {
-      icao: a.icao,
-      name: a.name,
-      lon: (ends[0].lon + ends[1].lon) / 2,
-      lat: (ends[0].lat + ends[1].lat) / 2,
-      elevation: a.elevation,
-      runways: a.runways.flatMap((r) => r.ends.map((e) => e.ident)),
-    };
-  });
+  game.airports.value = AIRPORTS.map((a) => ({
+    icao: a.icao,
+    name: a.name,
+    lon: a.lon,
+    lat: a.lat,
+    elevation: a.elevation,
+    runways: a.runways.flatMap((r) => r.ends.map((e) => e.ident)),
+  }));
   const togglePause = () => {
     if (!flight || !plan) return;
     if (game.screen.value === 'flight') {

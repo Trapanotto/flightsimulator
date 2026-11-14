@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { AIRPORTS, bearingDeg, findAirport, offsetPoint, runwayStart } from '../src/app/airports';
 import { WorldEnvironment } from '../src/app/environment';
 import { type InputEvents, PilotInput, keyAuthorityAt } from '../src/app/input';
 import { emptyState, lerpState, stateToRenderPose } from '../src/app/pose';
@@ -69,35 +68,6 @@ function levelOrientation(lon: number, lat: number, headingDeg: number) {
   }
   return { q, p };
 }
-
-describe('airports', () => {
-  it('knows Bern-Belp and lines up on runway 32 heading north-west', () => {
-    const lszb = findAirport('LSZB')!;
-    const start = runwayStart(lszb, '32')!;
-    expect(start.headingDeg).toBeGreaterThan(315);
-    expect(start.headingDeg).toBeLessThan(325);
-    const back = runwayStart(lszb, '14')!;
-    expect(Math.abs(((back.headingDeg - start.headingDeg + 360) % 360) - 180)).toBeLessThan(0.5);
-    expect(runwayStart(lszb, '99')).toBeUndefined();
-  });
-
-  it('has runway designators that match their headings', () => {
-    for (const a of AIRPORTS)
-      for (const r of a.runways)
-        for (const i of [0, 1] as const) {
-          const heading = bearingDeg(r.ends[i], r.ends[1 - i]!);
-          // Designators are magnetic and rounded: within 12 degrees of the true heading here.
-          const diff = Math.abs(((heading - Number(r.ends[i].ident) * 10 + 540) % 360) - 180);
-          expect(diff, `${a.icao} ${r.ends[i].ident}`).toBeLessThan(12);
-        }
-  });
-
-  it('offsets points by metres', () => {
-    const p = offsetPoint({ lon: 7.5, lat: 46.9 }, 90, 1000);
-    expect(p.lat).toBeCloseTo(46.9, 3);
-    expect((p.lon - 7.5) * 111_320 * Math.cos((46.9 * Math.PI) / 180)).toBeCloseTo(1000, -1);
-  });
-});
 
 describe('WorldEnvironment', () => {
   const frame = new LocalFrame(BERN.lon, BERN.lat, BERN.h);

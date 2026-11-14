@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.0-alpha.3 – Phase 2: die Welt (2026-11-14)
+
+- **Wald und Bäume:** 3D-Bäume in den Waldflächen und die einzeln vermessenen Bäume der
+  Landeskarte; Laub- und Nadelwald nach Höhenlage bis zur Baumgrenze.
+- **Gebäude:** in der Nähe die echten 3D-Gebäude von swisstopo (swissBUILDINGS3D), in der
+  Ferne Grundrisse mit berechneten Dächern; nachts beleuchtete Fenster.
+- **Flugplätze:** 63 Flugplätze mit 85 Pisten. Scharfe Pisten mit Markierungen nach ICAO,
+  Rollwege und Vorfelder, Pisten-, Anflug- und Rollwegbefeuerung, Gleitwinkelanzeige (PAPI),
+  Windsäcke.
+- **Jahreszeiten**, in der Flugplanung wählbar: Schneegrenze, Frühlingsgrün, Herbstfarben,
+  kahler Winterwald, Schnee auf Dächern und Baumkronen, gefrorene Bergseen.
+- **Nacht:** Strassen- und Siedlungslichter, einzelne Lichter bei Höfen und Hütten, dunkle
+  Seen und Wälder.
+- **Boden:** Bergschatten bei tiefer Sonne, hellere Nordhänge, Strassen als scharfe Bänder
+  mit Linien, Ackerfurchen in Feldrichtung.
+
+Daten: © swisstopo, OurAirports, © OpenStreetMap contributors.
+
 ## 1.0.0-alpha.2 – Phase 1 abgerundet (2026-11-13)
 
 - **Laden:** Das Gelände wird vollständig geladen, bevor Menü oder Flug erscheinen; der

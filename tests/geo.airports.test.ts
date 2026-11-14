@@ -11,7 +11,6 @@ import {
   runwayStart,
   thresholdOf,
 } from '../src/geo';
-import { AIRPORTS as APP_AIRPORTS } from '../src/app/airports';
 
 /** Magnetic variation in Switzerland, 2025 (east). */
 const VARIATION = 3;
@@ -103,20 +102,20 @@ describe('generated airport data', () => {
         }
   });
 
-  it('has the airports of the game today, at the same places', () => {
-    for (const old of APP_AIRPORTS) {
-      const a = findAirport(old.icao);
-      expect(a, old.icao).toBeDefined();
-      expect(Math.abs(a!.elevation - old.elevation), old.icao).toBeLessThan(5);
-      for (const r of old.runways)
-        for (const e of r.ends) {
-          const found = findRunwayEnd(a!, e.ident);
-          expect(found, `${old.icao} ${e.ident}`).toBeDefined();
-          // OSM's runway ends (traced from the orthophoto) replace OurAirports' where both
-          // exist; they agree within a few dozen metres.
-          expect(distanceM(found!.end, e), `${old.icao} ${e.ident}`).toBeLessThan(40);
-          expect(Math.abs(found!.runway.width - r.width), old.icao).toBeLessThan(11);
-        }
+  it('has the airports the first version of the game started from, with their runways', () => {
+    const first: Array<[string, string, string]> = [
+      ['LSZB', '32', '14'],
+      ['LSGS', '25', '07'],
+      ['LSZH', '28', '10'],
+      ['LSZS', '21', '03'],
+      ['LSZA', '01', '19'],
+      ['LSGG', '22', '04'],
+    ];
+    for (const [icao, a, b] of first) {
+      const airport = findAirport(icao);
+      expect(airport, icao).toBeDefined();
+      expect(findRunwayEnd(airport!, a), `${icao} ${a}`).toBeDefined();
+      expect(findRunwayEnd(airport!, b), `${icao} ${b}`).toBeDefined();
     }
   });
 

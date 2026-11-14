@@ -1,1 +1,11 @@
-{"v":1,"icao":"LSPO","origin":[7.88494,47.34131],"scale":1e-7,"taxiways":[],"aprons":[],"windsocks":[[24557,22960]],"holds":[],"towers":[]}
+{
+  "v": 1,
+  "icao": "LSPO",
+  "origin": [7.88494, 47.34131],
+  "scale": 1e-7,
+  "taxiways": [],
+  "aprons": [],
+  "windsocks": [[24557, 22960]],
+  "holds": [],
+  "towers": []
+}

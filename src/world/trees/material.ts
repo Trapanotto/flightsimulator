@@ -305,7 +305,12 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
     const own = vec3(seed.sub(0.5).mul(0.3).add(1), seed.sub(0.5).mul(0.2).add(1), 1);
     const nearColor = leaf.mul(select(hasPhoto, vec3(pow(clamp(bright, 0.3, 3), 0.8)), own));
     const season = leaf.div(summer.max(1e-3));
-    const farColor = iPhoto.xyz.mul(season);
+    // Leafless crowns cannot be recoloured by a ratio to the summer green (grey-brown over
+    // green has far more red and blue: the wood would turn violet). They take the twig
+    // colour, as light or dark as the photo is there.
+    const luma = (c: N) => c.x.mul(0.3).add(c.y.mul(0.59)).add(c.z.mul(0.11)) as N;
+    const bareFar = leaf.mul(luma(iPhoto.xyz).div(luma(summer).max(1e-3)).clamp(0.4, 2.5));
+    const farColor = mix(iPhoto.xyz.mul(season), bareFar, bare);
     const w = smoothstep(u.near.mul(1.5), u.thin, vDist).mul(select(hasPhoto, float(1), float(0)));
     const tint = vec3(1);
     let crown = mix(nearColor, farColor, w).mul(tint).mul(u.crownGain) as N;
