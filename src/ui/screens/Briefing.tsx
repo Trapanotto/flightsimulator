@@ -1,8 +1,10 @@
 import { AIRCRAFT } from '@sim';
+import { WEATHER_PRESETS } from '@sky';
 import type { JSX } from 'preact';
 import { type WeatherChoice, type WeatherReport, game, settings } from '../api';
 import { Keycap } from '../components/controls';
 import {
+  IconApproach,
   IconClimb,
   IconClock,
   IconCloud,
@@ -10,9 +12,16 @@ import {
   IconLive,
   IconOvercast,
   IconPlane,
+  IconRadio,
+  IconRoute,
   IconRunway,
+  IconStratus,
   IconSun,
+  IconWarning,
 } from '../components/icons';
+import { CHECK_KEY, PANEL_KEYS, TUNE_KEY, keyLabel } from '../panels';
+import { routeNm } from '../plan';
+import { formatFrequency } from '../radio';
 import {
   altitudeUnit,
   convertAltitude,
@@ -35,7 +44,7 @@ export const WEATHER_ICONS: Record<WeatherChoice, (size?: number) => JSX.Element
   fair: (s) => <IconFair size={s} />,
   cloudy: (s) => <IconCloud size={s} />,
   overcast: (s) => <IconOvercast size={s} />,
-  lowStratus: (s) => <IconOvercast size={s} />,
+  lowStratus: (s) => <IconStratus size={s} />,
 };
 
 /** Keys shown in the briefing: the few that get an aircraft off the ground. */
@@ -68,6 +77,15 @@ export const KEY_ROWS: { label: MessageKey; keys: (string | MessageKey)[][] }[] 
   { label: 'keys.brake', keys: [['B']] },
   { label: 'keys.view', keys: [['C']] },
   { label: 'keys.pause', keys: [['P'], ['key.esc']] },
+  // Phase 3: the panels (see panels.ts).
+  { label: 'keys.radio', keys: [[keyLabel(PANEL_KEYS.radio)]] },
+  { label: 'keys.reply', keys: [['1', '2', '3', '4']] },
+  { label: 'keys.tune', keys: [[keyLabel(TUNE_KEY)]] },
+  { label: 'keys.checklist', keys: [[keyLabel(PANEL_KEYS.checklist)]] },
+  { label: 'keys.check', keys: [[keyLabel(CHECK_KEY)]] },
+  { label: 'keys.stack', keys: [[keyLabel(PANEL_KEYS.stack)]] },
+  { label: 'keys.autopilot', keys: [[keyLabel(PANEL_KEYS.autopilot)]] },
+  { label: 'keys.switches', keys: [[keyLabel(PANEL_KEYS.switches)]] },
 ];
 
 const ARROWS: Record<string, string> = {
@@ -126,6 +144,23 @@ function visibilityText(w: WeatherReport): string {
   return km < 1 ? `${Math.round(w.visibility / 50) * 50} m` : `${km.toFixed(1)} km`;
 }
 
+/** Altitude above sea level, rounded as a forecast would say it. */
+function levelText(m: number): string {
+  const units = settings.units.value;
+  const v = convertAltitude(m, units);
+  const r = units === 'aviation' ? Math.round(v / 100) * 100 : Math.round(v / 10) * 10;
+  return `${groupThousands(r, lang.value)} ${altitudeUnit(units)}`;
+}
+
+export function stratusText(w: WeatherReport): string | null {
+  const s = w.stratus;
+  if (!s) return null;
+  const km = s.visibilityBelow / 1000;
+  const vis =
+    km >= 1 ? `${Number(km.toFixed(1))} km` : `${Math.round(s.visibilityBelow / 50) * 50} m`;
+  return t('briefing.stratus', { base: levelText(s.base), top: levelText(s.top), vis });
+}
+
 function Fact({ label, value }: { label: string; value: string }) {
   return (
     <div class="fact">
@@ -158,35 +193,67 @@ function TouchHints() {
   );
 }
 
+/** The weather to brief: the app's report, or the preset's own values while there is none. */
+function briefedWeather(weather: WeatherChoice): WeatherReport | null {
+  return game.weather.value ?? (weather === 'live' ? null : WEATHER_PRESETS[weather]);
+}
+
 /** Shown while the world loads for the chosen flight: where, what, weather, controls. */
 export function Briefing() {
   const plan = game.plan.value;
-  const airport = game.airports.value.find(
-    (a) =>
-      a.icao === plan?.airport || (plan?.start.kind === 'runway' && a.icao === plan.start.airport),
-  );
+  const airports = game.airports.value;
+  const start = plan?.start;
+  const startIcao = start && start.kind !== 'air' ? start.airport : undefined;
+  const airport = airports.find((a) => a.icao === plan?.airport || a.icao === startIcao);
+  const dest = airports.find((a) => a.icao === plan?.destination?.airport);
   const info = AIRCRAFT.find((a) => a.id === plan?.aircraft);
-  const report = game.weather.value;
+  const weather = plan?.weather ?? 'live';
+  const report = briefedWeather(weather);
   const p = Math.max(0, Math.min(1, game.loadProgress.value));
   const units = settings.units.value;
+  const frequencies = game.frequencies.value;
 
-  const start = plan?.start;
   const startText = !start
     ? ''
     : start.kind === 'air'
       ? t('briefing.air', { h: heightLabel(start.altitude - (airport?.elevation ?? 0)) })
-      : t('briefing.runway', { rwy: start.runway });
+      : start.kind === 'approach'
+        ? `${t('briefing.runway', { rwy: start.runway })} · ${t('briefing.approach', { d: t('setup.nm', { n: start.distanceNm }) })}`
+        : t('briefing.runway', { rwy: start.runway });
   const heading =
     start?.kind === 'air' ? start.headingDeg : start ? parseInt(start.runway, 10) * 10 : NaN;
   const time =
     !plan || plan.time === 'now'
       ? t('briefing.time.now', { clock: formatClock(swissNowHours(new Date())) })
       : formatClock(plan.time);
-  const weather = plan?.weather ?? 'live';
   // Rotation speed is about 1.15 times the clean stall speed (55 kt for the C172).
   const vr = info
     ? `${Math.round(convertSpeed(info.vs * 1.15, units) / 5) * 5} ${speedUnit(units)}`
     : '';
+  const tip = plan?.coldStart
+    ? t('briefing.tip.cold')
+    : start?.kind === 'air'
+      ? t('briefing.tip.air')
+      : start?.kind === 'approach'
+        ? t('briefing.tip.approach')
+        : t('briefing.tip.runway', { v: vr || '–' });
+
+  // The route: through the plan's waypoints if it has any, else straight.
+  const routeText = (() => {
+    if (!dest || !airport) return null;
+    // An approach to its own airport has no route to speak of; a start and return is a circuit.
+    if (dest === airport) return start?.kind === 'approach' ? null : t('briefing.circuit');
+    const points = [airport, ...(plan?.route ?? []), dest];
+    const via = (plan?.route ?? []).map((w) => w.ident);
+    const nm = Math.round(routeNm(points));
+    return [airport.icao, ...via, dest.icao].join(' → ') + ` · ${nm} NM`;
+  })();
+  const failures = plan?.failures?.length ?? 0;
+  const flags = [
+    plan?.coldStart ? t('briefing.coldStart') : null,
+    plan?.atc === false ? t('briefing.atcOff') : null,
+  ].filter((f): f is string => !!f);
+  const stratus = report ? stratusText(report) : null;
 
   return (
     <div class="briefing" role="region" aria-labelledby="briefing-title">
@@ -202,7 +269,13 @@ export function Briefing() {
               <p class="briefing-sub">
                 {airport && <span class="briefing-icao">{airport.icao}</span>}
                 <span class="briefing-start">
-                  {start?.kind === 'air' ? <IconClimb size={18} /> : <IconRunway size={18} />}
+                  {start?.kind === 'air' ? (
+                    <IconClimb size={18} />
+                  ) : start?.kind === 'approach' ? (
+                    <IconApproach size={18} />
+                  ) : (
+                    <IconRunway size={18} />
+                  )}
                   {startText}
                 </span>
                 {Number.isFinite(heading) && (
@@ -215,17 +288,14 @@ export function Briefing() {
             {airport && (
               <div class="briefing-map">
                 <SwissMap
-                  airports={game.airports.value}
+                  airports={airports}
                   selected={airport.icao}
+                  route={dest ? { from: airport.icao, to: dest.icao } : undefined}
                   label={t('setup.map')}
                 />
               </div>
             )}
-            <p class="briefing-tip">
-              {start?.kind === 'air'
-                ? t('briefing.tip.air')
-                : t('briefing.tip.runway', { v: vr || '–' })}
-            </p>
+            <p class="briefing-tip">{tip}</p>
           </section>
 
           <section class="briefing-right enter">
@@ -249,6 +319,23 @@ export function Briefing() {
                   </dt>
                   <dd class="brief-big num">{time}</dd>
                 </div>
+                {routeText && dest && (
+                  <div class="brief-fact brief-fact--wide">
+                    <dt class="caps">
+                      <IconRoute size={14} /> {t('briefing.destination')}
+                    </dt>
+                    <dd class="brief-big">
+                      {dest.name}
+                      {plan?.destination?.runway && (
+                        <span class="brief-dim">
+                          {' '}
+                          · {t('briefing.runway', { rwy: plan.destination.runway })}
+                        </span>
+                      )}
+                    </dd>
+                    <dd class="brief-route num">{routeText}</dd>
+                  </div>
+                )}
                 <div class="brief-fact brief-fact--wide">
                   <dt class="caps">
                     {WEATHER_ICONS[weather](14)} {t('briefing.weather')}
@@ -259,6 +346,7 @@ export function Briefing() {
                       <span class="brief-dim"> · {t('weather.live.sub')}</span>
                     )}
                   </dd>
+                  {stratus && <dd class="brief-stratus">{stratus}</dd>}
                   {report && (
                     <dd>
                       <dl class="facts">
@@ -273,6 +361,44 @@ export function Briefing() {
                     </dd>
                   )}
                 </div>
+                {frequencies.length > 0 && (
+                  <div class="brief-fact brief-fact--wide">
+                    <dt class="caps">
+                      <IconRadio size={14} /> {t('briefing.frequencies')}
+                    </dt>
+                    <dd>
+                      <ul class="brief-freqs">
+                        {frequencies.map((f) => (
+                          <li key={f.name}>
+                            <span class="brief-freq-name">{f.name}</span>
+                            <span class="brief-freq num">{frequencyText(f.frequency)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </dd>
+                  </div>
+                )}
+                {(flags.length > 0 || failures > 0) && (
+                  <div class="brief-fact brief-fact--wide brief-flags">
+                    {flags.map((f) => (
+                      <dd class="brief-flag" key={f}>
+                        {f}
+                      </dd>
+                    ))}
+                    {failures > 0 && (
+                      <dd
+                        class="brief-flag brief-flag--failure"
+                        title={t('briefing.failures.hint')}
+                      >
+                        <IconWarning size={14} />
+                        {failures === 1
+                          ? t('briefing.failures.one')
+                          : t('briefing.failures.many', { n: failures })}
+                        <span class="brief-dim"> · {t('briefing.failures.hint')}</span>
+                      </dd>
+                    )}
+                  </div>
+                )}
               </dl>
             </div>
 
@@ -318,4 +444,10 @@ export function Briefing() {
       </div>
     </div>
   );
+}
+
+/** A frequency in its band's usual form: COM with three decimals, NAV two, NDB in kHz. */
+function frequencyText(khz: number): string {
+  if (khz < 2000) return `${formatFrequency(khz, 'adf')} kHz`;
+  return formatFrequency(khz, khz < 118_000 ? 'nav' : 'com');
 }

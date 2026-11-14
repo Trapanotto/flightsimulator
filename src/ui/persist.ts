@@ -16,6 +16,9 @@ export interface SettingsValues {
   invertPitch: boolean;
   tiltSteering: boolean;
   units: 'metric' | 'aviation';
+  navStrip: boolean;
+  radioText: boolean;
+  checklistHints: boolean;
 }
 
 export const DEFAULT_SETTINGS: Readonly<SettingsValues> = {
@@ -25,6 +28,9 @@ export const DEFAULT_SETTINGS: Readonly<SettingsValues> = {
   invertPitch: false,
   tiltSteering: false,
   units: 'aviation',
+  navStrip: true,
+  radioText: true,
+  checklistHints: true,
 };
 
 const QUALITIES = ['auto', 'low', 'medium', 'high'] as const;
@@ -67,6 +73,9 @@ export function parseSettings(raw: string | null): SettingsValues {
     invertPitch: bool(o.invertPitch, d.invertPitch),
     tiltSteering: bool(o.tiltSteering, d.tiltSteering),
     units: oneOf(o.units, UNITS, d.units),
+    navStrip: bool(o.navStrip, d.navStrip),
+    radioText: bool(o.radioText, d.radioText),
+    checklistHints: bool(o.checklistHints, d.checklistHints),
   };
 }
 
@@ -78,6 +87,9 @@ export function currentSettings(): SettingsValues {
     invertPitch: settings.invertPitch.value,
     tiltSteering: settings.tiltSteering.value,
     units: settings.units.value,
+    navStrip: settings.navStrip.value,
+    radioText: settings.radioText.value,
+    checklistHints: settings.checklistHints.value,
   };
 }
 
@@ -88,6 +100,9 @@ export function applySettings(v: SettingsValues) {
   settings.invertPitch.value = v.invertPitch;
   settings.tiltSteering.value = v.tiltSteering;
   settings.units.value = v.units;
+  settings.navStrip.value = v.navStrip;
+  settings.radioText.value = v.radioText;
+  settings.checklistHints.value = v.checklistHints;
 }
 
 function safeGet(storage: StorageLike | undefined, key: string): string | null {

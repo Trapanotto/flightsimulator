@@ -7,15 +7,33 @@
  *   device=mobile   lang=de|en   bg=day|snow|night   view=cockpit   warn=stall|overspeed
  *   progress=0..1 (frozen loading/briefing progress)   still (frozen telemetry)
  *   noairports   noaircraft   live (briefing with a live weather report)   debug   msg=<text>
+ *
+ * Phase 3 (a fake cockpit, avionics, radio dialogue, checklists and failures):
+ *   p3                       switch the fakes on (also on for flights started with ATC)
+ *   panel=radio,checklist,stack,autopilot,switches   open panels
+ *   checklist=approach|start  open a checklist     ap  autopilot engaged     off  avionics off
+ *   annun=lowVolts,lowVacuum,…   lit annunciators     plan=ils|alps|cold   briefing plans
+ *   collapsed  radio panel collapsed     tools  touch menu open     failures  pause list open
  */
-import { AIRCRAFT, type Telemetry } from '@sim';
+import {
+  AIRCRAFT,
+  type AvionicsTelemetry,
+  C172_CONTROLS,
+  type FailureId,
+  type SystemsTelemetry,
+  type Telemetry,
+  limitControl,
+} from '@sim';
 import {
   type AirportOption,
+  type ChecklistView,
   type FlightPlan,
+  type RadioMessage,
   type UiActions,
   game,
   mountUi,
   nav,
+  panels,
   setLang,
   settings,
   status,
@@ -260,6 +278,391 @@ const sim = {
 let feed = 0;
 const still = q.has('still');
 
+// --- Phase 3 fakes: cockpit, avionics, radio, checklists ----------------------------------------
+
+let p3 = q.has('p3');
+const cockpit: Record<string, number> = {};
+for (const s of C172_CONTROLS) cockpit[s.id] = s.running ?? s.initial;
+// An ILS approach to Zurich 14 tuned and identified.
+Object.assign(cockpit, {
+  com1Active: 125_950,
+  com1Standby: 118_100,
+  nav1Active: 108_300,
+  nav1Standby: 110_500,
+  obs1: 137,
+  headingBug: 137,
+  apAltitude: 4000,
+  altimeterSetting: 1021,
+});
+if (q.has('off')) cockpit.avionics = 0;
+const ap = {
+  engaged: q.has('ap'),
+  lateral: 'hdg' as 'roll' | 'hdg' | 'nav' | 'apr',
+  lateralArmed: (q.has('ap') ? 'apr' : undefined) as 'nav' | 'apr' | undefined,
+  vertical: 'alt' as 'pitch' | 'vs' | 'alt' | 'gs',
+  verticalArmed: (q.has('ap') ? 'gs' : undefined) as 'alt' | 'gs' | undefined,
+  vs: 500,
+};
+let identUntil = 0;
+const failed = new Set<FailureId>();
+
+function publishCockpit() {
+  game.cockpit.value = { ...cockpit };
+}
+
+function setControl(id: string, value: number) {
+  const s = C172_CONTROLS.find((c) => c.id === id);
+  if (!s) return;
+  const before = cockpit[id] ?? 0;
+  const v = limitControl(s, value);
+  cockpit[id] = v;
+  // Buttons act on the press, as the systems do.
+  if (s.kind === 'button' && v === 1 && before === 0) {
+    const swap = /^(com|nav)(\d)Swap$/.exec(id);
+    if (swap) {
+      const a = `${swap[1]}${swap[2]}Active`;
+      const b = `${swap[1]}${swap[2]}Standby`;
+      [cockpit[a], cockpit[b]] = [cockpit[b]!, cockpit[a]!];
+      if (a === 'com1Active') radioTuned();
+    }
+    if (id === 'xpdrIdent') identUntil = sim.time + 18;
+    if (id === 'apEngage') ap.engaged = !ap.engaged;
+    if (id === 'apHdg') {
+      ap.lateral = 'hdg';
+      ap.lateralArmed = undefined;
+    }
+    if (id === 'apNav') ap.lateralArmed = 'nav';
+    if (id === 'apApr') {
+      ap.lateralArmed = 'apr';
+      ap.verticalArmed = 'gs';
+    }
+    if (id === 'apAlt') ap.vertical = 'alt';
+    if (id === 'apVsUp' || id === 'apVsDown') {
+      ap.vertical = 'vs';
+      ap.vs += id === 'apVsUp' ? 100 : -100;
+    }
+  }
+  publishCockpit();
+  checklistTick();
+}
+
+function avionics(): AvionicsTelemetry {
+  const powered = cockpit.battery! >= 1 && cockpit.avionics! >= 1;
+  const t = sim.time;
+  const nav = (n: 1 | 2) => {
+    const f = cockpit[`nav${n}Active`]!;
+    const ils = f === 108_300;
+    const valid = powered && (ils || f === 110_500);
+    return {
+      frequency: f,
+      standby: cockpit[`nav${n}Standby`]!,
+      valid,
+      ident: valid ? (ils ? 'IZH' : 'ZUE') : '',
+      localizer: ils,
+      course: cockpit[`obs${n}`]!,
+      deviation: valid ? Math.sin(t * 0.3) * 0.32 : 0,
+      toFrom: (valid ? 'to' : 'off') as 'to' | 'off',
+      bearing: valid ? 137 : undefined,
+      glideSlope: valid && ils ? Math.cos(t * 0.21) * 0.4 : undefined,
+    };
+  };
+  const nav1 = nav(1);
+  return {
+    powered,
+    com1: { active: cockpit.com1Active!, standby: cockpit.com1Standby! },
+    com2: { active: cockpit.com2Active!, standby: cockpit.com2Standby! },
+    nav1,
+    nav2: nav(2),
+    dme: {
+      source: 'nav1',
+      distanceNm: nav1.valid ? 7.4 : undefined,
+      groundSpeedKt: nav1.valid ? 92 : undefined,
+      minutes: nav1.valid ? 5 : undefined,
+    },
+    adf: { frequency: cockpit.adfFrequency!, valid: false, ident: '', relativeBearing: undefined },
+    transponder: {
+      code: cockpit.xpdrCode!,
+      mode: (['off', 'standby', 'on', 'alt'] as const)[cockpit.xpdrMode!] ?? 'off',
+      ident: sim.time < identUntil,
+      reply: powered && Math.floor(t) % 4 === 0,
+    },
+    markers: { outer: false, middle: false, inner: false },
+    autopilot: {
+      engaged: ap.engaged,
+      lateral: ap.lateral,
+      lateralArmed: ap.lateralArmed,
+      vertical: ap.vertical,
+      verticalArmed: ap.verticalArmed,
+      selectedAltitude: cockpit.apAltitude!,
+      selectedVerticalSpeed: ap.vs,
+      disconnectWarning: false,
+    },
+    gps: {
+      plan: [],
+      active: -1,
+      distanceNm: undefined,
+      bearing: undefined,
+      desiredTrack: undefined,
+      crossTrackNm: undefined,
+      groundSpeedKt: 92,
+      track: sim.heading,
+      lon: 8.4,
+      lat: 47.55,
+    },
+  };
+}
+
+function systems(): SystemsTelemetry {
+  const lit = new Set((q.get('annun') ?? '').split(',').filter(Boolean));
+  return {
+    busVolts: 28,
+    batteryAmps: 2,
+    batteryCharge: 1,
+    avionicsPowered: true,
+    fuelLeft: 70,
+    fuelRight: 70,
+    fuelAvailable: true,
+    vacuum: failed.has('vacuum') ? 0 : 5,
+    oilTemperature: 90,
+    oilPressure: 60,
+    egt: 0.8,
+    carbIce: 0,
+    airframeIce: 0,
+    pitotBlocked: failed.has('pitot'),
+    lights: { beacon: false, landing: false, taxi: false, nav: false, strobe: false },
+    panelLight: 0,
+    annunciators: {
+      lowVolts: lit.has('lowVolts') || failed.has('alternator'),
+      lowFuelLeft: lit.has('lowFuelLeft') || failed.has('fuelLeak'),
+      lowFuelRight: lit.has('lowFuelRight'),
+      lowVacuum: lit.has('lowVacuum') || failed.has('vacuum'),
+      oilPressure: lit.has('oilPressure'),
+    },
+  };
+}
+
+// The radio: a short ILS approach into Zurich, step by step.
+const de = () => document.documentElement.lang === 'de';
+interface RadioStep {
+  atc: string;
+  station: string;
+  options: { id: string; text: string }[];
+  hint?: string;
+  /** The next step waits for COM 1 on this frequency. */
+  waitFor?: number;
+}
+const RADIO: RadioStep[] = [
+  {
+    station: 'Zürich Arrival',
+    atc: 'HB-TFS, Zurich Arrival, radar contact. Descend to 4000 feet, QNH 1021, cleared ILS approach runway 14, report established.',
+    options: [
+      { id: 'ack', text: 'Descend 4000 feet, QNH 1021, cleared ILS 14, wilco, HB-TFS' },
+      { id: 'again', text: 'Say again, HB-TFS' },
+    ],
+  },
+  {
+    station: 'Zürich Arrival',
+    atc: 'HB-TFS, contact Zurich Tower 118.100.',
+    options: [{ id: 'ack', text: 'Tower 118.100, HB-TFS' }],
+    hint: 'Zürich Tower 118.100',
+    waitFor: 118_100,
+  },
+  {
+    station: 'Zürich Tower',
+    atc: 'HB-TFS, Zurich Tower, wind 050 degrees 3 knots, runway 14, cleared to land.',
+    options: [{ id: 'ack', text: 'Cleared to land runway 14, HB-TFS' }],
+  },
+];
+let radioStep = 0;
+let waiting: number | null = null;
+const log: RadioMessage[] = [
+  {
+    from: 'pilot',
+    station: 'Zürich Arrival',
+    text: 'Zurich Arrival, HB-TFS, Cessna 172, 12 miles northwest, 5000 feet, information Kilo, request ILS 14.',
+    time: 700,
+  },
+];
+
+function publishAtc(options: { id: string; text: string }[], hint: string | null) {
+  const station = cockpit.com1Active === 118_100 ? 'Zürich Tower' : 'Zürich Arrival';
+  game.atc.value = {
+    station: cockpit.avionics ? station : null,
+    frequency: cockpit.com1Active!,
+    log: [...log],
+    options,
+    hint,
+  };
+}
+
+function atcSays(i: number) {
+  const s = RADIO[i];
+  if (!s) return publishAtc([], null);
+  log.push({ from: 'atc', station: s.station, text: s.atc, time: sim.time });
+  publishAtc(s.options, s.hint ?? null);
+}
+
+function atcReply(id: string) {
+  const s = RADIO[radioStep];
+  const o = s?.options.find((x) => x.id === id);
+  if (!s || !o) return;
+  log.push({ from: 'pilot', station: s.station, text: o.text, time: sim.time });
+  if (id === 'again') {
+    publishAtc([], null);
+    setTimeout(() => atcSays(radioStep), 1200);
+    return;
+  }
+  radioStep++;
+  if (s.waitFor) {
+    waiting = s.waitFor;
+    publishAtc([], s.hint ?? null);
+    if (cockpit.com1Active === s.waitFor) radioTuned();
+    return;
+  }
+  publishAtc([], null);
+  setTimeout(() => atcSays(radioStep), 1500);
+}
+
+function radioTuned() {
+  if (waiting === null || cockpit.com1Active !== waiting)
+    return publishAtc(game.atc.value?.options ?? [], game.atc.value?.hint ?? null);
+  waiting = null;
+  publishAtc([], null);
+  setTimeout(() => atcSays(radioStep), 1200);
+}
+
+// Checklists: the app ticks what it can see; the rest is ticked by hand.
+interface CheckDef {
+  label: [string, string];
+  expect: [string, string];
+  control?: string;
+  value?: number;
+}
+const CHECKLISTS: Record<string, { title: [string, string]; items: CheckDef[] }> = {
+  start: {
+    title: ['Vor dem Anlassen', 'Before starting engine'],
+    items: [
+      {
+        label: ['Sicherheitsgurte und Schultergurte', 'Seats and seat belts'],
+        expect: ['Geschlossen', 'Secure'],
+      },
+      {
+        label: ['Brandhahn', 'Fuel shutoff valve'],
+        expect: ['Offen', 'On'],
+        control: 'fuelShutoff',
+        value: 1,
+      },
+      {
+        label: ['Tankwahlschalter', 'Fuel selector'],
+        expect: ['Beide', 'Both'],
+        control: 'fuelSelector',
+        value: 1,
+      },
+      {
+        label: ['Avionik', 'Avionics switch'],
+        expect: ['Aus', 'Off'],
+        control: 'avionics',
+        value: 0,
+      },
+      { label: ['Batterie', 'Battery'], expect: ['Ein', 'On'], control: 'battery', value: 1 },
+      { label: ['Beacon', 'Beacon'], expect: ['Ein', 'On'], control: 'lightBeacon', value: 1 },
+    ],
+  },
+  approach: {
+    title: ['Anflug', 'Approach'],
+    items: [
+      {
+        label: ['ATIS und QNH', 'ATIS and altimeter'],
+        expect: ['Erhalten, gesetzt', 'Received, set'],
+      },
+      {
+        label: ['Tankwahlschalter', 'Fuel selector'],
+        expect: ['Beide', 'Both'],
+        control: 'fuelSelector',
+        value: 1,
+      },
+      { label: ['Gemisch', 'Mixture'], expect: ['Reich', 'Rich'], control: 'mixture', value: 1 },
+      { label: ['Vergaservorwärmung', 'Carburettor heat'], expect: ['Nach Bedarf', 'As required'] },
+      {
+        label: ['Landescheinwerfer', 'Landing light'],
+        expect: ['Ein', 'On'],
+        control: 'lightLanding',
+        value: 1,
+      },
+      {
+        label: ['Höhenmessereinstellung kontrolliert', 'Altimeter setting cross-checked'],
+        expect: ['1021', '1021'],
+      },
+      { label: ['Landeklappen', 'Flaps'], expect: ['Nach Bedarf', 'As required'] },
+    ],
+  },
+  landing: {
+    title: ['Vor der Landung', 'Before landing'],
+    items: [
+      { label: ['Gemisch', 'Mixture'], expect: ['Reich', 'Rich'], control: 'mixture', value: 1 },
+      { label: ['Landeklappen', 'Flaps'], expect: ['30°', '30°'], control: 'flaps', value: 3 },
+    ],
+  },
+};
+let openList: string | null = null;
+let doneCount = 0;
+
+function publishChecklist() {
+  const c = openList ? CHECKLISTS[openList] : undefined;
+  const l = de() ? 0 : 1;
+  game.checklists.value = Object.entries(CHECKLISTS).map(([id, c]) => ({ id, title: c.title[l] }));
+  if (!c || !openList) {
+    game.checklist.value = null;
+    return;
+  }
+  const view: ChecklistView = {
+    id: openList,
+    title: c.title[l],
+    items: c.items.map((it, i) => ({
+      label: it.label[l],
+      expect: it.expect[l],
+      state: i < doneCount ? 'done' : i === doneCount ? 'current' : 'todo',
+      control: it.control,
+    })),
+  };
+  game.checklist.value = view;
+}
+
+function checklistTick() {
+  const c = openList ? CHECKLISTS[openList] : undefined;
+  let moved = false;
+  while (c) {
+    const it = c.items[doneCount];
+    if (!it?.control || cockpit[it.control] !== it.value) break;
+    doneCount++;
+    moved = true;
+  }
+  if (moved) publishChecklist();
+}
+
+function startP3() {
+  p3 = true;
+  game.controls.value = C172_CONTROLS;
+  publishCockpit();
+  atcSays(0);
+  publishChecklist();
+  game.failures.value = [];
+  game.frequencies.value = [
+    { name: 'Zürich ATIS', frequency: 128_525 },
+    { name: 'Zürich Arrival', frequency: 125_950 },
+    { name: 'Zürich Tower', frequency: 118_100 },
+    { name: 'ILS 14 IZH', frequency: 108_300 },
+  ];
+}
+
+function stopP3() {
+  game.controls.value = [];
+  game.cockpit.value = null;
+  game.atc.value = null;
+  game.checklists.value = [];
+  game.checklist.value = null;
+}
+
 function telemetry(): Telemetry {
   const warn = q.get('warn');
   return {
@@ -289,6 +692,7 @@ function telemetry(): Telemetry {
     ],
     fuel: 120,
     crashed: sim.crashed,
+    ...(p3 ? { avionics: avionics(), systems: systems() } : {}),
   };
 }
 
@@ -404,7 +808,27 @@ const actions: UiActions = {
     game.plan.value = plan;
     game.screen.value = 'briefing';
     game.loadProgress.value = 0;
+    if (q.has('p3') || plan.atc) startP3();
     runProgress('flight', 3);
+  },
+  setControl,
+  atcReply,
+  openChecklist(id) {
+    openList = id;
+    doneCount = 0;
+    publishChecklist();
+    checklistTick();
+  },
+  checkItem() {
+    doneCount++;
+    publishChecklist();
+    checklistTick();
+  },
+  setFailure(id, on) {
+    if (on) failed.add(id);
+    else failed.delete(id);
+    game.failures.value = [...failed];
+    if (id === 'com1') game.message.value = on ? 'COM 1 failed' : null;
   },
   pause() {
     if (game.screen.value === 'flight') game.screen.value = 'paused';
@@ -421,6 +845,8 @@ const actions: UiActions = {
     game.telemetry.value = null;
     game.levers.value = null;
     game.screen.value = 'menu';
+    stopP3();
+    p3 = q.has('p3');
   },
   toggleView() {
     game.view.value = game.view.value === 'outside' ? 'cockpit' : 'outside';
@@ -472,6 +898,38 @@ const defaultPlan: FlightPlan = {
   airport: 'LSZB',
 };
 
+const BRIEFING_PLANS: Record<string, FlightPlan> = {
+  ils: {
+    aircraft: 'c172',
+    start: { kind: 'approach', airport: 'LSZH', runway: '14', distanceNm: 10 },
+    time: 9,
+    weather: 'lowStratus',
+    season: 'autumn',
+    airport: 'LSZH',
+    destination: { airport: 'LSZH', runway: '14' },
+    atc: true,
+    coldStart: false,
+    failures: [{ id: 'vacuum', after: 'random' }],
+  },
+  alps: {
+    aircraft: 'c172',
+    start: { kind: 'runway', airport: 'LSZB', runway: '14' },
+    time: 9,
+    weather: 'clear',
+    season: 'summer',
+    airport: 'LSZB',
+    destination: { airport: 'LSZS', runway: '21' },
+    route: [
+      { ident: 'INTERLAKEN', lon: 7.86, lat: 46.68 },
+      { ident: 'GRIMSEL', lon: 8.33, lat: 46.56 },
+      { ident: 'JULIER', lon: 9.73, lat: 46.47 },
+    ],
+    atc: true,
+    coldStart: true,
+    failures: [],
+  },
+};
+
 if (q.get('view') === 'cockpit') game.view.value = 'cockpit';
 if (q.has('live'))
   game.weather.value = {
@@ -498,7 +956,10 @@ switch (screenParam) {
     if (screenParam === 'settings') nav.settingsOpen.value = true;
     break;
   case 'briefing':
-    game.plan.value = q.has('live') ? { ...defaultPlan, weather: 'live' } : defaultPlan;
+    game.plan.value = q.has('live')
+      ? { ...defaultPlan, weather: 'live' }
+      : (BRIEFING_PLANS[q.get('plan') ?? ''] ?? defaultPlan);
+    if (p3) startP3();
     game.screen.value = 'briefing';
     runProgress('flight', 6);
     break;
@@ -506,10 +967,23 @@ switch (screenParam) {
   case 'paused':
   case 'crash':
     game.plan.value = defaultPlan;
+    if (p3) {
+      startP3();
+      // The dialogue as it stands a few calls in.
+      if (q.has('collapsed')) panels.radioCollapsed.value = true;
+      if (q.get('checklist')) {
+        openList = q.get('checklist');
+        doneCount = 2;
+        publishChecklist();
+      }
+      for (const id of q.get('fail')?.split(',') ?? []) actions.setFailure?.(id as FailureId, true);
+    }
     startFeed(flying);
     if (screenParam === 'crash') sim.crashed = 'terrain';
     publish();
     game.screen.value = screenParam === 'paused' ? 'paused' : 'flight';
+    if (q.get('panel')) panels.open.value = q.get('panel')!.split(',') as typeof panels.open.value;
+    if (q.has('tools')) panels.toolsOpen.value = true;
     if (q.get('msg')) message(q.get('msg')!);
     break;
 }
@@ -520,6 +994,7 @@ switch (screenParam) {
   touchInput,
   settings,
   nav,
+  panels,
   sim,
   AIRCRAFT,
 };

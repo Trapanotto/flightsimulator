@@ -4,7 +4,9 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright-core';
 
-const base = 'http://localhost:5205/flightsimulator/demo/ui.html';
+const base =
+  process.argv.find((a) => a.startsWith('--base='))?.slice(7) ??
+  'http://localhost:5205/flightsimulator/demo/ui.html';
 
 async function launch() {
   for (const channel of ['msedge', 'chrome']) {
@@ -126,7 +128,7 @@ await check('settings: units persist; Esc closes only the dialog', async () => {
   // Tabs with arrow keys.
   await page.focus('[role="tab"][aria-selected="true"]');
   await page.keyboard.press('ArrowRight');
-  assert.match(await focused(page), /Sound/);
+  assert.match(await focused(page), /Display/);
   await page.keyboard.press('Escape');
   await page.waitForSelector('.settings', { state: 'detached' });
   assert.equal(await screen(page), 'paused', 'Esc closed the dialog, not the pause');
@@ -263,7 +265,19 @@ await check('touch targets at least 44 px', async () => {
     { width: 390, height: 844 },
   ]) {
     const page = await browser.newPage({ viewport: vp });
-    for (const s of ['menu', 'setup', 'settings', 'flight&still', 'paused&still']) {
+    for (const s of [
+      'menu',
+      'setup',
+      'settings',
+      'flight&still',
+      'paused&still',
+      'flight&still&p3&panel=radio',
+      'flight&still&p3&panel=stack',
+      'flight&still&p3&panel=autopilot&ap',
+      'flight&still&p3&panel=switches',
+      'flight&still&p3&panel=checklist&checklist=approach',
+      'flight&still&p3&tools',
+    ]) {
       await page.goto(base + '?screen=' + s + '&device=mobile&lang=de');
       await page.waitForTimeout(700);
       const found = await page.evaluate(() =>
@@ -330,6 +344,63 @@ await check('no horizontal scrolling at any size or screen', async () => {
   }
   assert.deepEqual(bad, []);
 });
+
+// --- Phase 3: panels by key, Escape, replies, tuning; the flight keys keep working ---------
+await check(
+  'panels: keys, Escape without pausing, focus kept, replies, tuning, typing',
+  async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+    await page.goto(`${base}?screen=flight&still&p3&lang=en`);
+    await page.waitForSelector('.radio-panel');
+    const open = () => page.evaluate(() => window.__demo.panels.open.value.join(','));
+    const bodyFocused = () => page.evaluate(() => document.activeElement === document.body);
+    assert.equal(await open(), 'radio', 'the radio opens by itself with ATC');
+    await page.keyboard.press('n');
+    assert.equal(await open(), 'radio,stack');
+    await page.keyboard.press('u');
+    assert.equal(await open(), 'radio,autopilot', 'one avionics panel at a time');
+    assert.ok(await bodyFocused(), 'opening took no focus: the flight keys still go to the app');
+    await page.click('.ap-panel .ap-btn');
+    assert.ok(await bodyFocused(), 'a click in a panel took no focus');
+    // Escape inside a panel closes it and does not pause.
+    await page.focus('.ap-panel .ap-btn');
+    await page.keyboard.press('Escape');
+    assert.equal(await open(), 'radio');
+    assert.equal(await screen(page), 'flight');
+    // Reply 1; the controller hands over to the tower; T tunes it (standby, then swap).
+    await page.keyboard.press('1');
+    await page.waitForFunction(() => window.__demo.game.atc.value?.options.length, null, {
+      timeout: 4000,
+    });
+    await page.keyboard.press('1');
+    await page.waitForFunction(() => window.__demo.game.atc.value?.hint, null, { timeout: 4000 });
+    await page.keyboard.press('t');
+    await page.waitForFunction(
+      () => window.__demo.game.cockpit.value?.com1Active === 118100,
+      null,
+      {
+        timeout: 2000,
+      },
+    );
+    // Typing a frequency: the keys go to the field, not to the panels.
+    await page.keyboard.press('n');
+    await page.click('.radio-card .value-input');
+    await page.keyboard.type('121.5n');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Enter');
+    assert.equal(await page.evaluate(() => window.__demo.game.cockpit.value.com1Standby), 121500);
+    assert.equal(await open(), 'radio,stack', 'typing n did not close the stack');
+    // Checklist: L opens, X ticks.
+    await page.keyboard.press('l');
+    await page.click('.check-list-btn');
+    await page.keyboard.press('x');
+    assert.equal(
+      await page.evaluate(() => window.__demo.game.checklist.value.items[0].state),
+      'done',
+    );
+    await page.close();
+  },
+);
 
 await browser.close();
 console.log(results.join('\n'));

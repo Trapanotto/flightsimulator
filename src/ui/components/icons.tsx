@@ -189,6 +189,122 @@ export const IconMute = (p: P) => (
     <path d="M16 9.5l5 5M21 9.5l-5 5" />
   </Icon>
 );
+/** Hochnebel: sunshine above a flat deck, grey below it. */
+export const IconStratus = (p: P) => (
+  <Icon {...p}>
+    <circle cx="12" cy="7" r="2.75" />
+    <path d="M12 2v.8M7.2 4.2l.6.6M16.8 4.2l-.6.6M5.5 7h.8M17.7 7h.8" />
+    <path d="M3 12.5h18M5 16h14M7.5 19.5h9" />
+  </Icon>
+);
+/** Final approach: a glide path down to a runway threshold. */
+export const IconApproach = (p: P) => (
+  <Icon {...p}>
+    <path d="M3 6.5 17 15" stroke-dasharray="2.2 2.2" />
+    <path d="M14 19h7M4 19h4" />
+    <path d="M17 15l1.5 4" />
+  </Icon>
+);
+export const IconRadio = (p: P) => (
+  <Icon {...p}>
+    <path d="M5 13v-1a7 7 0 0 1 14 0v1" />
+    <rect x="3.5" y="13" width="4" height="6" rx="1.5" />
+    <rect x="16.5" y="13" width="4" height="6" rx="1.5" />
+    <path d="M18.5 19v.5a2 2 0 0 1-2 2H13" />
+  </Icon>
+);
+export const IconChecklist = (p: P) => (
+  <Icon {...p}>
+    <path d="M10 6.5h10M10 12h10M10 17.5h10" />
+    <path d="M3.5 6.5l1.5 1.5 2.5-3M3.5 12l1.5 1.5 2.5-3" />
+    <circle cx="5.5" cy="17.5" r="1.4" />
+  </Icon>
+);
+/** The radio stack: two frequency windows. */
+export const IconStack = (p: P) => (
+  <Icon {...p}>
+    <rect x="3" y="5" width="18" height="6" rx="1.5" />
+    <rect x="3" y="13" width="18" height="6" rx="1.5" />
+    <path d="M6.5 8h5M6.5 16h5M16.5 8h1M16.5 16h1" />
+  </Icon>
+);
+export const IconAutopilot = (p: P) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M3.5 12h5l1.5-2.5 2 5 1.5-2.5h7" />
+  </Icon>
+);
+export const IconSwitches = (p: P) => (
+  <Icon {...p}>
+    <rect x="3.5" y="4" width="7" height="16" rx="3.5" />
+    <circle cx="7" cy="8" r="2" />
+    <rect x="13.5" y="4" width="7" height="16" rx="3.5" />
+    <circle cx="17" cy="16" r="2" />
+  </Icon>
+);
+export const IconTools = (p: P) => (
+  <Icon {...p}>
+    <rect x="4" y="4" width="6.5" height="6.5" rx="1.5" />
+    <rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5" />
+    <rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5" />
+    <rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5" />
+  </Icon>
+);
+export const IconSwap = (p: P) => (
+  <Icon {...p}>
+    <path d="M4 8.5h15l-3.5-3.5M20 15.5H5l3.5 3.5" />
+  </Icon>
+);
+export const IconPlus = (p: P) => (
+  <Icon {...p}>
+    <path d="M12 5.5v13M5.5 12h13" />
+  </Icon>
+);
+export const IconMinus = (p: P) => (
+  <Icon {...p}>
+    <path d="M5.5 12h13" />
+  </Icon>
+);
+export const IconCheck = (p: P) => (
+  <Icon {...p}>
+    <path d="M5 12.5l4.5 4.5L19 7.5" />
+  </Icon>
+);
+export const IconSide = (p: P) => (
+  <Icon {...p}>
+    <path d="M8 7 3.5 12 8 17M16 7l4.5 5-4.5 5M3.5 12h17" />
+  </Icon>
+);
+export const IconNight = (p: P) => (
+  <Icon {...p}>
+    <path d="M19.5 14.5A8 8 0 0 1 9.5 4.5a8 8 0 1 0 10 10z" />
+  </Icon>
+);
+export const IconMountain = (p: P) => (
+  <Icon {...p}>
+    <path d="M2.5 19.5 9 8l4 6.5 2.5-3.5 6 8.5z" />
+    <path d="M7.4 10.8 9 12.5l1.6-1.6" />
+  </Icon>
+);
+export const IconCircuit = (p: P) => (
+  <Icon {...p}>
+    <rect x="4" y="6" width="16" height="12" rx="5" />
+    <path d="M9 12h6" stroke-width="2.5" />
+  </Icon>
+);
+/** Two chevrons: a coarse step (flipped by CSS for the other way). */
+export const IconFast = (p: P) => (
+  <Icon {...p}>
+    <path d="M12 6 6 12l6 6M18 6l-6 6 6 6" />
+  </Icon>
+);
+export const IconRoute = (p: P) => (
+  <Icon {...p}>
+    <circle cx="6" cy="18" r="2.25" />
+    <circle cx="18" cy="6" r="2.25" />
+    <path d="M8 16.5c4-1 2-6 5.5-8.5" stroke-dasharray="2 2.2" />
+  </Icon>
+);
 export const IconWarning = (p: P) => (
   <Icon {...p}>
     <path d="M12 3.5 2.5 20h19z" />

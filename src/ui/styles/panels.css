@@ -1,0 +1,1461 @@
+/*
+ * In-flight panels (phase 3): radio, checklist, radio stack, autopilot, switches; the
+ * toolbar that opens them; the navigation strip and the annunciator tags of the HUD.
+ * Same glass, lines and type as the HUD cards. Panels keep to the edges and the bottom: the
+ * middle of the view belongs to the flight.
+ */
+
+/* Navigation strip ------------------------------------------------------------------------ */
+
+.nav-strip {
+  position: absolute;
+  top: calc(var(--hud-top) + 60px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: 34px 40px 84px 12px 58px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 400px;
+  height: 32px;
+  padding: 0 12px;
+  font-size: var(--fs-1);
+  white-space: nowrap;
+}
+
+.nav-src {
+  color: var(--c-ink-3);
+}
+
+.nav-ident {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: var(--fs-3);
+  letter-spacing: 0.06em;
+  color: var(--c-accent);
+  overflow: hidden;
+}
+
+.nav-bar {
+  position: relative;
+  display: block;
+  justify-self: center;
+  border-radius: var(--r-pill);
+  background: rgb(255 255 255 / 0.14);
+}
+
+.nav-cdi {
+  width: 84px;
+  height: 4px;
+  /* Dots at half and full scale. */
+  background:
+    radial-gradient(circle, var(--c-ink-3) 1.5px, transparent 2px) center / 21px 4px repeat-x,
+    rgb(255 255 255 / 0.1);
+}
+
+.nav-gs {
+  width: 4px;
+  height: 22px;
+}
+
+.nav-bar::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  background: var(--c-ink-2);
+}
+
+.nav-gs::before {
+  width: 10px;
+  height: 1px;
+}
+
+.nav-needle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: block;
+  width: 3px;
+  height: 14px;
+  margin: -7px 0 0 -1.5px;
+  border-radius: 2px;
+  background: var(--c-accent);
+  box-shadow: 0 0 6px rgb(143 211 255 / 0.6);
+  transition: transform 120ms linear;
+  will-change: transform;
+}
+
+.nav-gs .nav-needle {
+  width: 12px;
+  height: 3px;
+  margin: -1.5px 0 0 -6px;
+}
+
+.nav-bar.is-off .nav-needle {
+  opacity: 0;
+}
+
+.nav-bar.is-off {
+  opacity: 0.45;
+}
+
+.nav-dme {
+  font-weight: 600;
+  font-size: var(--fs-2);
+  text-align: right;
+}
+
+.nav-dme small {
+  margin-left: 3px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-0);
+  font-weight: 500;
+}
+
+.nav-ap {
+  overflow: hidden;
+  color: var(--c-ok);
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: var(--fs-2);
+  letter-spacing: 0.06em;
+  text-align: right;
+}
+
+.nav-ap-armed {
+  margin-left: 6px;
+  color: var(--c-ink-3);
+}
+
+.hud.has-nav .hud-alerts {
+  top: calc(var(--hud-top) + 64px + 40px);
+}
+
+/* Annunciators: quiet amber tags, no popups. */
+.annun {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+.annun:empty {
+  display: none;
+}
+
+.annun-tag {
+  padding: 2px 8px;
+  border: 1px solid rgb(255 181 58 / 0.6);
+  border-radius: var(--r-1);
+  background: var(--c-hud-glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  color: var(--c-caution);
+  font-size: var(--fs-0);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+/* Radio caption and checklist hint: single lines of glass. */
+.radio-caption,
+.check-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 100%;
+  padding: 7px 14px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  background: var(--c-hud-glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  font-size: var(--fs-2);
+  line-height: 1.35;
+  animation: ui-enter var(--t-base) var(--ease-out) both;
+}
+
+.radio-caption .icon,
+.check-hint .icon {
+  margin-top: 1px;
+  color: var(--c-accent);
+}
+
+.radio-caption span {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.check-hint {
+  align-items: center;
+}
+
+.check-hint-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.check-hint-expect {
+  flex: none;
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--c-accent);
+  font-size: var(--fs-1);
+  font-weight: 600;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+/* Docks ----------------------------------------------------------------------------------- */
+
+.flight-panels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.flight-panels.is-paused {
+  opacity: 0.35;
+}
+
+/*
+ * Large screens: three columns under the speed and altitude cards. The radio (and the
+ * checklist, if moved) on the left above the systems card, the checklist and the toolbar on
+ * the right, the avionics at the bottom in between, so no two panels ever overlap.
+ */
+.flight-panels:not(.is-touch) {
+  inset: calc(var(--hud-side-y) + 96px) var(--safe-r) var(--safe-b) var(--safe-l);
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr) 320px;
+  column-gap: 12px;
+}
+
+.dock {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  min-height: 0;
+}
+
+.dock--left {
+  grid-column: 1;
+  grid-row: 1;
+  /* Room for the systems card. */
+  padding-bottom: 132px;
+}
+
+.dock--right {
+  grid-column: 3;
+  grid-row: 1;
+  /* The altitude card is taller than the speed card. */
+  padding-top: 30px;
+  align-items: flex-end;
+}
+
+.dock--bottom {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: end;
+  justify-self: center;
+  width: min(720px, 100%);
+  max-height: min(340px, 100%);
+}
+
+.dock > .panel {
+  width: 100%;
+  min-height: 0;
+}
+/* Panel ----------------------------------------------------------------------------------- */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-3);
+  background: var(--c-hud-glass, var(--c-glass));
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: 0 10px 32px rgb(0 0 0 / 0.3);
+  pointer-events: auto;
+  animation: ui-enter var(--t-base) var(--ease-out) both;
+}
+
+.panel-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 44px;
+  padding: 4px 6px 4px 14px;
+}
+
+.panel:not(.is-collapsed) .panel-head {
+  border-bottom: 1px solid var(--c-line);
+}
+
+.panel-icon {
+  display: grid;
+  color: var(--c-ink-3);
+}
+
+.panel-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: var(--fs-4);
+  letter-spacing: var(--tracking-wide);
+  line-height: 1.1;
+  text-transform: uppercase;
+  /* Long German titles take a second line rather than lose their end. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.panel-aside {
+  flex: none;
+  color: var(--c-ink-2);
+  font-size: var(--fs-2);
+}
+
+.panel-warn {
+  color: var(--c-caution);
+  font-size: var(--fs-1);
+}
+
+.panel-actions {
+  flex: none;
+  display: flex;
+  gap: 2px;
+}
+
+.panel-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-3) 14px 14px;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.2) transparent;
+}
+
+.panel-empty {
+  color: var(--c-ink-3);
+  font-size: var(--fs-2);
+}
+
+.panel-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--c-ink-2);
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease-out),
+    color var(--t-fast) var(--ease-out),
+    border-color var(--t-fast) var(--ease-out);
+}
+
+.panel-btn:hover {
+  background: var(--c-fill-hover);
+  color: var(--c-ink);
+}
+
+.panel-btn:active {
+  background: var(--c-fill-active);
+}
+
+.panel-btn[disabled] {
+  opacity: 0.35;
+  cursor: default;
+  background: transparent;
+}
+
+.panel-body .panel-btn {
+  border-color: var(--c-line);
+  background: var(--c-fill);
+}
+
+.panel-body .panel-btn:hover {
+  border-color: var(--c-line-strong);
+  background: var(--c-fill-hover);
+}
+
+.panel-btn--text {
+  padding: 0 10px;
+  font-size: var(--fs-2);
+  font-weight: 600;
+}
+
+.panel-btn.is-on {
+  border-color: var(--c-accent);
+  background: var(--c-accent-dim);
+  color: var(--c-ink);
+}
+
+.is-flip .icon {
+  transform: scaleX(-1);
+}
+
+.seg--compact {
+  padding: 2px;
+}
+
+.seg--compact .seg-option {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 1px 8px;
+  font-size: var(--fs-1);
+}
+
+/* Toolbar --------------------------------------------------------------------------------- */
+
+.tools {
+  display: flex;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.tool {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--tap);
+  height: var(--tap);
+  padding: 0;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  background: var(--c-hud-glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  color: var(--c-ink-2);
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease-out),
+    border-color var(--t-fast) var(--ease-out),
+    color var(--t-fast) var(--ease-out);
+}
+
+.tool:hover {
+  border-color: var(--c-line-strong);
+  color: var(--c-ink);
+}
+
+.tool.is-on {
+  border-color: var(--c-accent);
+  background: rgb(14 30 44 / 0.78);
+  color: var(--c-accent);
+}
+
+.tool-key {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  color: var(--c-ink-3);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.hud.is-cockpit .tools {
+  opacity: 0.75;
+}
+
+/* Touch: the button in the top bar and its menu. */
+.hud-tools {
+  position: relative;
+}
+
+.hud-tools.is-on {
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+}
+
+.tool-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-accent);
+  box-shadow: 0 0 0 2px rgb(9 13 20 / 0.8);
+}
+
+.tools-scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+}
+
+.tools-menu {
+  position: absolute;
+  top: calc(var(--hud-top) + 56px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: repeat(3, 96px);
+  gap: 6px;
+  padding: 8px;
+  border-radius: var(--r-3);
+  pointer-events: auto;
+}
+
+.tools-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 64px;
+  padding: 6px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--r-2);
+  background: var(--c-fill);
+  color: var(--c-ink-2);
+  font-size: var(--fs-1);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.tools-item span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tools-item.is-on {
+  border-color: var(--c-accent);
+  background: var(--c-accent-dim);
+  color: var(--c-ink);
+}
+
+/* Touch: one panel as a sheet between the thumbs. */
+.sheet {
+  position: absolute;
+  left: var(--sheet-l);
+  right: var(--sheet-r);
+  bottom: var(--sheet-b);
+  top: var(--sheet-t);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.sheet > .panel {
+  max-height: 100%;
+}
+
+.flight-panels.is-touch {
+  /* Landscape: between the stick and the buttons, above the rudder. */
+  --sheet-l: calc(var(--safe-l) + 192px);
+  --sheet-r: calc(var(--safe-r) + 224px);
+  --sheet-b: calc(var(--safe-b) + 84px);
+  --sheet-t: calc(var(--hud-top) + 56px);
+}
+
+@media (min-height: 700px) and (min-width: 700px) {
+  .flight-panels.is-touch {
+    --sheet-l: calc(var(--safe-l) + 226px);
+    --sheet-r: calc(var(--safe-r) + 232px);
+  }
+}
+
+/* Portrait: full width, above the row of buttons over the throttle. */
+@media (orientation: portrait) {
+  .flight-panels.is-touch {
+    --sheet-l: var(--safe-l);
+    --sheet-r: var(--safe-r);
+    --sheet-b: calc(var(--safe-b) + 312px);
+    /* Below the speed and altitude cards. */
+    --sheet-t: calc(var(--safe-t) + 168px);
+  }
+}
+
+/* Radio ----------------------------------------------------------------------------------- */
+
+.radio-freq {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-accent);
+  font-size: var(--fs-3);
+  font-weight: 600;
+}
+
+.radio-badge {
+  display: grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--c-accent);
+  color: #0b1018;
+  font-size: var(--fs-0);
+  font-weight: 700;
+}
+
+.radio-log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 150px;
+  margin: 0;
+  padding: 12px 0 0;
+  overflow-y: auto;
+  list-style: none;
+  scrollbar-width: none;
+  /* Older calls fade out at the top instead of being cut. */
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 28px);
+  mask-image: linear-gradient(180deg, transparent, #000 28px);
+}
+
+.radio-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-width: 92%;
+  /* Older calls fade: the newest is what matters. */
+  opacity: max(0.4, calc(1 - var(--age) * 0.16));
+}
+
+.radio-msg.is-pilot {
+  align-self: flex-end;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.radio-who {
+  color: var(--c-ink-3);
+}
+
+.radio-msg.is-pilot .radio-who {
+  color: var(--c-accent);
+}
+
+.radio-text {
+  font-size: var(--fs-2);
+  line-height: 1.4;
+}
+
+.radio-msg.is-pilot .radio-text {
+  color: var(--c-ink-2);
+}
+
+.radio-empty {
+  color: var(--c-ink-3);
+  font-size: var(--fs-2);
+}
+
+.radio-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--c-line);
+}
+
+.radio-hint-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.radio-hint-value {
+  font-size: var(--fs-2);
+  font-weight: 600;
+}
+
+.radio-tune {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: var(--fs-2);
+}
+
+.radio-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.radio-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 38px;
+  padding: 6px 10px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  background: var(--c-fill);
+  font-size: var(--fs-2);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease-out),
+    border-color var(--t-fast) var(--ease-out);
+}
+
+.radio-option:hover {
+  border-color: var(--c-accent);
+  background: var(--c-accent-dim);
+}
+
+.radio-option .keycap {
+  flex: none;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+}
+
+.radio-option-text {
+  min-width: 0;
+}
+
+/* Checklist ------------------------------------------------------------------------------- */
+
+.check-progress {
+  color: var(--c-ink-3);
+  font-size: var(--fs-1);
+}
+
+.check-lists {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.check-list-btn {
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 12px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  background: var(--c-fill);
+  font-size: var(--fs-2);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.check-list-btn:hover {
+  border-color: var(--c-line-strong);
+  background: var(--c-fill-hover);
+}
+
+.check-back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  margin: -4px 0 -4px -6px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--c-ink-3);
+  font-size: var(--fs-1);
+  cursor: pointer;
+}
+
+.check-back:hover {
+  color: var(--c-ink);
+}
+
+.check-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  margin: 0 -8px;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.2) transparent;
+}
+
+.check-item {
+  display: grid;
+  grid-template-columns: 18px auto minmax(12px, 1fr) auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--r-1);
+  color: var(--c-ink-2);
+  font-size: var(--fs-2);
+}
+
+.check-mark {
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--c-ink-4);
+  border-radius: 50%;
+}
+
+.check-label {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.check-leader {
+  align-self: end;
+  margin-bottom: 4px;
+  border-bottom: 1px dotted var(--c-ink-4);
+}
+
+.check-expect {
+  font-size: var(--fs-1);
+  font-weight: 600;
+  letter-spacing: var(--tracking-wide);
+  text-align: right;
+  text-transform: uppercase;
+}
+
+.check-item.is-done {
+  color: var(--c-ink-3);
+}
+
+.check-item.is-done .check-mark {
+  border-color: var(--c-ok);
+  background: rgb(75 213 141 / 0.16);
+  color: var(--c-ok);
+}
+
+.check-item.is-current {
+  padding-block: 8px;
+  background: var(--c-accent-dim);
+  box-shadow: inset 2px 0 0 var(--c-accent);
+  color: var(--c-ink);
+  font-size: var(--fs-3);
+  font-weight: 500;
+}
+
+.check-item.is-current .check-mark {
+  border-color: var(--c-accent);
+  background: radial-gradient(circle, var(--c-accent) 3px, transparent 3.5px);
+}
+
+.check-item.is-current .check-expect {
+  color: var(--c-accent);
+  font-size: var(--fs-2);
+}
+
+.check-foot {
+  display: flex;
+}
+
+.check-btn {
+  flex: 1;
+  min-height: 40px;
+}
+
+.check-btn .keycap {
+  margin-left: auto;
+}
+
+.check-complete {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-ok);
+  font-size: var(--fs-2);
+  font-weight: 600;
+}
+
+/* Radio stack ----------------------------------------------------------------------------- */
+
+/* Two columns of two-line radios, the DME as a line across the bottom. */
+.stack-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(262px, 1fr));
+  gap: 6px;
+}
+
+.radio-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 8px 8px 10px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  background: rgb(0 0 0 / 0.18);
+}
+
+.rc-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-height: 22px;
+}
+
+.rc-name {
+  flex: none;
+  min-width: 3.6em;
+  color: var(--c-ink-2);
+  font-size: var(--fs-0);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+}
+
+.rc-ident {
+  margin-left: auto;
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: var(--fs-2);
+  letter-spacing: 0.08em;
+  color: var(--c-accent);
+}
+
+.rc-ident.is-off {
+  color: var(--c-ink-4);
+}
+
+.rc-active {
+  font-size: var(--fs-4);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.rc-unit {
+  color: var(--c-ink-3);
+  font-size: var(--fs-1);
+  font-weight: 500;
+}
+
+.rc-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.value-input {
+  width: 64px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 4px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-1);
+  background: rgb(0 0 0 / 0.32);
+  color: var(--c-ink-2);
+  font: inherit;
+  font-size: var(--fs-2);
+  font-weight: 500;
+  text-align: center;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.value-input:focus {
+  border-color: var(--c-accent);
+  color: var(--c-ink);
+}
+
+.value-input.is-invalid {
+  border-color: var(--c-warning);
+  box-shadow: 0 0 0 3px rgb(255 77 79 / 0.2);
+}
+
+.xpdr-code {
+  width: 52px;
+}
+
+.rc-row .panel-btn {
+  height: 28px;
+}
+
+.rc-swap {
+  min-width: 30px;
+  padding: 0;
+}
+
+.stepper {
+  display: inline-flex;
+  align-items: center;
+}
+
+.stepper .panel-btn {
+  min-width: 24px;
+  padding: 0;
+}
+
+.stepper-unit {
+  min-width: 22px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-0);
+  font-weight: 600;
+  text-align: center;
+}
+
+.xpdr-reply {
+  align-self: center;
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.18);
+}
+
+.xpdr-reply.is-on {
+  background: var(--c-ok);
+  box-shadow: 0 0 6px rgb(75 213 141 / 0.8);
+}
+
+/* The DME lives in the stack's header: one line, no card of its own. */
+.dme {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dme-read {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  min-width: 11ch;
+}
+
+.dme-big {
+  color: var(--c-ink);
+  font-size: var(--fs-3);
+  font-weight: 600;
+}
+
+.dme-small {
+  margin-left: 6px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-1);
+}
+
+.xpdr-card .rc-head .seg {
+  margin-left: auto;
+}
+.dme-off {
+  color: var(--c-ink-3);
+  font-size: var(--fs-2);
+}
+.stack-grid.is-dark :is(.rc-active, .value-input, .dme-read) {
+  opacity: 0.35;
+}
+
+/* Autopilot ------------------------------------------------------------------------------- */
+
+.ap-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  min-height: 36px;
+  padding: 4px 12px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-1);
+  background: rgb(0 0 0 / 0.35);
+}
+
+.ap-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.ap-mode {
+  color: var(--c-ok);
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: var(--fs-4);
+  letter-spacing: 0.08em;
+}
+
+.ap-mode.is-armed {
+  color: var(--c-ink-3);
+}
+
+.ap-mode.is-off {
+  color: var(--c-ink-3);
+  font-family: var(--f-text);
+  font-weight: 500;
+  font-size: var(--fs-2);
+  letter-spacing: 0;
+}
+
+.ap-mode.is-warn {
+  color: var(--c-caution);
+}
+
+.ap-sel {
+  display: flex;
+  gap: var(--s-3);
+  font-size: var(--fs-3);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ap-sel small {
+  color: var(--c-ink-3);
+  font-size: var(--fs-0);
+}
+
+.ap-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ap-btn {
+  min-width: 52px;
+  height: 36px;
+  font-family: var(--f-display);
+  font-size: var(--fs-3);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.ap-btn.is-armed {
+  border-style: dashed;
+  border-color: var(--c-ink-3);
+}
+
+.knob-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.knob-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px var(--s-2);
+  min-height: 40px;
+}
+
+.knob-label {
+  flex: 1 0 auto;
+  max-width: 100%;
+  color: var(--c-ink-2);
+  font-size: var(--fs-2);
+}
+
+.knob-ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.knob-value {
+  min-width: 7ch;
+  font-size: var(--fs-3);
+  font-weight: 600;
+  text-align: center;
+}
+
+.knob-sync {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: var(--fs-1);
+}
+
+/* Switches -------------------------------------------------------------------------------- */
+
+.switch-groups {
+  column-width: 216px;
+  column-gap: var(--s-4);
+}
+
+.switch-group {
+  break-inside: avoid;
+  margin-bottom: var(--s-3);
+}
+
+.switch-group h3 {
+  margin-bottom: 2px;
+}
+
+.ctl-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px var(--s-2);
+  width: 100%;
+  min-height: 40px;
+  padding: 4px 0;
+  border: 0;
+  border-bottom: 1px solid var(--c-line);
+  background: transparent;
+  text-align: left;
+}
+
+/* A long German name keeps its line; the control moves below it rather than break the word. */
+.ctl-label {
+  flex: 1 0 auto;
+  max-width: 100%;
+  color: var(--c-ink-2);
+  font-size: var(--fs-2);
+  overflow-wrap: break-word;
+}
+
+.ctl-row > :not(.ctl-label) {
+  margin-left: auto;
+}
+
+.ctl-toggle {
+  cursor: pointer;
+}
+
+.ctl-toggle .switch {
+  width: 36px;
+  height: 22px;
+}
+
+.ctl-toggle .switch-knob {
+  width: 16px;
+  height: 16px;
+}
+
+.ctl-toggle.is-on .switch {
+  background: var(--c-accent);
+}
+
+.ctl-toggle.is-on .switch-knob {
+  transform: translateX(14px);
+  background: #0b1018;
+}
+
+.ctl-toggle.is-on .ctl-label {
+  color: var(--c-ink);
+}
+
+.ctl-lever {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ctl-lever .slider {
+  width: 104px;
+  height: 32px;
+}
+
+.ctl-value {
+  min-width: 4.5ch;
+  font-size: var(--fs-2);
+  font-weight: 600;
+  text-align: right;
+}
+
+/* Selectors take a line of their own: the positions need the width. */
+.ctl-selector > :is(.seg, .sel-step) {
+  flex: 1 0 100%;
+}
+
+.sel-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.sel-value {
+  flex: 1;
+  min-width: 6ch;
+  font-size: var(--fs-2);
+  font-weight: 600;
+  text-align: center;
+}
+
+.ctl-row .knob-value {
+  min-width: 7.5ch;
+  font-size: var(--fs-2);
+}
+
+/* Pause: failures for practice ------------------------------------------------------------ */
+
+.pause-failure-btn .icon:last-child {
+  margin-left: auto;
+  transition: transform var(--t-base) var(--ease-out);
+}
+
+.pause-failure-btn.is-open .icon:last-child {
+  transform: rotate(180deg);
+}
+
+.pause-failures {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 2px 0 6px;
+}
+
+.pause-failures-hint {
+  grid-column: 1 / -1;
+  color: var(--c-ink-3);
+  font-size: var(--fs-1);
+}
+
+.pause-failure {
+  justify-content: flex-start;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 10px;
+  font-size: var(--fs-2);
+  white-space: normal;
+  text-align: left;
+}
+
+.pause-failure-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pause-failure-lamp {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.18);
+}
+
+.pause-failure.is-on {
+  border-color: rgb(255 181 58 / 0.6);
+}
+
+.pause-failure.is-on .pause-failure-lamp {
+  background: var(--c-caution);
+  box-shadow: 0 0 6px rgb(255 181 58 / 0.8);
+}
+
+.pause-failure-state {
+  margin-left: auto;
+  color: var(--c-caution);
+  font-size: var(--fs-0);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+/* Touch: everything a thumb can hit is at least 44 px ---------------------------------------- */
+
+.ui[data-touch] :is(.panel-btn, .stepper .panel-btn) {
+  min-width: var(--tap);
+  height: var(--tap);
+}
+
+.ui[data-touch] :is(.radio-option, .check-list-btn, .check-btn, .radio-tune, .knob-sync) {
+  min-height: var(--tap);
+}
+
+.ui[data-touch] .check-back {
+  min-height: var(--tap);
+}
+
+.ui[data-touch] .value-input {
+  height: var(--tap);
+}
+
+.ui[data-touch] .seg--compact .seg-option {
+  min-width: var(--tap);
+  min-height: var(--tap);
+}
+
+.ui[data-touch] .ctl-row {
+  min-height: 48px;
+}
+
+.ui[data-touch] .ctl-selector .seg-option {
+  flex: 1 1 0;
+}
+
+.ui[data-touch] .ctl-lever .slider {
+  height: var(--tap);
+}
+
+.ui[data-touch] .stack-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+}
+
+.ui[data-touch] .rc-row {
+  gap: 6px;
+}
+
+.ui[data-touch] .dme {
+  flex-wrap: wrap;
+}
+
+.ui[data-touch] .rc-row .panel-btn {
+  height: var(--tap);
+}
+
+/* Short screens --------------------------------------------------------------------------- */
+
+@media (max-height: 560px) {
+  .nav-strip {
+    top: calc(var(--hud-top) + 52px);
+    height: 30px;
+  }
+  .hud.has-nav .hud-alerts {
+    top: calc(var(--hud-top) + 54px + 38px);
+  }
+  .tools-menu {
+    top: calc(var(--hud-top) + 50px);
+  }
+}
+
+/* Narrow portrait: the strip drops below the speed and altitude cards. */
+@media (max-width: 600px) and (orientation: portrait) {
+  .nav-strip {
+    top: calc(var(--safe-t) + 60px + 104px);
+    width: min(340px, 100% - 2 * var(--s-4));
+  }
+  .hud.has-nav .hud-alerts {
+    top: calc(var(--safe-t) + 60px + 104px + 42px);
+  }
+  .tools-menu {
+    top: calc(var(--safe-t) + 60px);
+  }
+  /* The tools button leaves the top bar for the gap between the two cards. */
+  .hud-tools {
+    position: absolute;
+    top: calc(100% + 16px);
+    left: 50%;
+    transform: translateX(-50%);
+  }
+}

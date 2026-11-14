@@ -223,8 +223,12 @@ export function SwissMap(props: {
   selected: string;
   onSelect?: (icao: string) => void;
   label: string;
+  /** A flight from one airport to another: a dashed line and a marker at the far end. */
+  route?: { from: string; to: string };
 }) {
   const sel = props.airports.find((a) => a.icao === props.selected);
+  const from = props.airports.find((a) => a.icao === props.route?.from);
+  const to = props.airports.find((a) => a.icao === props.route?.to);
   return (
     <figure
       class={`swissmap${props.onSelect ? ' is-interactive' : ''}`}
@@ -258,6 +262,22 @@ export function SwissMap(props: {
           <path class="swissmap-lake" d={d} key={d} />
         ))}
         <path class="swissmap-border" d={BORDER_PATH} />
+        {from &&
+          to &&
+          from !== to &&
+          (() => {
+            const [x1, y1] = project(from.lon, from.lat);
+            const [x2, y2] = project(to.lon, to.lat);
+            return (
+              <line
+                class="swissmap-route"
+                x1={x1.toFixed(1)}
+                y1={y1.toFixed(1)}
+                x2={x2.toFixed(1)}
+                y2={y2.toFixed(1)}
+              />
+            );
+          })()}
         {sel &&
           (() => {
             const [x, y] = project(sel.lon, sel.lat);
@@ -266,12 +286,14 @@ export function SwissMap(props: {
         {props.airports.map((a) => {
           const [x, y] = project(a.lon, a.lat);
           const on = a.icao === props.selected;
+          // The other end of the route (the selection is one end already).
+          const end = !on && !!to && (a === to || a === from);
           // Labels go left of dots in the east of the map so they stay inside the frame.
           const left = x > MAP_W * 0.78;
           return (
             <g
               key={a.icao}
-              class={`swissmap-apt${on ? ' is-on' : ''}`}
+              class={`swissmap-apt${on ? ' is-on' : ''}${end ? ' is-end' : ''}`}
               transform={`translate(${x.toFixed(1)} ${y.toFixed(1)})`}
               onClick={() => props.onSelect?.(a.icao)}
               aria-hidden="true"
