@@ -36,10 +36,11 @@ function horizontalDistance(
 /**
  * Stall: from trimmed flight at idle, slow down at 1 kt/s holding altitude until the stall.
  * Returns the minimum calibrated and indicated speed reached (handbook stall speeds are
- * power off, 1 kt/s, most rearward CG).
+ * power off, 1 kt/s, most rearward CG). `setup` changes the aircraft after the reset.
  */
-export function stallSpeed(flapsLever: number) {
+export function stallSpeed(flapsLever: number, setup?: (f: Flight) => void) {
   const f = airborne(1500, flapsLever > 0 ? 65 : 70, { flaps: flapsLever });
+  setup?.(f);
   const { ac } = f;
   ac.controls.throttle[0] = 0;
   const pilot = new SpeedPilot(ac, 0);

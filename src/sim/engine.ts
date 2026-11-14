@@ -73,6 +73,20 @@ export class PistonEngine {
   running = true;
   /** Shaft speed, rad/s. */
   omega = 0;
+  /**
+   * Set by the systems before each evaluation; the defaults are a healthy engine on both
+   * magnetos with clean induction air, so the engine alone behaves as without systems.
+   * `ignition`: share of combustion power the sparks give (1 both, a little less on one
+   * magneto, 0 with no spark). `intake`: share of the manifold pressure the induction lets
+   * through (alternate air, induction ice). `fireable`: a cold engine fires only once primed.
+   * `failed`: no power whatever the controls.
+   */
+  ignition = 1;
+  intake = 1;
+  fireable = true;
+  failed = false;
+  /** Share of the starter's torque the battery can drive, 0..1. */
+  starterPower = 1;
   private readonly torqueScale: number;
 
   constructor(readonly data: PistonEngineData) {
@@ -119,14 +133,15 @@ export class PistonEngine {
     const rpm = this.rpm;
     const phi = this.equivalenceRatio(mixture, density);
     const mixturePower = mixture < 0.03 ? 0 : lookup(MIXTURE_POWER, phi);
-    const canFire = hasFuel && mixturePower > 0.05;
+    const canFire = hasFuel && mixturePower > 0.05 && this.ignition > 0 && !this.failed;
     if (!canFire) this.running = false;
     // Cranking at starter speed is enough to fire; windmilling needs more to fire unaided.
-    else if (!this.running && rpm > (starter ? 150 : 350)) this.running = true;
-    else if (this.running && rpm < 250) this.running = false;
+    else if (!this.running && rpm > (starter ? 150 : 350) && this.fireable) this.running = true;
+    // While the starter still helps, a just-fired engine is given the time to run up.
+    else if (this.running && rpm < (starter ? 100 : 250)) this.running = false;
 
     const t = Math.min(1, Math.max(0, throttle));
-    const manifold = pressure * 0.98 * (d.idleManifold + (1 - d.idleManifold) * t);
+    const manifold = pressure * 0.98 * (d.idleManifold + (1 - d.idleManifold) * t) * this.intake;
     const absOmega = Math.abs(this.omega);
     let friction = d.frictionTorque + d.frictionPerRadS * absOmega;
     // Friction opposes rotation and fades to zero at standstill, so it never turns the shaft.
@@ -140,10 +155,10 @@ export class PistonEngine {
     let fuelFlow = 0;
     if (this.running) {
       const air = this.airflow(manifold, temperature, Math.max(rpm, 0));
-      torque += (this.torqueScale * air * mixturePower) / Math.max(this.omega, 1);
+      torque += (this.torqueScale * air * mixturePower * this.ignition) / Math.max(this.omega, 1);
       fuelFlow = (air * phi) / STOICHIOMETRIC_AIR_FUEL;
     }
-    if (starter && rpm < d.starterRpm) torque += d.starterTorque;
+    if (starter && rpm < d.starterRpm) torque += d.starterTorque * this.starterPower;
     out.torque = torque;
     out.power = torque * this.omega;
     out.fuelFlow = fuelFlow;

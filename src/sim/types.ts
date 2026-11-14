@@ -73,6 +73,11 @@ export interface AirSample {
   temperature: number;
   /** Pa */
   pressure: number;
+  /**
+   * Visible moisture: 0 dry .. 1 in cloud or precipitation. With the temperature it decides
+   * icing. Missing means dry.
+   */
+  moisture?: number;
 }
 
 /** Kind of surface under a wheel; sets rolling and braking friction. */

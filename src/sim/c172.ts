@@ -9,6 +9,7 @@
  */
 import type { AirfoilData } from './airfoil';
 import type { AircraftDefinition, StripDef } from './definition';
+import type { SystemsData } from './systems/data';
 import { DEG, FT, KT } from './math';
 import type { Vec3 } from './types';
 
@@ -178,6 +179,65 @@ function tailStrips(): StripDef[] {
 }
 
 const strips = [...wingStrips(), ...tailStrips()];
+
+const LB = 0.45359237;
+/** Avgas as the handbook's weight and balance counts it: 6 lb per US gallon. */
+const GAL = 6 * LB;
+
+/**
+ * C172S Information Manual, section 2 (limitations, instrument markings) and section 7
+ * (systems): 24 V 12.75 Ah battery, 28 V 60 A alternator, LOW VOLTS below 24.5 V; 56 gal
+ * total, 53 usable in two wing tanks, L/R LOW FUEL below 5 gal; oil pressure 20 psi minimum,
+ * 50-90 green, 115 maximum; suction 4.5-5.5 in Hg green, LOW VACUUM below 3.0 in Hg. The
+ * consumer currents are typical for the installed equipment, not handbook figures.
+ */
+const C172_SYSTEMS: SystemsData = {
+  electrical: {
+    batteryAmpHours: 12.75,
+    batteryResistance: 0.05,
+    batteryFullVolts: 24.8,
+    batteryLowVolts: 23.84,
+    alternatorVolts: 28,
+    alternatorAmps: 60,
+    alternatorCutInRpm: 400,
+    alternatorFullRpm: 1500,
+    lowVolts: 24.5,
+    // Radios want about 22 V; the rest of the bus keeps working much lower.
+    avionicsMinVolts: 20,
+    busMinVolts: 16,
+    loads: {
+      base: 3,
+      panelLights: 1.5,
+      beacon: 1.5,
+      strobe: 3,
+      nav: 1.5,
+      landing: 4,
+      taxi: 3,
+      pitotHeat: 5.5,
+      avionics: 7,
+      flapsMotor: 10,
+      starter: 150,
+      fuelPump: 3,
+    },
+  },
+  fuel: {
+    tankUsable: 26.5 * GAL,
+    tankArm: 1.7,
+    lowFuel: 5 * GAL,
+    // A leak of about 10 gal/h: noticeable on the gauge within a quarter of an hour.
+    leakRate: (10 * GAL) / 3600,
+    lineFuel: 0.02,
+  },
+  engine: {
+    singleMagnetoLoss: 0.11,
+    alternateAirLoss: 0.035,
+    oilPressure: 72,
+    oilPressureMax: 100,
+    lowOilPressure: 20,
+  },
+  vacuum: { suction: 5, fullRpm: 850, low: 3 },
+  icing: { iceMass: 50 },
+};
 const stallHorn = strips.findIndex((s) => s.name === 'wing-left-2');
 
 export const C172: AircraftDefinition = {
@@ -393,4 +453,5 @@ export const C172: AircraftDefinition = {
       [250, 253],
     ],
   ],
+  systems: C172_SYSTEMS,
 };

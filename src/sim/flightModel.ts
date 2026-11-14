@@ -8,9 +8,10 @@
  * with the gear and contact points recomputed each sub-step (they are stiff). Semi-implicit
  * Euler, which keeps the phugoid and the gear oscillation from gaining energy.
  */
-import type { Avionics } from './avionicsTypes';
-import { C172_CONTROLS, type Cockpit, CockpitPanel } from './cockpit';
-import type { Failures } from './systemsTypes';
+import type { Avionics, AvionicsInput, AvionicsUnit } from './avionicsTypes';
+import { C172_CONTROLS, CockpitPanel } from './cockpit';
+import { AircraftSystems } from './systems/systems';
+import { FailureSet } from './systems/failures';
 import {
   sectionCoefficients,
   staticSeparation,
@@ -62,6 +63,12 @@ const SEA_LEVEL_DENSITY = 1.225;
 const CONTACT_RANGE = 60;
 const GEAR_SUBSTEPS = 4;
 const ORIGIN: Vec3 = { x: 0, y: 0, z: 0 };
+/** What `avionics` hands out while no avionics unit is plugged in. */
+const NO_AVIONICS: Avionics = { setDatabase() {}, setFlightPlan() {}, directTo() {} };
+/** Heavy airframe ice: how much it lowers the stall angle, adds profile drag and body drag. */
+const ICE_STALL = 0.25;
+const ICE_DRAG = 0.012;
+const ICE_BODY_DRAG = 0.3;
 const X_AXIS: Vec3 = { x: 1, y: 0, z: 0 };
 const Y_AXIS: Vec3 = { x: 0, y: 1, z: 0 };
 const Z_AXIS: Vec3 = { x: 0, y: 0, z: 1 };
@@ -116,18 +123,16 @@ export class FlightModel implements SimAircraft {
   };
   readonly controls: ControlInput;
   readonly telemetry: Telemetry;
-  // Phase 3 placeholders: the panel holds its values, nothing acts on them yet.
-  readonly cockpit: Cockpit = new CockpitPanel(C172_CONTROLS);
-  readonly failures: Failures = {
-    ids: [],
-    active: () => false,
-    set() {},
-    clear() {},
-  };
-  readonly avionics: Avionics = { setDatabase() {}, setFlightPlan() {}, directTo() {} };
+  readonly cockpit: CockpitPanel = new CockpitPanel(C172_CONTROLS);
+  readonly failures = new FailureSet();
+  /**
+   * The avionics (radios, navigation, transponder, GPS, autopilot), plugged in by whoever
+   * builds the aircraft. Without one the aircraft flies as before, with dark avionics.
+   */
+  avionicsUnit: AvionicsUnit | undefined;
+  readonly systems: AircraftSystems;
 
   private readonly engine: PistonEngine;
-  private fuel: number;
   private time = 0;
   private crashed: string | undefined;
   /** Waiting for the terrain to load while standing: the aircraft is held in place. */
@@ -174,7 +179,35 @@ export class FlightModel implements SimAircraft {
   private fuelFlow = 0;
   private enginePower = 0;
   private specificForceZ = -G0;
+  /** Specific force (aero and gear over mass), world frame, averaged over the sub-steps. */
+  private readonly specificForce = vec();
+  private specificForceY = 0;
   private wheelsLoaded = 0;
+  /** Stick input actually flown this step: the pilot's, or the autopilot's while engaged. */
+  private pitchIn = 0;
+  private rollIn = 0;
+  private readonly avionicsInput: AvionicsInput = {
+    powered: false,
+    com1Failed: false,
+    lon: 0,
+    lat: 0,
+    altitude: 0,
+    heading: 0,
+    track: 0,
+    groundSpeed: 0,
+    verticalSpeed: 0,
+    ias: 0,
+    pitch: 0,
+    bank: 0,
+    turnRate: 0,
+    onGround: false,
+    declination: 0,
+    indicatedHeading: 0,
+    indicatedAltitude: 0,
+    pilotPitch: 0,
+    pilotRoll: 0,
+  };
+  private readonly afterEngine = { fuelFlow: 0, load: 0, tas: 0, slipstream: 0, phi: 1 };
 
   // Air samples: centre, left tip, right tip, tail.
   private readonly air = [newAir(), newAir(), newAir(), newAir()];
@@ -203,12 +236,16 @@ export class FlightModel implements SimAircraft {
   };
   private readonly propOut: PropellerOutput = { thrust: 0, torque: 0 };
 
-  constructor(readonly def: AircraftDefinition) {
+  constructor(
+    readonly def: AircraftDefinition,
+    avionicsUnit?: AvionicsUnit,
+  ) {
     this.info = def.info;
+    this.avionicsUnit = avionicsUnit;
     const span = def.wingSpan / 2;
     this.airPoints = [vec(0, 0, 0), vec(0, -span, 0), vec(0, span, 0), vec(-def.tailArm, 0, 0)];
     this.engine = new PistonEngine(def.engine);
-    this.fuel = def.fuelCapacity;
+    this.systems = new AircraftSystems(def.systems, this.cockpit, this.failures);
     const n = def.strips.length;
     this.separation = new Float64Array(n).fill(1);
     this.stripCl = new Float64Array(n);
@@ -275,11 +312,68 @@ export class FlightModel implements SimAircraft {
       engines: [{ running: true, rpm: 0, power: 0, fuelFlow: 0 }],
       fuel: this.fuel,
       crashed: undefined,
+      systems: this.systems.telemetry,
+      instruments: this.systems.instruments.telemetry,
     };
+    this.bindCockpit();
+  }
+
+  /** Total usable fuel, kg. */
+  private get fuel() {
+    return this.systems.fuel.total;
   }
 
   get mass() {
-    return this.def.mass + this.fuel;
+    const ice = this.systems.icing.airframe;
+    return this.def.mass + this.fuel + (ice > 0 ? ice * this.def.systems.icing.iceMass : 0);
+  }
+
+  /** The navigation database and the flight plan go to the avionics unit, if there is one. */
+  get avionics(): Avionics {
+    return this.avionicsUnit ?? NO_AVIONICS;
+  }
+
+  /**
+   * Fuel in the tanks, kg (the planned fuel load; a reset fills both). Usable fuel only,
+   * clamped to a tank's capacity.
+   */
+  setFuel(left: number, right: number) {
+    this.systems.fuel.reset(left, right);
+    this.systems.fillTelemetry();
+    this.telemetry.fuel = this.fuel;
+  }
+
+  /** The levers of ControlInput appear in the cockpit under their names. */
+  private bindCockpit() {
+    const p = this.cockpit;
+    const c = this.controls;
+    const detents = this.def.controls.flapDetents.length - 1;
+    p.bind(
+      'throttle',
+      () => c.throttle[0] ?? 0,
+      (v) => (c.throttle[0] = v),
+    );
+    p.bind(
+      'mixture',
+      () => c.mixture[0] ?? 0,
+      (v) => (c.mixture[0] = v),
+    );
+    // The selector's positions are the flap detents; ControlInput spreads them over 0..1.
+    p.bind(
+      'flaps',
+      () => Math.round(clamp(c.flaps, 0, 1) * detents),
+      (v) => (c.flaps = v / detents),
+    );
+    p.bind(
+      'trim',
+      () => c.pitchTrim,
+      (v) => (c.pitchTrim = v),
+    );
+    p.bind(
+      'parkingBrake',
+      () => (c.parkingBrake ? 1 : 0),
+      (v) => (c.parkingBrake = v >= 0.5),
+    );
   }
 
   // ---------------------------------------------------------------------------------------
@@ -296,7 +390,7 @@ export class FlightModel implements SimAircraft {
     const c = this.def.controls;
     const trim = clamp(this.controls.pitchTrim, -1, 1);
     const trimAngle = trim >= 0 ? trim * c.trimUp : trim * c.trimDown;
-    const p = clamp(this.controls.pitch, -1, 1) * hold;
+    const p = clamp(this.pitchIn, -1, 1) * hold;
     const stick = p >= 0 ? p * c.elevatorUp : p * c.elevatorDown;
     return clamp(trimAngle + stick, -c.elevatorDown, c.elevatorUp);
   }
@@ -313,12 +407,16 @@ export class FlightModel implements SimAircraft {
     const eTarget = this.elevatorTarget(hold);
     const eRange = c.elevatorUp + c.elevatorDown;
     this.elevator += clamp(eTarget - this.elevator, -rate * eRange, rate * eRange);
-    const aTarget = clamp(clamp(this.controls.roll, -1, 1) * hold + c.aileronRigging, -1, 1);
+    const aTarget = clamp(clamp(this.rollIn, -1, 1) * hold + c.aileronRigging, -1, 1);
     this.aileron += clamp(aTarget - this.aileron, -rate * 2, rate * 2);
     const rTarget = clamp(clamp(this.controls.yaw, -1, 1) * hold + c.rudderRigging, -1, 1);
     this.rudder += clamp(rTarget - this.rudder, -rate * 2, rate * 2);
+    // The flaps are electric: without power they stay where they are.
     const fTarget = this.flapTarget();
-    this.flap += clamp(fTarget - this.flap, -c.flapRate * dt, c.flapRate * dt);
+    const moving = Math.abs(fTarget - this.flap) > 1e-9;
+    if (this.systems.flapsPowered)
+      this.flap += clamp(fTarget - this.flap, -c.flapRate * dt, c.flapRate * dt);
+    this.systems.flapsMoving = moving;
   }
 
   /** Change of zero-lift angle of a strip from its control surface, rad. */
@@ -461,6 +559,7 @@ export class FlightModel implements SimAircraft {
     const def = this.def;
     const air = this.air[0]!;
     const rho = air.density;
+    const ice = this.systems.icing.airframe;
     set(this.forceBody, 0, 0, 0);
     set(this.momentBody, 0, 0, 0);
 
@@ -541,7 +640,11 @@ export class FlightModel implements SimAircraft {
       const ctrl = strip.control
         ? this.controlAlpha(strip.control.kind, strip.control.effectiveness, strip.control.side)
         : 0;
-      const alphaSep = alpha + def.controls.stallShift * ctrl;
+      const alphaControl = alpha + def.controls.stallShift * ctrl;
+      let alphaSep = alphaControl;
+      // Ice roughens the leading edge: the flow separates at a smaller angle. The stall
+      // horn's reed does not know that, which is why it warns late on an iced wing.
+      if (ice > 0) alphaSep /= 1 - ICE_STALL * ice;
       if (steady) this.separation[i] = staticSeparation(strip.foil, alphaSep);
       const f = this.separation[i]!;
       const c = sectionCoefficients(strip.foil, alpha, ctrl, f, this.coeff);
@@ -556,12 +659,13 @@ export class FlightModel implements SimAircraft {
         );
       const cl = c.cl * (strip.liftFactor ?? 1);
       let cd = c.cd;
+      if (ice > 0) cd += ICE_DRAG * ice;
       if (strip.control?.kind === 'flap') {
         const sf = Math.sin(this.flap);
         cd += def.controls.flapDrag * sf * sf;
       }
       this.stripCl[i] = cl;
-      this.stripAlpha[i] = alphaSep;
+      this.stripAlpha[i] = alphaControl;
       const qS = 0.5 * rho * v2 * strip.area * (strip.qFactor ?? 1);
       // Lift is normal to the effective flow (tilted by the induced angle): induced drag.
       const ca = Math.cos(alpha);
@@ -615,7 +719,8 @@ export class FlightModel implements SimAircraft {
     const fus = def.fuselage;
     const vf = this.airVelocityAt(fus.dragPoint, this.t1);
     const vfl = length(vf);
-    scale(this.t2, vf, -0.5 * rho * vfl * fus.dragArea);
+    const dragArea = ice > 0 ? fus.dragArea * (1 + ICE_BODY_DRAG * ice) : fus.dragArea;
+    scale(this.t2, vf, -0.5 * rho * vfl * dragArea);
     this.addForce(fus.dragPoint, this.t2);
     for (const [station, share] of [
       [fus.front, fus.frontShare],
@@ -636,10 +741,10 @@ export class FlightModel implements SimAircraft {
       this.momentBody.z -= q * def.wingArea * def.wingSpan * fus.yawMunk * ((vc.x * vc.y) / uv);
   }
 
-  private engineStep(dt: number, steady: boolean) {
+  private engineStep(dt: number, steady: boolean, starter = false) {
     const c = this.controls;
     const air = this.air[0]!;
-    const hasFuel = this.fuel > 0;
+    const hasFuel = this.systems.fuel.engineHasFuel;
     if (steady) {
       // Shaft speed where engine and propeller torque balance (bisection).
       let lo = 0;
@@ -667,7 +772,7 @@ export class FlightModel implements SimAircraft {
     const e = this.engine.evaluate(
       c.throttle[0] ?? 0,
       c.mixture[0] ?? 1,
-      c.starter?.[0] ?? false,
+      starter,
       air.pressure,
       air.temperature,
       air.density,
@@ -922,13 +1027,28 @@ export class FlightModel implements SimAircraft {
     const air = this.air[0]!;
     const vc = sub(this.t0, this.vBody, this.windBody[0]!);
     const q = 0.5 * air.density * dot(vc, vc);
+    const tas = length(vc);
+    this.stepAvionics(dt, env);
+    const starter = this.systems.beforeEngine(
+      dt,
+      this.engine,
+      this.controls.starter?.[0] ?? false,
+      this.time,
+    );
     this.moveSurfaces(dt, q);
 
     this.aerodynamics(dt, false);
-    this.engineStep(dt, false);
+    this.engineStep(dt, false, starter);
+    this.fuelImbalance();
 
-    // Fuel burns off and lightens the aircraft.
-    this.fuel = Math.max(0, this.fuel - this.fuelFlow * dt);
+    // Fuel burns off and lightens the aircraft; the systems follow the engine.
+    const ae = this.afterEngine;
+    ae.fuelFlow = this.fuelFlow;
+    ae.load = this.enginePower / this.def.engine.ratedPower;
+    ae.tas = tas;
+    ae.slipstream = this.slipDelta;
+    ae.phi = this.engine.equivalenceRatio(this.controls.mixture[0] ?? 1, air.density);
+    this.systems.afterEngine(dt, this.engine, ae, air);
 
     const agl = this.cgPlane.valid ? this.heightAboveGround(ORIGIN) : Infinity;
     if (agl < 0) this.crash('terrain');
@@ -953,6 +1073,95 @@ export class FlightModel implements SimAircraft {
       this.engine.running = false;
     }
     this.fillTelemetry(env);
+    this.updateInstruments(env, dt);
+  }
+
+  /**
+   * The avionics unit sees the aircraft as it was at the end of the last step; while its
+   * autopilot is engaged it flies pitch and roll, and it turns the trim wheel itself (so the
+   * trim stays where it left it when it lets go).
+   */
+  private stepAvionics(dt: number, env: Environment) {
+    const c = this.controls;
+    this.pitchIn = c.pitch;
+    this.rollIn = c.roll;
+    const unit = this.avionicsUnit;
+    if (!unit) return;
+    const t = this.telemetry;
+    const s = this.state;
+    const i = this.avionicsInput;
+    const shown = this.systems.instruments.telemetry;
+    i.powered = this.systems.electrical.avionicsPowered;
+    i.com1Failed = this.failures.active('com1');
+    i.lon = Math.atan2(s.position.y, s.position.x) / DEG;
+    // The local vertical is the ellipsoid normal: its z component is the sine of latitude.
+    i.lat = Math.asin(clamp(this.up.z, -1, 1)) / DEG;
+    i.altitude = t.altitude - (env.geoidHeight?.(s.position) ?? 0);
+    i.heading = t.headingDeg;
+    i.track = t.trackDeg;
+    i.groundSpeed = t.groundSpeed;
+    i.verticalSpeed = t.verticalSpeed;
+    i.ias = t.ias;
+    i.pitch = t.pitch;
+    i.bank = t.bank;
+    const w = s.angularVelocity;
+    i.turnRate =
+      (w.y * Math.sin(t.bank) + w.z * Math.cos(t.bank)) / Math.max(Math.cos(t.pitch), 0.1) / DEG;
+    i.onGround = t.onGround;
+    i.declination = env.magneticDeclination?.(s.position) ?? 0;
+    i.indicatedHeading = shown.heading;
+    i.indicatedAltitude = shown.altitude;
+    i.pilotPitch = c.pitch;
+    i.pilotRoll = c.roll;
+    unit.step(dt, i, this.cockpit);
+    t.avionics = unit.telemetry;
+    const cmd = unit.command;
+    if (cmd) {
+      this.pitchIn = cmd.pitch;
+      this.rollIn = cmd.roll;
+      c.pitchTrim = clamp(cmd.pitchTrim, -1, 1);
+    }
+  }
+
+  /**
+   * Fuel in one wing heavier than in the other: its weight acts off the centre line and
+   * rolls the aircraft towards the heavy wing.
+   */
+  private fuelImbalance() {
+    const f = this.systems.fuel;
+    const dm = f.right - f.left;
+    if (dm === 0) return;
+    const upBody = rotateInverse(this.t0, this.state.orientation, this.up);
+    const arm = this.def.systems.fuel.tankArm;
+    // Weight -dm g up acting at y = arm: moment arm × force.
+    this.momentBody.x -= arm * dm * G0 * upBody.z;
+    this.momentBody.z += arm * dm * G0 * upBody.x;
+  }
+
+  /** The instruments read the truth of this step through their own physics. */
+  private updateInstruments(env: Environment, dt: number, resetRunning?: boolean) {
+    const s = this.state;
+    const t = this.telemetry;
+    const i = this.systems.instrumentInput;
+    const air = this.air[0]!;
+    i.pitch = t.pitch;
+    i.bank = t.bank;
+    i.headingDeg = t.headingDeg;
+    i.p = s.angularVelocity.x;
+    i.q = s.angularVelocity.y;
+    i.r = s.angularVelocity.z;
+    i.ias = t.ias;
+    i.staticPressure = air.pressure;
+    i.density = air.density;
+    copy(i.up, this.up);
+    copy(i.north, this.north);
+    rotate(i.forward, s.orientation, X_AXIS);
+    copy(i.specificForce, this.specificForce);
+    i.lateralSpecificForce = this.specificForceY;
+    i.latitude = Math.asin(clamp(this.up.z, -1, 1)) / DEG;
+    i.declination = env.magneticDeclination?.(s.position) ?? 0;
+    if (resetRunning === undefined) this.systems.stepInstruments(dt);
+    else this.systems.resetInstruments(resetRunning);
   }
 
   private integrate(dt: number, env: Environment, substeps: number) {
@@ -968,11 +1177,17 @@ export class FlightModel implements SimAircraft {
     const accel = this.accel;
     const mBody = this.mBody;
     let specific = 0;
+    let specificY = 0;
+    const sf = set(this.specificForce, 0, 0, 0);
     for (let k = 0; k < substeps; k++) {
       this.contactForces(h);
       add(accel, aeroWorld, this.gearForce);
-      // Specific force along body z for the load factor (before gravity).
-      specific += rotateInverse(this.t0, s.orientation, accel).z / m;
+      // Specific force (before gravity): along body z for the load factor, across for the
+      // ball, and whole for the compass card.
+      addScaled(sf, sf, accel, 1 / (m * substeps));
+      const body = rotateInverse(this.t0, s.orientation, accel);
+      specific += body.z / m;
+      specificY += body.y / m;
       scale(accel, accel, 1 / m);
       addScaled(accel, accel, this.up, -g);
       addScaled(s.velocity, s.velocity, accel, h);
@@ -994,6 +1209,7 @@ export class FlightModel implements SimAircraft {
       integrateOrientation(s.orientation, w, h);
     }
     this.specificForceZ = specific / substeps;
+    this.specificForceY = specificY / substeps;
   }
 
   private checkStructure() {
@@ -1088,7 +1304,17 @@ export class FlightModel implements SimAircraft {
     this.held = false;
     this.placeWhenGroundLoads = false;
     this.heldStart = undefined;
-    this.fuel = this.def.fuelCapacity;
+    const running = start.enginesRunning ?? true;
+    // Every switch to the start condition. The flap lever is kept: a start in the air or on
+    // the runway is asked for with the flaps it should have (set before the reset).
+    const flapLever = this.controls.flaps;
+    this.cockpit.reset(running);
+    this.controls.flaps = flapLever;
+    if (running) this.setRunningLights(start.onGround);
+    this.sampleAirAt(env, start.position);
+    this.systems.reset(running, !start.onGround, this.air[0]!);
+    this.avionicsUnit?.reset();
+    this.telemetry.avionics = this.avionicsUnit?.telemetry;
     this.separation.fill(1);
     this.stripCl.fill(0);
     this.groupCl.fill(0);
@@ -1108,10 +1334,13 @@ export class FlightModel implements SimAircraft {
     c.brakeLeft = 0;
     c.brakeRight = 0;
     c.gearDown = true;
-    c.mixture[0] = 1;
     if (c.starter) c.starter[0] = false;
-    const running = start.enginesRunning ?? true;
+    this.pitchIn = 0;
+    this.rollIn = 0;
     this.engine.running = running;
+    this.engine.omega = 0;
+    // Bus, ignition and fuel supply as the switches now stand, before anything is trimmed.
+    this.systems.beforeEngine(0, this.engine, false, 0);
     this.flap = this.flapTarget();
     this.aileron = this.def.controls.aileronRigging;
     this.rudder = this.def.controls.rudderRigging;
@@ -1134,7 +1363,26 @@ export class FlightModel implements SimAircraft {
     } else {
       this.trimInAir(start, env, running);
     }
+    this.sampleAir(env);
+    env.up(s.position, this.up);
+    scale(this.specificForce, this.up, G0);
+    this.specificForceY = 0;
+    this.specificForceZ = -G0;
+    // Once more with the engine turning: the alternator now carries the bus.
+    this.systems.beforeEngine(0, this.engine, false, 0);
     this.fillTelemetry(env);
+    this.systems.fillTelemetry();
+    this.updateInstruments(env, 0, running);
+  }
+
+  /** Lights as a pilot has them: lined up on the runway, or cruising. */
+  private setRunningLights(onGround: boolean) {
+    const p = this.cockpit;
+    p.set('lightBeacon', 1);
+    p.set('lightNav', 1);
+    p.set('lightStrobe', 1);
+    p.set('lightLanding', onGround ? 1 : 0);
+    p.set('lightTaxi', onGround ? 1 : 0);
   }
 
   /** Orientation from heading and pitch, laid on a ground normal if given (bank 0 otherwise). */
@@ -1274,8 +1522,8 @@ export class FlightModel implements SimAircraft {
     if (!running) this.engine.running = false;
   }
 
-  private sampleAirAt(env: Environment) {
-    env.air(this.state.position, this.air[0]!);
+  private sampleAirAt(env: Environment, position: Vec3 = this.state.position) {
+    env.air(position, this.air[0]!);
   }
 }
 

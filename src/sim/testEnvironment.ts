@@ -61,6 +61,13 @@ export interface TestEnvironmentOptions {
   slope?: { gradient: number; downhillDeg: number };
   /** No ground at all (as when terrain is not loaded). */
   noGround?: boolean;
+  /** Visible moisture 0..1 everywhere (in cloud), for icing. */
+  moisture?: number;
+  /** Sea-level pressure, hPa (default the standard 1013.25): scales the whole column. */
+  qnh?: number;
+  /** Magnetic declination, degrees east, and geoid height above the ellipsoid, m (default 0). */
+  declination?: number;
+  geoidHeight?: number;
 }
 
 export class TestEnvironment implements Environment {
@@ -75,6 +82,10 @@ export class TestEnvironment implements Environment {
   private readonly downhill: Vec3 = { x: 0, y: 0, z: 0 };
   private readonly gradient: number;
   noGround: boolean;
+  moisture: number;
+  qnh: number | undefined;
+  declination: number;
+  geoid: number;
 
   constructor(options: TestEnvironmentOptions = {}) {
     this.lat0 = options.latitude ?? 46.91;
@@ -84,6 +95,10 @@ export class TestEnvironment implements Environment {
     this.wetness = options.wetness ?? 0;
     this.isaDeviation = options.isaDeviation ?? 0;
     this.noGround = options.noGround ?? false;
+    this.moisture = options.moisture ?? 0;
+    this.qnh = options.qnh;
+    this.declination = options.declination ?? 0;
+    this.geoid = options.geoidHeight ?? 0;
     this.origin = geodeticToEcef(this.lat0, this.lon0, this.elevation);
     const up = this.up(this.origin, { x: 0, y: 0, z: 0 });
     const north = this.north(this.origin, { x: 0, y: 0, z: 0 });
@@ -142,14 +157,27 @@ export class TestEnvironment implements Environment {
   }
 
   air(position: Vec3, out: AirSample): AirSample {
-    const s = isa(this.altitude(position), this.isaDeviation);
+    const s = isa(this.altitude(position) - this.geoid, this.isaDeviation);
     out.density = s.density;
     out.pressure = s.pressure;
     out.temperature = s.temperature;
+    if (this.qnh !== undefined) {
+      out.pressure = s.pressure * (this.qnh / 1013.25);
+      out.density = out.pressure / (287.053 * s.temperature);
+    }
+    out.moisture = this.moisture;
     out.wind.x = this.windVector.x;
     out.wind.y = this.windVector.y;
     out.wind.z = this.windVector.z;
     return out;
+  }
+
+  geoidHeight(): number {
+    return this.geoid;
+  }
+
+  magneticDeclination(): number {
+    return this.declination;
   }
 
   private groundHeightAt(position: Vec3): number {
