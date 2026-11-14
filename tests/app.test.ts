@@ -99,14 +99,17 @@ describe('WorldEnvironment', () => {
     const air = env.air(p, { wind: v(), density: 0, temperature: 0, pressure: 0 });
     // 1560 m above the ellipsoid is about 1510 m above sea level.
     expect(air.pressure).toBeCloseTo(84_400, -3);
-    expect(Math.hypot(air.wind.x, air.wind.y, air.wind.z)).toBe(0);
-    // A west wind (from 270) moves the air east.
+    // Calm: nothing but the faint stirring of still air.
+    expect(Math.hypot(air.wind.x, air.wind.y, air.wind.z)).toBeLessThan(0.5);
+    // A west wind (from 270) moves the air east: stronger than at the surface 1000 m up,
+    // veered a little to the right, with gusts, and over flat land neither up nor down.
     env.air_ = { windFromDeg: 270, windSpeed: 10, isaDeviation: 0, wetness: 0 };
     const w = env.air(p, { wind: v(), density: 0, temperature: 0, pressure: 0 }).wind;
     const local = frame.dirToLocal(w, v());
     expect(local.x).toBeGreaterThan(10);
-    expect(Math.abs(local.z)).toBeLessThan(1e-6);
-    expect(Math.abs(local.y)).toBeLessThan(1e-6);
+    expect(local.x).toBeLessThan(30);
+    expect(Math.abs(local.z)).toBeLessThan(0.6 * local.x);
+    expect(Math.abs(local.y)).toBeLessThan(2.5);
   });
 });
 
