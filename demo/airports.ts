@@ -8,6 +8,7 @@
  *   ?rwy=14                runway end the views refer to (default: the first end)
  *   ?view=eye              eye      1.2 m above the threshold, looking down the runway
  *                          final100 / final1500   on a 3 degree path, 100 m / 1.5 km out
+ *                          final    the same, ?out=400 metres before the threshold
  *                          app5k    3 degrees from 5 km; low (2 degrees) and high (4 degrees)
  *                          overhead 600 m above the middle of the runway
  *                          far      15 km out on the extended centre line, 3 degrees
@@ -124,6 +125,7 @@ const VIEWS: Record<string, () => View> = {
   }),
   final100: () => onPath(100, 3),
   final1500: () => onPath(1500, 3),
+  final: () => onPath(Number(query.get('out') ?? '400'), 3),
   app5k: () => onPath(5000, 3),
   low: () => onPath(5000, 2),
   high: () => onPath(5000, 4),

@@ -79,6 +79,17 @@ function pick(
 type V3 = Node<'vec3'>;
 type V4 = Node<'vec4'>;
 
+/** Brightest a pixel of a light may be (before tone mapping), white and fully saturated. */
+export const LIGHT_CAP_WHITE = 3;
+export const LIGHT_CAP_SATURATED = 1;
+
+/** The per-pixel limit for a light of colour rgb (CPU twin of the shader, for tests). */
+export function lightPixelCap(rgb: readonly number[]): number {
+  const hi = Math.max(...rgb, 1e-6);
+  const whiteness = Math.min(...rgb) / hi;
+  return LIGHT_CAP_SATURATED + (LIGHT_CAP_WHITE - LIGHT_CAP_SATURATED) * whiteness;
+}
+
 /** Per-frame values shared by every airport's lights. */
 export const lightUniforms = {
   screenHeight: uniform(1080),
@@ -216,11 +227,14 @@ export function createLightMaterial(cameraLocal: Node<'vec3'>): MeshBasicNodeMat
   const r2 = dot(p, p);
   const profile = exp(r2.mul(-3)).mul(smoothstep(1, 0.8, r2));
   // Limit per pixel, keeping the hue: a bright light becomes a disc of its full colour instead
-  // of a white blob, so green, red, yellow and blue stay apart at night (the tone mapping turns
-  // anything far above 1 into white).
+  // of a white blob, so green, red, yellow and blue stay apart at night. The tone mapping (ACES)
+  // bleaches a saturated colour well before white: red at 3 comes out orange, green at 3 nearly
+  // white. Saturated lights stop at about 1, white ones may glare up to 3.
   const v = peak.mul(profile);
   const vmax = max(v.x, max(v.y, v.z));
-  const scaled = v.mul(min(float(1), float(3).div(max(vmax, 1e-6))));
+  const whiteness = min(v.x, min(v.y, v.z)).div(max(vmax, 1e-6));
+  const cap = mix(float(LIGHT_CAP_SATURATED), float(LIGHT_CAP_WHITE), whiteness);
+  const scaled = v.mul(min(float(1), cap.div(max(vmax, 1e-6))));
   m.colorNode = vec4(scaled, 1);
   return m;
 }
