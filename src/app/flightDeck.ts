@@ -2,7 +2,7 @@ import type { CockpitSound, RadioVoice } from '@audio';
 import { ilsFor, magneticDeclination, navDatabase, planFlight } from '@geo';
 import type { ControlSpec, FailureId, SimAircraft } from '@sim';
 import type { Weather } from '@sky';
-import { type FlightPlan, game, lang } from '@ui';
+import { type FlightPlan, game, lang, settings } from '@ui';
 import { ATC_WORLD, comFrequency } from './atcWorld';
 import {
   AtcController,
@@ -21,6 +21,29 @@ const BUTTON_HOLD = 0.12;
 const START_HOLD = 8;
 const MAGNETOS_BOTH = 3;
 const MAGNETOS_START = 4;
+
+/** The stations a flight will talk to, in the order they are used, for the briefing. */
+export function frequenciesFor(plan: FlightPlan): { name: string; frequency: number }[] {
+  if (plan.atc === false) return [];
+  const start = plan.start;
+  const from = plan.airport ?? (start.kind === 'air' ? undefined : start.airport);
+  const to = plan.destination?.airport;
+  const order = ['atis', 'ground', 'tower', 'aerodrome', 'arrival'];
+  const of = (icao: string | undefined, roles: string[]) =>
+    (icao ? (ATC_WORLD.airport(icao)?.stations ?? []) : [])
+      .filter((s) => roles.includes(s.role))
+      .sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role));
+  // Arriving, the approach controller comes before the tower.
+  const arriving = ['atis', 'arrival', 'tower', 'aerodrome'];
+  const list =
+    start.kind === 'approach'
+      ? of(from, arriving).sort((a, b) => arriving.indexOf(a.role) - arriving.indexOf(b.role))
+      : [
+          ...of(from, ['atis', 'ground', 'tower', 'aerodrome']),
+          ...(to && to !== from ? of(to, arriving) : []),
+        ];
+  return list.map((s) => ({ name: s.name, frequency: s.frequency }));
+}
 
 interface Scheduled {
   id: FailureId;
@@ -78,6 +101,7 @@ export class FlightDeck {
     this.checklists = new ChecklistRunner(C172_CHECKLISTS, aircraft.cockpit.specs, this.language);
     game.checklists.value = this.checklists.list();
     game.checklist.value = null;
+    game.failures.value = [];
   }
 
   private homeOf(plan: FlightPlan) {
@@ -179,10 +203,18 @@ export class FlightDeck {
 
   setFailure(id: FailureId, failed: boolean) {
     this.aircraft.failures.set(id, failed);
+    this.publishFailures();
+  }
+
+  private publishFailures() {
+    const f = this.aircraft.failures;
+    const active = f.ids.filter((id) => f.active(id));
+    if (active.join() !== game.failures.value.join()) game.failures.value = active;
   }
 
   /** The control the open checklist is waiting for, for the 3D cockpit's highlight. */
   get highlighted(): string | null {
+    if (!settings.checklistHints.value) return null;
     return game.checklist.value?.items.find((i) => i.state === 'current')?.control ?? null;
   }
 
@@ -211,6 +243,7 @@ export class FlightDeck {
       if (t.time < this.failures[i]!.at) continue;
       aircraft.failures.set(this.failures[i]!.id, true);
       this.failures.splice(i, 1);
+      this.publishFailures();
     }
 
     this.sincePublish += dt;
@@ -269,5 +302,6 @@ export class FlightDeck {
     game.checklists.value = [];
     game.cockpit.value = null;
     game.controls.value = [];
+    game.failures.value = [];
   }
 }

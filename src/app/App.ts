@@ -55,7 +55,7 @@ import { CameraRig } from './camera';
 import { PROFILES, detectDevice } from './device';
 import { WorldEnvironment } from './environment';
 import { Flight } from './Flight';
-import { FlightDeck } from './flightDeck';
+import { FlightDeck, frequenciesFor } from './flightDeck';
 import { fetchLiveWeather } from './liveWeather';
 import { type InputEvents, KEYS, Keyboard, PilotInput, keyAuthorityAt, readGamepad } from './input';
 import { dateAtSwissHour } from './time';
@@ -412,6 +412,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     plan = p;
     deck?.dispose();
     deck = undefined;
+    game.frequencies.value = p ? frequenciesFor(p) : [];
     // Screenshot tests must not change with the calendar.
     season = shot ? 'summer' : !p?.season || p.season === 'now' ? seasonOf(new Date()) : p.season;
     const icao = p?.airport ?? (p?.start.kind === 'runway' ? p.start.airport : undefined);
@@ -616,6 +617,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     atcReply: (id) => deck?.reply(id),
     openChecklist: (id) => deck?.openChecklist(id),
     checkItem: () => deck?.checkItem(),
+    setFailure: (id, failed) => deck?.setFailure(id, failed),
   };
   mountUi(uiRoot, actions);
   keyboard.onPress = (code) => {
