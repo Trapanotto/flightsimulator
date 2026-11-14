@@ -31,6 +31,21 @@ export function autoLights(t: Telemetry): AircraftLights {
   };
 }
 
+/** The sky's exposure at noon and in a dark night (sky/atmosphere.ts: exposureFor). */
+const EXPOSURE_NOON = 4.2;
+const EXPOSURE_NIGHT = 400;
+
+/**
+ * How strongly a lamp's glow shows for the sky's exposure, 0.2 .. 1. A lamp is as bright at
+ * noon as at midnight, but the eye is stopped down by day: its halo all but disappears in
+ * sunlight and blooms in the dark. Even steps of brightness are even steps of the logarithm.
+ */
+export function glowVisibility(exposure: number): number {
+  const t =
+    Math.log(Math.max(exposure, 1e-6) / EXPOSURE_NOON) / Math.log(EXPOSURE_NIGHT / EXPOSURE_NOON);
+  return 0.2 + 0.8 * Math.min(Math.max(t, 0), 1);
+}
+
 /** Beacon: a red flash of 0.12 s, 45 times a minute. 0..1. */
 export function beaconIntensity(time: number): number {
   const period = 60 / 45;

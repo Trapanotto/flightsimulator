@@ -85,7 +85,13 @@ import {
   vsiAngle,
   C172S_TANK_GAL,
 } from './instruments';
-import { type AircraftLights, autoLights, beaconIntensity, strobeIntensity } from './lights';
+import {
+  type AircraftLights,
+  autoLights,
+  beaconIntensity,
+  glowVisibility,
+  strobeIntensity,
+} from './lights';
 
 const DEG = Math.PI / 180;
 /** Distances (m) at which the reduced models take over. */
@@ -146,6 +152,8 @@ class C172 implements AircraftVisual {
   private readonly blades: Object3D[] = [];
   private readonly spot?: SpotLight;
   private readonly glowScale: number;
+  /** 0.2 by day .. 1 at night, see setExposure. */
+  private glowVisibility = 1;
   private altOffset = 0;
   private lightsOverride: Partial<AircraftLights> | undefined;
   private inside = false;
@@ -523,6 +531,10 @@ class C172 implements AircraftVisual {
     this.lightsOverride = lights === 'auto' ? undefined : { ...this.lightsOverride, ...lights };
   }
 
+  setExposure(exposure: number): void {
+    this.glowVisibility = glowVisibility(exposure);
+  }
+
   setCockpitView(inside: boolean): void {
     this.inside = inside;
     // From the seat the windshield must not veil the view; keep a hint of reflection.
@@ -663,7 +675,7 @@ class C172 implements AircraftVisual {
     this.object.updateWorldMatrix(true, false);
     const q = this.object.getWorldQuaternion(tmpQ);
     for (const g of this.glows) {
-      const lv = (level[g.kind] ?? 0) * this.glowScale;
+      const lv = (level[g.kind] ?? 0) * this.glowScale * this.glowVisibility;
       g.intensity.value = lv;
       g.sprite.visible = lv > 0;
       g.pos.value.copy(g.local).applyMatrix4(this.object.matrixWorld);

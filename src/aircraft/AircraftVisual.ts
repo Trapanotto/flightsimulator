@@ -53,6 +53,11 @@ export interface AircraftVisual {
    * telemetry; an object overrides single lights and keeps the rest.
    */
   setLights(lights: Partial<AircraftLights> | 'auto'): void;
+  /**
+   * The sky's exposure (about 4 at noon, hundreds at night): the lamps' glow shows weakly in
+   * daylight and fully in the dark.
+   */
+  setExposure(exposure: number): void;
   dispose(): void;
 }
 
@@ -114,6 +119,7 @@ export function createReferenceMarker(): AircraftVisual {
     setCockpitView() {},
     setAltimeterOffset() {},
     setLights() {},
+    setExposure() {},
     dispose() {
       object.traverse((o) => {
         if (o instanceof Mesh) o.geometry.dispose();

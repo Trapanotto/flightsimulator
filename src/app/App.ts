@@ -706,6 +706,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
           flight.place(visual.object, frame, alpha);
         }
       }
+      visual.setExposure(sky.state.exposure);
       visual.update(dt, aircraft.telemetry, aircraft.controls);
       if (!tour)
         rig.update(dt, camera, visual.object, visual.view, flying && !aircraft.telemetry.onGround);

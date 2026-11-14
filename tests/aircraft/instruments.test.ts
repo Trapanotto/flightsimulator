@@ -24,7 +24,12 @@ import {
   turnCoordinatorAngle,
   vsiAngle,
 } from '../../src/aircraft/instruments';
-import { autoLights, beaconIntensity, strobeIntensity } from '../../src/aircraft/lights';
+import {
+  autoLights,
+  beaconIntensity,
+  glowVisibility,
+  strobeIntensity,
+} from '../../src/aircraft/lights';
 import type { Telemetry } from '../../src/sim';
 
 describe('unit conversions', () => {
@@ -156,6 +161,22 @@ describe('compass and headings', () => {
 });
 
 describe('exterior lights', () => {
+  it('glow weakly in daylight and fully at night', () => {
+    expect(glowVisibility(4.2)).toBeCloseTo(0.2, 6);
+    expect(glowVisibility(1)).toBeCloseTo(0.2, 6);
+    expect(glowVisibility(400)).toBeCloseTo(1, 6);
+    expect(glowVisibility(1e5)).toBeCloseTo(1, 6);
+    // Dusk lies in between, and brighter surroundings never mean a stronger glow.
+    let last = 0;
+    for (const e of [4.2, 10, 40, 150, 400]) {
+      const v = glowVisibility(e);
+      expect(v).toBeGreaterThanOrEqual(last);
+      last = v;
+    }
+    expect(glowVisibility(40)).toBeGreaterThan(0.4);
+    expect(glowVisibility(40)).toBeLessThan(0.8);
+  });
+
   const base: Telemetry = {
     time: 0,
     ias: 0,
