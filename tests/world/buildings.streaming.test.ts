@@ -8,7 +8,7 @@ import {
   tilesInRange,
 } from '../../src/world/buildings/grid';
 import { GroundGrid, fillGaps } from '../../src/world/buildings/groundGrid';
-import { BUILDING_FLOATS, FLAG_GROUND } from '../../src/world/buildings/mesh';
+import { FLAG_GROUND, MeshBuilder } from '../../src/world/buildings/mesh';
 import { BUILDING_PRESETS, footprintLod } from '../../src/world/buildings/presets';
 import { estimateHeight, planBuilding } from '../../src/world/buildings/style';
 import { orientedBox } from '../../src/world/buildings/footprint';
@@ -55,14 +55,16 @@ describe('tile selection', () => {
   it('switches footprint builds with hysteresis', () => {
     const p = BUILDING_PRESETS.desktop;
     expect(footprintLod(1000, undefined, p)).toBe(0);
-    expect(footprintLod(p.footprintDetailRange + 10, undefined, p)).toBe(1);
-    expect(footprintLod(p.footprintRange + 10, undefined, p)).toBe(2);
+    expect(footprintLod(p.footprintNearRange + 10, undefined, p)).toBe(1);
+    expect(footprintLod(p.footprintDetailRange + 10, undefined, p)).toBe(2);
+    expect(footprintLod(p.footprintRange + 10, undefined, p)).toBe(3);
     // Just past the boundary a tile keeps its build...
-    expect(footprintLod(p.footprintDetailRange * 1.1, 0, p)).toBe(0);
+    expect(footprintLod(p.footprintDetailRange * 1.1, 1, p)).toBe(1);
     // ...well past it, it changes.
-    expect(footprintLod(p.footprintDetailRange * 1.3, 0, p)).toBe(1);
-    expect(footprintLod(p.footprintDetailRange * 0.9, 1, p)).toBe(1);
-    expect(footprintLod(p.footprintDetailRange * 0.5, 1, p)).toBe(0);
+    expect(footprintLod(p.footprintDetailRange * 1.3, 1, p)).toBe(2);
+    expect(footprintLod(p.footprintDetailRange * 0.9, 2, p)).toBe(2);
+    expect(footprintLod(p.footprintDetailRange * 0.5, 2, p)).toBe(1);
+    expect(footprintLod(p.footprintNearRange * 0.5, 1, p)).toBe(0);
   });
 
   it('gives the phone clearly less to draw', () => {
@@ -97,11 +99,23 @@ describe('ground under the buildings', () => {
     while (!g.ready) g.fill(ground, 1000);
     // One building anchored at x = 0; a roof vertex, and wall feet at x = -10 (lower ground)
     // and x = +10 (higher ground).
-    const buildings = new Float32Array(BUILDING_FLOATS);
-    const positions = new Float32Array([0, 8, 0, -10, -1, 0, 10, -1, 0]);
-    const meta = new Uint16Array([0, 0, 0, FLAG_GROUND, 0, FLAG_GROUND]);
+    const b = new MeshBuilder();
+    b.begin({
+      anchorX: 0,
+      anchorZ: 0,
+      cell: -1,
+      seed: 0,
+      roof: [0, 0, 0],
+      wall: [0, 0, 0],
+      kind: 0,
+      eave: 6,
+    });
+    b.vertex(0, 8, 0);
+    b.vertex(-10, -1, 0, FLAG_GROUND);
+    b.vertex(10, -1, 0, FLAG_GROUND);
+    const m = b.finish();
     const lift = new Float32Array(3);
-    g.lift(positions, meta, buildings, lift);
+    g.lift(m, lift);
     const gA = g.sample(0, 0);
     expect(lift[0]).toBeCloseTo(gA, 3);
     // Downhill foot: down to the terrain there, minus 0.4 m.

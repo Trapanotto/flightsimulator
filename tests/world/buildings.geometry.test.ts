@@ -8,7 +8,7 @@ import {
   simplifyRing,
   triangulate,
 } from '../../src/world/buildings/footprint';
-import { FLAG_GROUND, MeshBuilder } from '../../src/world/buildings/mesh';
+import { MeshBuilder } from '../../src/world/buildings/mesh';
 import {
   addSolid,
   orient,
@@ -16,6 +16,7 @@ import {
   roofHeight,
   type RoofShape,
 } from '../../src/world/buildings/roof';
+import { unpack } from './buildings.helpers';
 
 /** Rectangle w x h (x east, z south) as an outer ring: clockwise on the map. */
 const rect = (w: number, h: number, x = 0, z = 0) => [x, z, x + w, z, x + w, z + h, x, z + h];
@@ -135,17 +136,18 @@ describe('roofs', () => {
     expect(d.maxY).toBeCloseTo(10, 6);
     expect(d.minY).toBeCloseTo(-1, 6);
     // Ridge vertices sit at the middle of the short walls (z = 5), at the ridge height.
+    const u = unpack(d);
     const ridge: Array<[number, number]> = [];
-    for (let i = 0; i < d.positions.length; i += 3)
-      if (Math.abs(d.positions[i + 1]! - 10) < 1e-6)
-        ridge.push([d.positions[i]!, d.positions[i + 2]!]);
+    for (let i = 0; i < u.positions.length; i += 3)
+      if (Math.abs(u.positions[i + 1]! - 10) < 1e-3)
+        ridge.push([u.positions[i]!, u.positions[i + 2]!]);
     expect(ridge.length).toBeGreaterThanOrEqual(2);
-    for (const [, z] of ridge) expect(z).toBeCloseTo(5, 6);
+    for (const [, z] of ridge) expect(z).toBeCloseTo(5, 3);
     // Wall feet are marked to follow the ground.
-    for (let i = 0; i < d.positions.length / 3; i++)
-      expect((d.meta[2 * i + 1]! & FLAG_GROUND) !== 0).toBe(d.positions[3 * i + 1]! < -0.5);
+    for (let i = 0; i < d.vertexCount; i++)
+      expect(u.ground[i]).toBe(u.positions[3 * i + 1]! < -0.5);
     // Every triangle faces outwards or up: roof normals point up.
-    const p = d.positions;
+    const p = u.positions;
     for (let t = 0; t < d.indices.length; t += 3) {
       const [a, b, c] = [d.indices[t]!, d.indices[t + 1]!, d.indices[t + 2]!];
       const ux = p[3 * b]! - p[3 * a]!;
@@ -187,10 +189,10 @@ describe('roofs', () => {
     const d = m.finish();
     // Roof area: triangles at y = 15.
     let roof = 0;
-    const p = d.positions;
+    const p = unpack(d).positions;
     for (let t = 0; t < d.indices.length; t += 3) {
       const [a, b, c] = [d.indices[t]!, d.indices[t + 1]!, d.indices[t + 2]!];
-      if ([a, b, c].every((v) => Math.abs(p[3 * v + 1]! - 15) < 1e-6)) {
+      if ([a, b, c].every((v) => Math.abs(p[3 * v + 1]! - 15) < 1e-3)) {
         roof +=
           Math.abs(
             (p[3 * b]! - p[3 * a]!) * (p[3 * c + 2]! - p[3 * a + 2]!) -
@@ -198,6 +200,6 @@ describe('roofs', () => {
           ) / 2;
       }
     }
-    expect(roof).toBeCloseTo(600 - 80, 4);
+    expect(roof).toBeCloseTo(600 - 80, 1);
   });
 });

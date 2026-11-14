@@ -5,6 +5,10 @@
  *
  * URL switches:
  *   ?view=bern|belp|zurich|emmental|grindelwald|street|fly|far   camera preset (default bern)
+ *   ?agl=500            camera height above the ground, metres (default from the view)
+ *   ?at=8.53,47.37      camera lon,lat (default from the view)
+ *   ?look=8.54,47.37,420  looks at lon,lat,metres above sea level (default from the view)
+ *   ?fov=20             vertical field of view, degrees (a telephoto look at far tiles)
  *   ?hour=14            local (Swiss) time of day, hours (default 10.5)
  *   ?season=winter      season (default from the date: summer); winter also moves the date
  *   ?night=0..1         override the night factor (default from the sun)
@@ -93,7 +97,14 @@ type DemoStats = {
 
 const query = new URLSearchParams(location.search);
 const viewName = query.get('view') ?? 'bern';
-const view = VIEWS[viewName] ?? VIEWS.bern!;
+const view = { ...(VIEWS[viewName] ?? VIEWS.bern!) };
+if (query.has('agl')) view.agl = Number(query.get('agl'));
+if (query.has('at'))
+  [view.lon, view.lat] = query.get('at')!.split(',').map(Number) as [number, number];
+if (query.has('look')) {
+  const [lon, lat, h] = query.get('look')!.split(',').map(Number) as [number, number, number];
+  view.look = { lon, lat, h };
+}
 const mobile = query.get('device') === 'mobile';
 const device = mobile ? 'mobile' : 'desktop';
 if (query.has('clean')) document.body.classList.add('clean');
@@ -194,7 +205,7 @@ const resize = () => {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, mobile ? 1.5 : 2));
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
-  camera.fov = w < h ? 70 : 55;
+  camera.fov = query.has('fov') ? Number(query.get('fov')) : w < h ? 70 : 55;
   camera.updateProjectionMatrix();
   const size = renderer.getDrawingBufferSize(new Vector2());
   world.setViewport(size.x, size.y);

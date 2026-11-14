@@ -21,7 +21,10 @@ export const FOOTPRINT_ZOOM = 14;
 
 export interface FootprintTileOptions {
   key: TileKey;
-  /** 0: every building as it is; 1: far away (simplified outlines, no sheds, no eaves). */
+  /**
+   * 0: every building as it is; 1: without eaves and the smallest sheds, outlines to half a
+   * metre; 2: far away (simplified outlines, no sheds); 3: boxes, for their lit windows.
+   */
   lod: FootprintLod;
   /**
    * Ground heights above sea level on a 5 x 5 grid over the tile (row 0 at the north edge),
@@ -87,7 +90,9 @@ export function buildFootprintTile(bytes: Uint8Array, o: FootprintTileOptions): 
     ring.push(q.x, q.z);
   };
   // Far builds drop sheds and garages; the ring seen only at night keeps just the larger.
-  const minArea = [4, 30, 70][o.lod]!;
+  const minArea = [4, 15, 30, 70][o.lod]!;
+  const minHole = [4, 25, 60, 60][o.lod]!;
+  const tolerance = [0, 0.6, 1.2, 3][o.lod]!;
 
   for (let i = 0; i < layer.length; i++) {
     const f = layer.feature(i);
@@ -144,20 +149,29 @@ export function buildFootprintTile(bytes: Uint8Array, o: FootprintTileOptions): 
       const convert = (pts: Array<{ x: number; y: number }>) => {
         const r: Ring = [];
         for (const p of pts) toLocal(p.x, p.y, r);
-        let c = cleanRing(r);
-        if (cut && c.length) c = clipRingToRect(c, -half.x, -half.z, half.x, half.z);
-        if (o.lod && c.length) c = simplifyRing(c, o.lod === 1 ? 1.2 : 3);
-        return c;
+        const c = cleanRing(r);
+        return cut && c.length ? clipRingToRect(c, -half.x, -half.z, half.x, half.z) : c;
       };
+      // What the building is (size, shape, anchor, seed, so its plan and colours) comes from
+      // the full outline at every build: a tile changing its build must not change the look.
       const outerRing = convert(poly.outer);
       if (outerRing.length < 6) continue;
       const holeRings = poly.holes
         .map(convert)
-        .filter((h) => h.length >= 6 && Math.abs(signedArea(h)) > (o.lod ? 60 : 4));
+        .filter((h) => h.length >= 6 && Math.abs(signedArea(h)) > 4);
       const oriented = orient(outerRing, holeRings);
       const area =
         signedArea(oriented.outer) - holeRings.reduce((s, h) => s + Math.abs(signedArea(h)), 0);
       if (area < minArea) continue;
+      // The geometry of far builds: simpler outlines, only the larger courtyards.
+      const simple = (r: Ring) => (tolerance ? simplifyRing(r, tolerance) : r);
+      const shape = orient(
+        simple(oriented.outer),
+        oriented.holes
+          .map(simple)
+          .filter((h) => h.length >= 6 && Math.abs(signedArea(h)) > minHole),
+      );
+      if (shape.outer.length < 6) continue;
 
       const box = orientedBox(oriented.outer);
       const boxArea = 4 * box.halfLength * box.halfWidth;
@@ -203,11 +217,11 @@ export function buildFootprintTile(bytes: Uint8Array, o: FootprintTileOptions): 
       const boxed = plan.boxed;
       const canopy = plan.kind === KIND.canopy;
       addSolid(out, {
-        outer: boxed ? boxRing(box) : oriented.outer,
-        holes: boxed ? [] : oriented.holes,
+        outer: boxed ? boxRing(box) : shape.outer,
+        holes: boxed ? [] : shape.holes,
         // The night-only ring: a box as high as the roof's middle (only its windows are seen).
         roof:
-          o.lod === 2
+          o.lod === 3
             ? { kind: 'flat', box, eave: (plan.eave + plan.height) / 2, ridge: plan.height }
             : { kind: plan.roof, box, eave: plan.eave, ridge: plan.height },
         base: canopy ? Math.max(plan.height - 0.6, 0.5) : -1,
