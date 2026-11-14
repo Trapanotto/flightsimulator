@@ -27,10 +27,13 @@ GAUGES = {
     "ASI": (0.345, 0.300, 0.037), "AI": (0.250, 0.300, 0.037), "ALT": (0.155, 0.300, 0.037),
     "TC": (0.345, 0.205, 0.037), "HI": (0.250, 0.205, 0.037), "VSI": (0.155, 0.205, 0.037),
     "TACH": (0.385, 0.105, 0.033), "CDI1": (0.060, 0.300, 0.034), "CDI2": (0.060, 0.205, 0.034),
-    "FUELL": (0.468, 0.318, 0.019), "FUELR": (0.468, 0.268, 0.019), "OILT": (0.468, 0.218, 0.019),
-    "OILP": (0.468, 0.168, 0.019), "EGT": (0.468, 0.118, 0.019), "VAC": (0.468, 0.068, 0.019),
-    "CLOCK": (0.060, 0.115, 0.022), "FLAPS": (-0.215, 0.205, 0.020),
+    "ADF": (0.060, 0.115, 0.034),
+    "FUELL": (0.468, 0.330, 0.019), "FUELR": (0.468, 0.280, 0.019), "OILT": (0.468, 0.230, 0.019),
+    "OILP": (0.468, 0.180, 0.019), "EGT": (0.468, 0.130, 0.019), "VAC": (0.468, 0.080, 0.019),
+    "AMP": (0.310, 0.115, 0.019), "FF": (0.215, 0.115, 0.019), "FLAPS": (-0.215, 0.205, 0.020),
 }
+# Dials whose face turns (painted by the loader too, but not merged with the fixed ones).
+TURNING_FACES = ("AI", "HI", "CDI1", "CDI2")
 
 
 def pp(bl, v, s=0.0):
@@ -145,7 +148,7 @@ def needle(b, name, bl, v, length, width, tail, s=0.006, tip="taper", mat="needl
 def instruments(b):
     for gid, (bl, v, r) in GAUGES.items():
         bezel(b, gid, bl, v, r)
-        if gid not in ("AI", "HI"):
+        if gid not in TURNING_FACES:
             face(b, gid, bl, v, r)
     g = GAUGES
     # Single-needle dials.
@@ -153,7 +156,8 @@ def instruments(b):
                             ("TACH", 0.86, 0.075, "taper"), ("FUELL", 0.8, 0.11, "taper"),
                             ("FUELR", 0.8, 0.11, "taper"), ("OILT", 0.8, 0.11, "taper"),
                             ("OILP", 0.8, 0.11, "taper"), ("EGT", 0.8, 0.11, "taper"),
-                            ("VAC", 0.8, 0.11, "taper"), ("FLAPS", 0.8, 0.11, "taper")):
+                            ("VAC", 0.8, 0.11, "taper"), ("AMP", 0.8, 0.11, "taper"),
+                            ("FF", 0.8, 0.11, "taper"), ("FLAPS", 0.8, 0.11, "taper")):
         bl, v, r = g[gid]
         needle(b, f"Needle_{gid}", bl, v, ln * r, w * r, 0.18 * r, tip=tip)
     # Altimeter: 100 ft (long), 1000 ft (short, wide), 10 000 ft (thin, with a triangle).
@@ -161,24 +165,18 @@ def instruments(b):
     needle(b, "Needle_ALT10000", bl, v, 0.92 * r, 0.03 * r, 0.0, s=0.0045, tip="arrow", hub=False)
     needle(b, "Needle_ALT1000", bl, v, 0.55 * r, 0.12 * r, 0.12 * r, s=0.0058, tip="wide", hub=False)
     needle(b, "Needle_ALT100", bl, v, 0.88 * r, 0.075 * r, 0.2 * r, s=0.0071, tip="taper")
-    # Clock (static hands at 10:10, the classic display time).
-    bl, v, r = g["CLOCK"]
-    for ang, ln in ((-60, 0.55), (60, 0.85)):
-        c = pp(bl, v)
-        poly = np.array(_needle_poly(ln * r, 0.08 * r, 0.1 * r))
-        a = math.radians(ang)
-        rot = np.array([[math.cos(a), math.sin(a)], [-math.sin(a), math.cos(a)]])
-        b.add("needle", _flat_shape(poly @ rot.T, c, 0.004))
-    for gid in ("CDI1", "CDI2"):
-        bl, v, r = g[gid]
-        c = pp(bl, v)
-        b.add("needle", _flat_shape([(-0.002, -0.8 * r), (0.002, -0.8 * r), (0.002, 0.8 * r), (-0.002, 0.8 * r)],
-                                    c, 0.004))
-        b.add("needle", _flat_shape([(-0.75 * r, -0.002), (0.75 * r, -0.002), (0.75 * r, 0.002), (-0.75 * r, 0.002)],
-                                    c, 0.005))
+    # ADF: a long pointer over a fixed card.
+    bl, v, r = g["ADF"]
+    needle(b, "Needle_ADF", bl, v, 0.86 * r, 0.06 * r, 0.6 * r, tip="arrow", mat="needle_orange")
+    cdi(b, "CDI1", True)
+    cdi(b, "CDI2", False)
     attitude(b)
     heading(b)
+    heading_bug(b)
     turn_coordinator(b)
+    flag(b, "AI_Flag", "AI", -45, s=0.0052, radial=0.8)
+    flag(b, "HI_Flag", "HI", 45, s=0.0055, radial=0.8)
+    flag(b, "TC_Flag", "TC", -125, s=0.0045, radial=0.78)
 
 
 def attitude(b):
@@ -275,6 +273,76 @@ def _sphere(c, r, nu=14, nv=8):
     return np.array(verts), faces
 
 
+def flag(b, name, gid, angle_deg, s=0.0035, radial=0.86):
+    """Red flag plate on a dial; extras.slide moves it out behind the bezel (hidden)."""
+    from . import controls as K
+    bl, v, r = GAUGES[gid]
+    a = math.radians(angle_deg)
+    d = -math.sin(a) * VX + math.cos(a) * VV        # clockwise from 12 o'clock as the pilot sees it
+    at = pp(bl, v, s) + d * radial * r
+    piv = b.pivot(name, at, VN)
+    # Hidden: inside the bezel ring (radius r .. r + 8 mm), behind its lip.
+    piv["slide"] = [c * (1.11 - radial) * r for c in M.model_axis(*d)]
+    K.attach(b, f"{name}_mesh", K.shared("flag", K.flag_shape, b.mats["knob_red"]), piv)
+    return piv
+
+
+def cdi(b, gid, glide):
+    """VOR/ILS indicator: turning azimuth card (OBS), needle hinged at the top, flags."""
+    from . import controls as K
+    bl, v, r = GAUGES[gid]
+    c = pp(bl, v)
+    card = b.pivot(f"{gid}_Card", c + VN * 0.0015, VN)
+    verts, faces, uvs = _disc(c + VN * 0.0015, r)
+    b.obj(f"Face_{gid}", (verts, faces), "gauge_face", parent=card, origin=M.P(*(c + VN * 0.0015)), uvs=uvs,
+          smooth=False)
+    # Fixed parts: course index and reciprocal, the dots of the deviation scale.
+    b.add("needle_orange", _flat_shape([(-0.0028, r * 0.99), (0.0028, r * 0.99), (0.0, r * 0.83)], c, 0.0032))
+    b.add("needle", _flat_shape([(-0.0018, -r * 0.99), (0.0018, -r * 0.99), (0.0, -r * 0.86)], c, 0.0032))
+    for i in range(-5, 6):
+        if i == 0:
+            continue
+        b.add("needle", M.cylinder(c + VN * 0.0026 - VX * (i * 0.1 * r), c + VN * 0.0032 - VX * (i * 0.1 * r),
+                                   0.0008, 8))
+        if glide:
+            b.add("needle", M.cylinder(c + VN * 0.0026 + VV * (i * 0.1 * r), c + VN * 0.0032 + VV * (i * 0.1 * r),
+                                       0.0008, 8))
+    b.add("needle", M.lathe([(0.0, 0.0028), (0.0, 0.0036), (0.0006, 0.0036), (0.0006, 0.0028)], c + VN * 0.0026, VN,
+                            n=20, close_start=False, close_end=False))
+    # Needle: hangs from a hinge near the top; the loader swings it.
+    hinge = c + VV * 0.75 * r
+    piv = b.pivot(f"{gid}_Needle", hinge + VN * 0.005, VN)
+    bar = _flat_shape([(-0.0007, 0.0), (0.0007, 0.0), (0.0007, -1.62 * r), (-0.0007, -1.62 * r)], hinge, 0.005)
+    b.obj(f"{gid}_Needle_mesh", bar, "needle", parent=piv, origin=M.P(*(hinge + VN * 0.005)))
+    if glide:
+        hinge = c + VX * 0.75 * r
+        piv = b.pivot(f"{gid}_GS", hinge + VN * 0.0058, VN)
+        bar = _flat_shape([(0.0, -0.0007), (1.62 * r, -0.0007), (1.62 * r, 0.0007), (0.0, 0.0007)], hinge, 0.0058)
+        b.obj(f"{gid}_GS_mesh", bar, "needle", parent=piv, origin=M.P(*(hinge + VN * 0.0058)))
+        flag(b, f"{gid}_GsFlag", gid, 90, radial=0.8)
+    flag(b, f"{gid}_NavFlag", gid, 225, radial=0.78)
+    # TO/FROM: a white triangle that turns over; it slides away when there is no signal.
+    a = math.radians(45)
+    d = -math.sin(a) * VX + math.cos(a) * VV
+    at = c + d * 0.6 * r + VN * 0.0034
+    piv = b.pivot(f"{gid}_ToFrom", at, VN)
+    piv["slide"] = [x * 0.51 * r for x in M.model_axis(*d)]
+    tri = np.array([(-0.0032, -0.0022, 0.0), (0.0032, -0.0022, 0.0), (0.0, 0.0028, 0.0),
+                    (-0.0032, -0.0022, 0.0006), (0.0032, -0.0022, 0.0006), (0.0, 0.0028, 0.0006)])
+    tri_f = [(2, 1, 0), (3, 4, 5), (0, 1, 4, 3), (1, 2, 5, 4), (2, 0, 3, 5)]
+    K.attach(b, f"{gid}_ToFrom_mesh", K.shared("tofrom", lambda: (tri, tri_f), b.mats["needle"]), piv)
+
+
+def heading_bug(b):
+    bl, v, r = GAUGES["HI"]
+    c = pp(bl, v)
+    piv = b.pivot("HI_Bug", c + VN * 0.0026, VN)
+    notch = [(-0.0034, r * 0.99), (-0.0034, r * 0.84), (-0.0012, r * 0.84), (-0.0012, r * 0.92), (0.0012, r * 0.92),
+             (0.0012, r * 0.84), (0.0034, r * 0.84), (0.0034, r * 0.99)]
+    b.obj("HI_Bug_mesh", _flat_shape(notch, c, 0.0026, 0.0008), "needle_orange", parent=piv,
+          origin=M.P(*(c + VN * 0.0026)))
+
+
 def compass(b):
     """Wet compass hanging at the top of the windshield centre."""
     c = np.array([0.0, 0.66, 1.885])
@@ -318,27 +386,7 @@ def panel(b):
         j = (i + 1) % n
         faces.append((i, j, n + j, n + i))
     b.add("panel", (np.array(pts), faces))
-    # Radio stack (audio panel, GPS/COM, NAV/COM, transponder, autopilot): boxes with screens.
-    x0, x1 = -0.030, -0.190
-    xc = 0.5 * (x0 + x1)
-    w = x0 - x1
-    for top, h, screen in ((0.36, 0.03, None), (0.325, 0.078, (0.36, 0.62)), (0.243, 0.046, (0.5, 0.45)),
-                           (0.193, 0.036, (0.45, 0.5)), (0.153, 0.032, (0.3, 0.45))):
-        c = pp(xc, top - h / 2, 0.006)
-        b.add("plastic_black", _box_panel(c, w * 0.99, h * 0.96, 0.012))
-        if screen:
-            sw, sh = screen[0] * w, screen[1] * h
-            b.add("screen", _box_panel(pp(xc, top - h / 2, 0.0125), sw, sh, 0.0015))
-        for kx in (-0.42, 0.42):
-            kc = pp(xc + kx * w * -1, top - h / 2, 0.012)
-            b.add("plastic_black", M.cylinder(kc, kc + VN * 0.012, 0.0065, 14))
-    # Switch row and magneto key on the lower left, circuit breakers on the lower right.
-    for i in range(8):
-        sx = 0.49 - i * 0.026
-        b.add("plastic_black", _box_panel(pp(sx, 0.04, 0.004), 0.011, 0.022, 0.008))
-        b.add("knob_red" if i < 2 else "plastic_black", _box_panel(pp(sx, 0.046, 0.009), 0.009, 0.009, 0.004))
-    kc = pp(0.30, 0.05, 0.0)
-    b.add("steel", M.cylinder(kc, kc + VN * 0.006, 0.013, 18))
+    # Circuit breakers on the lower right.
     for row in range(2):
         for i in range(8):
             cb = pp(-0.30 - i * 0.022, 0.03 + row * 0.03, 0.0)
@@ -366,7 +414,9 @@ def glareshield(b):
     """Padded hood from the panel's top edge forward to the windshield base."""
     rows = []
     us = np.linspace(-1, 1, 25)
-    prof = [(0.445, 1.488), (0.452, 1.505), (0.44, 1.52), (0.36, 1.548), (0.24, 1.568), (0.10, 1.575), (0.02, 1.565)]
+    # The lip overhangs the panel by about 5 cm: any more and it hides the panel's top row
+    # (annunciators, audio panel) from the pilot's eye.
+    prof = [(0.395, 1.49), (0.40, 1.505), (0.39, 1.52), (0.33, 1.548), (0.24, 1.568), (0.10, 1.575), (0.02, 1.565)]
     for u in us:
         row = []
         for fs, wl in prof:
@@ -471,37 +521,6 @@ def pedals(b):
         b.obj(f"Pedals_{which}_mesh", M.merge(parts), "steel", parent=piv, origin=M.P(0.0, 0.16, 1.05))
 
 
-def levers(b):
-    # Throttle (black, smooth) and mixture (red, ribbed): push-pull knobs, pulled out = idle/lean.
-    for name, bl, mat in (("Throttle", -0.065, "plastic_black"), ("Mixture", -0.150, "knob_red")):
-        base = pp(bl, 0.06, 0.0)
-        piv = b.pivot(name, base, VN, props={"slide": [c * 0.065 for c in M.model_axis(*VN)]})
-        parts = [M.cylinder(base - VN * 0.07, base + VN * 0.01, 0.0045, 10)]
-        b.obj(f"{name}_shaft", M.merge(parts), "chrome", parent=piv, origin=M.P(*base))
-        knob = M.lathe([(0.0, 0.0), (0.0, 0.017), (0.006, 0.019), (0.02, 0.019), (0.026, 0.014), (0.028, 0.0)],
-                       base + VN * 0.008, VN, n=24, close_start=False, close_end=False)
-        b.obj(f"{name}_knob", knob, mat, parent=piv, origin=M.P(*base), sharp=50)
-    # Flap lever: moves down its slot (0 at the top, 30 deg at the bottom).
-    slot_c = pp(-0.215, 0.115, 0.0)
-    b.add("plastic_black", _box_panel(slot_c, 0.008, 0.10, 0.002))
-    top = pp(-0.215, 0.155, 0.0)
-    piv = b.pivot("FlapLever", top, -VV, props={"slide": [c * 0.08 for c in M.model_axis(*(-VV))]})
-    handle = [M.cylinder(top - VN * 0.01, top + VN * 0.03, 0.004, 8),
-              _box_panel(top + VN * 0.034, 0.03, 0.012, 0.012)]
-    b.obj("FlapLever_mesh", M.merge(handle), "placard", parent=piv, origin=M.P(*top))
-    # Elevator trim wheel on the pedestal, turning about the BL axis.
-    tc = np.array([-0.025, 0.66, 0.92])
-    piv = b.pivot("TrimWheel", tc, (-1, 0, 0))
-    wheel = M.lathe([(-0.008, 0.0), (-0.008, 0.07), (0.0, 0.075), (0.008, 0.07), (0.008, 0.0)], tc, (1, 0, 0), n=32,
-                    close_start=False, close_end=False)
-    marks = [M.rounded_box(tc + np.array([0, 0.076 * math.sin(a), 0.076 * math.cos(a)]), (0.018, 0.006, 0.006), 0.0, 1)
-             for a in np.linspace(0, 2 * math.pi, 16, endpoint=False)]
-    b.obj("TrimWheel_mesh", M.merge([wheel] + marks), "plastic_black", parent=piv, origin=M.P(*tc), sharp=50)
-    # Fuel selector on the floor between the seats.
-    b.add("plastic_black", M.cylinder((0, 0.80, 0.80), (0, 0.80, 0.83), 0.045, 20))
-    b.add("knob_red", M.rounded_box((0, 0.80, 0.845), (0.02, 0.08, 0.025), 0.006, 1))
-
-
 def build(col, mats, root):
     b = Builder(col, mats, root)
     panel(b)
@@ -511,7 +530,8 @@ def build(col, mats, root):
     seats(b)
     yokes(b)
     pedals(b)
-    levers(b)
+    from . import controls
+    controls.build(b)
     b.flush()
     eye = M.empty("Eye", col, M.P(*D.EYE), size=0.03)
     M.parent_keep(eye, root)

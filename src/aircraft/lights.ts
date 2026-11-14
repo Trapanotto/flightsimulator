@@ -13,8 +13,8 @@ export interface AircraftLights {
 }
 
 /**
- * What a pilot would have on when nobody sets the switches (there are no light switches in
- * the controls yet): beacon and position lights with the engine running, strobes on the
+ * What a pilot would have on when nobody sets the switches (without the systems' light
+ * state): beacon and position lights with the engine running, strobes on the
  * runway and in the air, landing light below 1000 ft above the ground, taxi light rolling.
  */
 export function autoLights(t: Telemetry): AircraftLights {
@@ -41,9 +41,40 @@ const EXPOSURE_NIGHT = 400;
  * sunlight and blooms in the dark. Even steps of brightness are even steps of the logarithm.
  */
 export function glowVisibility(exposure: number): number {
+  return 0.2 + 0.8 * darkness(exposure);
+}
+
+/** 0 at noon .. 1 in a dark night, even in the logarithm of the exposure. */
+export function darkness(exposure: number): number {
   const t =
     Math.log(Math.max(exposure, 1e-6) / EXPOSURE_NOON) / Math.log(EXPOSURE_NIGHT / EXPOSURE_NOON);
-  return 0.2 + 0.8 * Math.min(Math.max(t, 0), 1);
+  return Math.min(Math.max(t, 0), 1);
+}
+
+/**
+ * Emission of the panel's post lights and the gauges' internal lighting (multiplies the
+ * painted colour). A lamp of fixed brightness: emission x exposure on screen, so it shows at
+ * night and vanishes in daylight. A small share of self-light by day keeps the dials readable
+ * in the glareshield's shadow; it fades out with the daylight.
+ */
+export const POST_LIGHT = 0.0011;
+export const PANEL_DAY_FILL = 0.04;
+export function panelGlow(exposure: number, panelLight: number): number {
+  const lamp = Math.min(POST_LIGHT * exposure, 0.45) * Math.min(Math.max(panelLight, 0), 1);
+  return lamp + PANEL_DAY_FILL * (1 - darkness(exposure));
+}
+
+/**
+ * Backlit displays and annunciator lamps: bright enough to read by day, dimmed at night (the
+ * sets' photocells do the same) so they do not glare.
+ */
+export function displayGlow(exposure: number): number {
+  return 1.1 - 0.72 * darkness(exposure);
+}
+
+/** The checklist highlight: easy to see on a sunlit panel, soft at night. */
+export function highlightGlow(exposure: number): number {
+  return 3.2 - 2.5 * darkness(exposure);
 }
 
 /** Beacon: a red flash of 0.12 s, 45 times a minute. 0..1. */

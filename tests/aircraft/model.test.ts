@@ -2,10 +2,16 @@ import { readFileSync, statSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   COCKPIT_PIVOTS,
+  DISPLAYS,
+  DUAL_KNOBS,
   EXTERIOR_PIVOTS,
+  FLAGS,
   GAUGE_PIVOTS,
   allExpectedNodes,
+  controlNode,
 } from '../../src/aircraft/c172Parts';
+import { REGIONS } from '../../src/aircraft/displays';
+import { C172_CONTROLS } from '../../src/sim';
 
 const FILE = 'public/assets/aircraft/c172.glb';
 
@@ -46,7 +52,7 @@ describe('c172.glb', () => {
   });
 
   it('gives every rotating pivot a unit axis and an identity rest rotation', () => {
-    const rotating = [...EXTERIOR_PIVOTS, ...GAUGE_PIVOTS, 'YokeRoll_L', 'YokeRoll_R', 'TrimWheel'];
+    const rotating = [...EXTERIOR_PIVOTS, ...GAUGE_PIVOTS, 'YokeRoll_L', 'YokeRoll_R', 'Ctl_trim'];
     for (const name of rotating) {
       const node = byName.get(name)!;
       const axis = node.extras?.axis as number[];
@@ -57,9 +63,11 @@ describe('c172.glb', () => {
   });
 
   it('gives every sliding control a travel vector', () => {
-    for (const name of COCKPIT_PIVOTS.filter(
-      (n) => !n.startsWith('YokeRoll') && n !== 'TrimWheel',
-    )) {
+    const sliding = [
+      ...COCKPIT_PIVOTS.filter((n) => !n.startsWith('YokeRoll')),
+      ...['throttle', 'mixture', 'flaps'].map(controlNode),
+    ];
+    for (const name of sliding) {
       const slide = byName.get(name)!.extras?.slide as number[];
       expect(slide, name).toHaveLength(3);
       expect(Math.hypot(...slide), name).toBeGreaterThan(0.03);
@@ -93,5 +101,58 @@ describe('c172.glb', () => {
 
   it('keeps the skin textures small', () => {
     expect((gltf.images ?? []).length).toBeLessThanOrEqual(4);
+  });
+
+  it('has a node and a hit box for every cockpit control', () => {
+    const hits = gltf.nodes.filter((n) => n.name?.startsWith('Hit_'));
+    for (const c of C172_CONTROLS) {
+      expect(byName.has(controlNode(c.id)), c.id).toBe(true);
+      const own = hits.filter((h) => h.extras?.control === c.id);
+      expect(own.length, c.id).toBeGreaterThan(0);
+      for (const h of own) {
+        const half = h.extras!.half as number[];
+        expect(half, c.id).toHaveLength(3);
+        // Big enough for a finger at arm's length (at least 1 cm across), small enough not
+        // to swallow the neighbours.
+        expect(Math.max(...half) * 2, c.id).toBeGreaterThan(0.01);
+        expect(Math.max(...half), c.id).toBeLessThan(0.1);
+      }
+    }
+    // Nothing but the controls' names.
+    const ids = new Set(C172_CONTROLS.map((c) => c.id));
+    for (const h of hits) expect(ids.has(h.extras!.control as string), h.name).toBe(true);
+  });
+
+  it('gives every control what it moves by: an axis, a travel, or nothing for a display hit', () => {
+    const still = ['com1Active', 'com2Active', 'nav1Active', 'nav2Active', 'xpdrCode'];
+    for (const c of C172_CONTROLS) {
+      const n = byName.get(controlNode(c.id))!;
+      if (still.includes(c.id)) continue;
+      const axis = n.extras?.axis as number[] | undefined;
+      const slide = n.extras?.slide as number[] | undefined;
+      expect(!!axis || !!slide, c.id).toBe(true);
+      if (axis) expect(Math.hypot(...axis), c.id).toBeCloseTo(1, 5);
+    }
+    for (const id of DUAL_KNOBS)
+      expect(byName.get(`${controlNode(id)}_outer`)?.extras?.axis).toHaveLength(3);
+    for (const f of FLAGS) expect(byName.get(f)!.extras?.slide, f).toHaveLength(3);
+  });
+
+  it('shapes every display window like its region of the display atlas', () => {
+    for (const d of DISPLAYS) {
+      const size = byName.get(`Disp_${d}`)!.extras!.size as number[];
+      const r = REGIONS[d];
+      expect(size[0]! / size[1]! / (r.w / r.h), d).toBeGreaterThan(0.94);
+      expect(size[0]! / size[1]! / (r.w / r.h), d).toBeLessThan(1.06);
+    }
+  });
+
+  it('carries the placard texts for the label atlas', () => {
+    const labels = byName.get('Labels')!.extras!;
+    const texts = labels.labels as string[];
+    expect(texts.length).toBeGreaterThan(50);
+    expect(texts.length).toBeLessThanOrEqual((labels.cols as number) * (labels.rows as number));
+    expect(texts).toContain('MASTER');
+    expect(texts).toContain('FUEL SELECTOR');
   });
 });

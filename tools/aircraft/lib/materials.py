@@ -71,6 +71,10 @@ def make_all():
     m["knob_red"] = principled("KnobRed", (0.6, 0.04, 0.03), 0.4)
     m["placard"] = principled("Placard", (0.75, 0.75, 0.72), 0.5)
     m["screen"] = principled("Screen", (0.02, 0.03, 0.035), 0.15)
+    m["avionics_face"] = principled("AvionicsFace", (0.075, 0.075, 0.08), 0.5)
+    # Display windows and placard texts: the loader paints both from canvases.
+    m["display"] = principled("Display", (0.02, 0.02, 0.02), 0.2)
+    m["labels"] = principled("Labels", (0.95, 0.95, 0.93), 0.6, alpha=0.5)
     # Instruments: faces are drawn by the game (canvas atlas), needles are geometry.
     m["gauge_face"] = principled("GaugeFace", (0.05, 0.05, 0.05), 0.6)
     m["gauge_bezel"] = principled("GaugeBezel", (0.03, 0.03, 0.032), 0.5)

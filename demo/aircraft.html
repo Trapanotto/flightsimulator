@@ -32,11 +32,30 @@
       body.shot #info {
         display: none;
       }
+      #fake {
+        position: fixed;
+        right: 8px;
+        top: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 6px 8px;
+        background: rgba(10, 14, 20, 0.7);
+        border-radius: 6px;
+        font-size: 12px;
+        max-height: 95vh;
+        overflow: auto;
+      }
+      #fake input[type='range'] {
+        width: 110px;
+        vertical-align: middle;
+      }
     </style>
   </head>
   <body>
     <canvas id="c"></canvas>
     <div id="info"></div>
+    <div id="fake"></div>
     <script type="module" src="./aircraft.ts"></script>
   </body>
 </html>

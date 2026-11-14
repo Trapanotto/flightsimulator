@@ -1,11 +1,12 @@
 /**
- * Naming convention of the Cessna 172 model (written by tools/aircraft/build_c172.py, which
- * documents the same list). The loader finds every moving part by these names; a test checks
- * that the .glb contains all of them.
+ * Naming convention of the Cessna 172 model (written by tools/aircraft/build_c172.py and
+ * tools/aircraft/c172/controls.py, which document the same lists). The loader finds every
+ * moving part by these names; a test checks that the .glb contains all of them.
  *
  * Pivots have an identity rest rotation and carry their hinge axis in the model frame as
  * extras (`userData.axis`); a positive angle about it is the positive direction named here.
  */
+import { C172_CONTROLS } from '@sim';
 
 /** Movable parts in LOD0 (LOD1 has the same ones with the suffix `_lod1`). */
 export const EXTERIOR_PIVOTS = [
@@ -23,7 +24,7 @@ export const EXTERIOR_PIVOTS = [
   'Wheel_R',
 ] as const;
 
-/** Cockpit controls (LOD0 only). */
+/** Yoke and pedals (LOD0 only). */
 export const COCKPIT_PIVOTS = [
   'Yoke_L', // slides towards the pilot (extras.slide at full back pressure)
   'Yoke_R',
@@ -31,10 +32,6 @@ export const COCKPIT_PIVOTS = [
   'YokeRoll_R',
   'Pedals_L', // slide forward (extras.slide at full pedal)
   'Pedals_R',
-  'Throttle', // slide out of the panel (extras.slide at lever 0)
-  'Mixture',
-  'FlapLever', // slides down its slot (extras.slide at flaps 1)
-  'TrimWheel', // nose up
 ] as const;
 
 /** Instrument pivots: extras.axis points out of the dial towards the pilot. */
@@ -51,12 +48,33 @@ export const GAUGE_PIVOTS = [
   'Needle_OILP',
   'Needle_EGT',
   'Needle_VAC',
+  'Needle_AMP',
+  'Needle_FF',
   'Needle_FLAPS',
+  'Needle_ADF',
   'AI_Roll',
   'HI_Card',
+  'HI_Bug',
   'TC_Plane',
   'TC_Ball',
   'Compass_Card',
+  'CDI1_Card',
+  'CDI1_Needle',
+  'CDI1_GS',
+  'CDI1_ToFrom', // also slides away (extras.slide) without a signal
+  'CDI2_Card',
+  'CDI2_Needle',
+  'CDI2_ToFrom',
+] as const;
+
+/** Warning flags: extras.slide moves them out of sight behind the bezel. */
+export const FLAGS = [
+  'AI_Flag',
+  'HI_Flag',
+  'TC_Flag',
+  'CDI1_NavFlag',
+  'CDI1_GsFlag',
+  'CDI2_NavFlag',
 ] as const;
 
 /** Dial faces with square UVs that the loader paints (see dials.ts). */
@@ -70,16 +88,37 @@ export const FACES = [
   'TACH',
   'CDI1',
   'CDI2',
+  'ADF',
   'FUELL',
   'FUELR',
   'OILT',
   'OILP',
   'EGT',
   'VAC',
-  'CLOCK',
+  'AMP',
+  'FF',
   'FLAPS',
 ] as const;
 export type FaceId = (typeof FACES)[number];
+/** Faces that turn with a pivot; the others are merged into one mesh at load. */
+export const TURNING_FACES: readonly FaceId[] = ['AI', 'HI', 'CDI1', 'CDI2'];
+
+/** Display windows (`Disp_<id>`): painted at runtime into one canvas atlas (displays.ts). */
+export const DISPLAYS = [
+  'GPS',
+  'COM1',
+  'NAV1',
+  'COM2',
+  'NAV2',
+  'ADF',
+  'DME',
+  'XPDR',
+  'MKR',
+  'AP',
+  'ANN',
+  'KOLL',
+] as const;
+export type DisplayId = (typeof DISPLAYS)[number];
 
 /** Other nodes the loader needs. */
 export const SPECIAL_NODES = [
@@ -103,6 +142,24 @@ export const SPECIAL_NODES = [
   'Glow_Strobe_R',
   'Glow_Landing',
   'Glow_Taxi',
+  'Labels',
+  'TrimInd',
+  'XpdrDigit_0',
+  'XpdrDigit_1',
+  'XpdrDigit_2',
+  'XpdrDigit_3',
+] as const;
+
+/** The node of a cockpit control. */
+export const controlNode = (id: string) => `Ctl_${id}`;
+/** Dual concentric knobs: the outer ring (coarse) has its own node. */
+export const DUAL_KNOBS = [
+  'com1Standby',
+  'com2Standby',
+  'nav1Standby',
+  'nav2Standby',
+  'adfFrequency',
+  'apAltitude',
 ] as const;
 
 export function allExpectedNodes(): string[] {
@@ -111,7 +168,12 @@ export function allExpectedNodes(): string[] {
     ...EXTERIOR_PIVOTS.map((n) => `${n}_lod1`),
     ...COCKPIT_PIVOTS,
     ...GAUGE_PIVOTS,
+    ...FLAGS,
     ...FACES.map((f) => `Face_${f}`),
+    ...DISPLAYS.map((d) => `Disp_${d}`),
     ...SPECIAL_NODES,
+    ...C172_CONTROLS.map((c) => controlNode(c.id)),
+    ...DUAL_KNOBS.map((id) => `${controlNode(id)}_outer`),
+    ...C172_CONTROLS.map((c) => `Hit_${c.id}`),
   ];
 }
