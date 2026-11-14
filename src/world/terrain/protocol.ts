@@ -12,11 +12,45 @@ export interface TileJob {
   maskSize: number;
   /** Vector tile zoom for the mask, or -1 for none. */
   vectorZoom: number;
+  ground: GroundJob;
+}
+
+/** What the ground of a tile bakes (see groundSettings.ts). */
+export interface GroundJob {
+  /** 4 = lights and roads, 2 = lights only. */
+  channels: 2 | 4;
+  /** Bake the road field (only close tiles need it). */
+  roads: boolean;
+  /** Find the direction of field rows in the photo (into the mask's alpha). */
+  rows: boolean;
+  horizonSize: number;
+  /** Read the coarse terrain of the surroundings for the horizon. */
+  context: boolean;
+  /** URL template of the terrain tiles (for the surroundings). */
+  terrainTemplate: string;
+}
+
+/**
+ * The ground texture (mip chain; channels: lamps, glow, road distance, road info, see
+ * lights.ts and roads.ts) and the horizon texture of a tile (see horizon.ts).
+ */
+export interface GroundOutput {
+  mips: Array<{ data: Uint8Array; width: number; height: number }>;
+  channels: number;
+  /** Luminance (cd/m²) a byte of 255 stands for in the lamp and glow channels. */
+  lightScale: [number, number];
+  /** Lamps placed (for the report). */
+  lamps: number;
+  horizon: Uint8Array;
+  horizonSize: number;
+  /** CPU time of the parts, ms (for the report). */
+  timing: { lights: number; roads: number; horizon: number; mips: number };
 }
 
 /**
  * Channels of the land-cover mask, drawn from swisstopo's vector tiles:
- * R = water (lakes, rivers), G = forest, B = class code (see MASK_B_*).
+ * R = water (lakes, rivers), G = forest, B = class code (see MASK_B_*), A = direction of
+ * field rows from the photo on close tiles (see rows.ts; 0 = none).
  */
 export const MASK_B_GLACIER = 255;
 export const MASK_B_RUNWAY = 160;
@@ -33,6 +67,9 @@ export interface TileOutput {
   maskSize: number;
   /** Imagery tiles that could not be loaded (the tile still shows, partly in a flat colour). */
   missingImagery: number;
+  ground: GroundOutput;
+  /** Wall time of the whole job (downloads included) and of its CPU work alone, ms. */
+  timing: { totalMs: number; cpuMs: number };
 }
 
 export type WorkerRequest =

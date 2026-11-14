@@ -1,34 +1,43 @@
 /**
- * Stand-alone page for the world package: renderer, a simple sun and sky, the streamed terrain
- * and camera presets. Served by Vite at /flightsimulator/demo/world.html.
+ * Stand-alone page for the world package: the streamed terrain under the real sky (scene pass,
+ * then the sky's air and clouds, as the game draws it) with camera presets. Served by Vite at
+ * /flightsimulator/demo/world.html.
  *
  * URL switches:
- *   ?view=belp|thun|low|alps|runway|top|lake  camera preset (default belp)
+ *   ?view=belp|thun|alps|...                   camera preset (see VIEWS; default belp)
+ *   ?season=spring|summer|autumn|winter        season of the ground (default summer); also picks
+ *                                              a date in that season for the sun
+ *   ?hour=22                                   Swiss local hour on that date (default 11)
+ *   ?t=2026-06-21T10:00Z                       exact time instead of season date and hour
+ *   ?night=0..1                                override the night factor (default from the sun)
+ *   ?snowline=1500                             override the snow line (m above sea level)
+ *   ?weather=clear|fair|cloudy|overcast        default clear
  *   ?device=mobile                             mobile quality preset
  *   ?webgl=1                                   force the WebGL 2 fallback
- *   ?depth=reversed|log|standard               depth buffer mode (default reversed)
- *   ?sun=azimuth,elevation                     degrees (default 140,48)
  *   ?clean=1                                   hide the text overlay
  *   ?fly=1                                     fly the view direction at 120 m/s
+ *   ?marks=1                                   labels on known summits
+ *   ?shadow=1                                  a red block in front of the camera (shadow map)
  *
- * window.__demo exposes stats for tools/world/shots.mjs.
+ * window.__demo exposes stats for tools/world/shots.mjs and tools/world/ground-shots.mjs.
  */
 import {
   ACESFilmicToneMapping,
   BoxGeometry,
   Mesh,
   MeshStandardNodeMaterial,
-  Color,
-  DirectionalLight,
-  HemisphereLight,
+  PCFShadowMap,
   PerspectiveCamera,
+  RenderPipeline,
   Scene,
   Vector2,
   Vector3,
   WebGPURenderer,
 } from 'three/webgpu';
-import { LocalFrame, seaLevelToEllipsoid } from '@geo';
-import { WORLD_QUALITY, World, type WorldStats } from '@world';
+import { pass } from 'three/tsl';
+import { LocalFrame, ellipsoidToSeaLevel, seaLevelToEllipsoid } from '@geo';
+import { SKY_QUALITY, Sky, WEATHER_PRESETS, type WeatherPreset } from '@sky';
+import { type Season, WORLD_QUALITY, World, type WorldStats } from '@world';
 
 interface View {
   /** Camera: lon/lat and height above sea level, or above ground with `agl`. */
@@ -65,7 +74,70 @@ const VIEWS: Record<string, View> = {
   top: { lon: 7.4972, lat: 46.9122, h: 2500, look: { lon: 7.4972, lat: 46.91221, h: 510 } },
   // Lake Thun from 600 m above the water, looking south across it to the Niesen.
   lake: { lon: 7.66, lat: 46.73, h: 1150, look: { lon: 7.66, lat: 46.66, h: 900 } },
+
+  // ---- Phase 2: seasons, night, the ground up close ----
+  // Bern from 1500 m above the town, 4 km south-west of the old town, looking at it.
+  bern1500: { lon: 7.41, lat: 46.925, h: 2050, look: { lon: 7.45, lat: 46.95, h: 540 } },
+  // Bern from 300 m, 1.2 km south of the old town (over the Aare at the Marzili).
+  bern300: { lon: 7.445, lat: 46.938, h: 840, look: { lon: 7.452, lat: 46.95, h: 530 } },
+  // The Mittelland from 3000 m over Burgdorf, looking north-east towards Olten and Zurich.
+  mittelland: { lon: 7.55, lat: 47.02, h: 3000, look: { lon: 7.95, lat: 47.25, h: 450 } },
+  // Zurich and its lake from 1600 m over the lake near Thalwil, looking north-west.
+  zurich: { lon: 8.6, lat: 47.27, h: 1600, look: { lon: 8.53, lat: 47.38, h: 410 } },
+  // The valley of Grindelwald from the slopes towards First, looking south-west to the village.
+  grindelwald: { lon: 8.075, lat: 46.645, h: 2100, look: { lon: 8.035, lat: 46.622, h: 1050 } },
+  // The Bernese Alps from 4000 m over the Niesen, for the seasons.
+  alps4000: { lon: 7.62, lat: 46.63, h: 4000, look: { lon: 7.96, lat: 46.55, h: 2800 } },
+  // The Aare valley at Belp from 600 m above ground, looking south-east up the valley.
+  belp600: { lon: 7.47, lat: 46.9, h: 600, agl: true, look: { lon: 7.56, lat: 46.84, h: 540 } },
+  // A meadow at 30 m above ground (Belpmoos, north of the airfield), looking south-east.
+  meadow30: {
+    lon: 7.488,
+    lat: 46.928,
+    h: 30,
+    agl: true,
+    look: { lon: 7.493, lat: 46.926, h: 515 },
+  },
+  // Fields at 30 m in the Aare valley near Kiesen, looking south.
+  field30: { lon: 7.58, lat: 46.818, h: 30, agl: true, look: { lon: 7.582, lat: 46.814, h: 540 } },
+  // A main road at 50 m: the Bernstrasse near Wichtrach, looking along it.
+  road50: {
+    lon: 7.5632,
+    lat: 46.8505,
+    h: 50,
+    agl: true,
+    look: { lon: 7.5717, lat: 46.8425, h: 545 },
+  },
+  // The grass beside runway 14 of Bern-Belp, 2 m above ground, 50 m north-east of the centre line.
+  runwaygrass: {
+    lon: 7.49778,
+    lat: 46.91458,
+    h: 2,
+    agl: true,
+    look: { lon: 7.51019, lat: 46.90408, h: 512 },
+  },
+  // The Eiger north face from the north (above Grindelwald), for low sun.
+  northface: { lon: 7.995, lat: 46.635, h: 2300, look: { lon: 8.005, lat: 46.578, h: 2900 } },
 };
+
+/** A date in each season for the sun's path (2026). */
+const SEASON_DATE: Record<Season, string> = {
+  winter: '2026-01-20',
+  spring: '2026-04-22',
+  summer: '2026-07-10',
+  autumn: '2026-10-18',
+};
+/** Same values as the app (src/app/season.ts), so the demo shows what the game shows. */
+const SNOW_LINE: Record<Season, number> = {
+  winter: 900,
+  spring: 1800,
+  summer: 2900,
+  autumn: 2300,
+};
+function nightFactor(sunElevation: number): number {
+  const t = Math.min(1, Math.max(0, (2 - sunElevation) / 8));
+  return t * t * (3 - 2 * t);
+}
 
 // No global declaration: every demo page has its own shape of __demo.
 type DemoStats = {
@@ -91,6 +163,7 @@ type DemoStats = {
   /** Renders n frames back to back and waits for the GPU: ms per frame (GPU-bound cost). */
   bench: (n: number) => Promise<number>;
   adapter: string;
+  conditions: { night: number; exposure: number; season: Season; snowLine: number };
 };
 
 const query = new URLSearchParams(location.search);
@@ -101,18 +174,27 @@ const quality = {
   ...(query.get('detail') === '0' ? { detail: false } : {}),
   ...(query.has('tiles') ? { maxTiles: Number(query.get('tiles')) } : {}),
 };
-const depth = query.get('depth') ?? 'reversed';
 if (query.has('clean')) document.body.classList.add('clean');
+
+const season = (query.get('season') ?? 'summer') as Season;
+const hour = Number(query.get('hour') ?? 11);
+// Swiss local time: UTC+1 in winter, UTC+2 in summer time (late March to late October).
+const summerTime = season !== 'winter';
+const date = query.has('t')
+  ? new Date(query.get('t')!)
+  : new Date(
+      Date.parse(`${SEASON_DATE[season]}T00:00:00Z`) + (hour - (summerTime ? 2 : 1)) * 3_600_000,
+    );
 
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
 const hud = document.getElementById('hud')!;
 
 const renderer = new WebGPURenderer({
   canvas,
-  antialias: true,
+  // As in the game: no multisampling, the scene goes through the sky's post chain.
+  antialias: false,
   forceWebGL: query.has('webgl'),
-  reversedDepthBuffer: depth === 'reversed',
-  logarithmicDepthBuffer: depth === 'log',
+  reversedDepthBuffer: true,
   trackTimestamp: query.has('gpu'),
 });
 await renderer.init();
@@ -120,31 +202,46 @@ const backend = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBack
   ? 'WebGPU'
   : 'WebGL 2';
 renderer.toneMapping = ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.9;
+renderer.toneMappingExposure = 1;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = PCFShadowMap;
 
 const scene = new Scene();
-const skyHorizon = new Color(0.62, 0.76, 0.92);
-const skyZenith = new Color(0.12, 0.3, 0.7);
-scene.background = skyHorizon.clone();
-const sun = new DirectionalLight(new Color(1, 0.96, 0.88), 3.2);
-const ambient = new HemisphereLight(0xbfd4ff, 0x6b6257, 1);
-scene.add(sun, sun.target, ambient);
-const [az, el] = (query.get('sun') ?? '140,48').split(',').map(Number) as [number, number];
-const sunDir = new Vector3(
-  Math.cos((el * Math.PI) / 180) * Math.sin((az * Math.PI) / 180),
-  Math.sin((el * Math.PI) / 180),
-  -Math.cos((el * Math.PI) / 180) * Math.cos((az * Math.PI) / 180),
-);
-sun.position.copy(sunDir).multiplyScalar(1000);
+const sky = new Sky(date, view.lon, view.lat, SKY_QUALITY[mobile ? 'mobile' : 'desktop']);
+sky.setWeather(WEATHER_PRESETS[(query.get('weather') ?? 'clear') as WeatherPreset]);
+scene.add(sky.object);
+scene.environment = sky.environment;
 
 const groundGuess = seaLevelToEllipsoid(view.lon, view.lat, 550);
 let frame = new LocalFrame(view.lon, view.lat, groundGuess);
+/** A fixed frame: the clouds are anchored to it. */
+const anchor = new LocalFrame(view.lon, view.lat, 0);
 const world = new World(frame, quality);
-world.setSkyColors(skyZenith, skyHorizon);
 await world.init();
 scene.add(world.object);
 
-const camera = new PerspectiveCamera(55, 1, 0.5, quality.viewDistance * 1.5);
+const camera = new PerspectiveCamera(55, 1, 0.1, quality.viewDistance * 1.5);
+const scenePass = pass(scene, camera);
+const pipeline = new RenderPipeline(renderer);
+pipeline.outputNode = sky.post(
+  scenePass.getTextureNode('output'),
+  scenePass.getTextureNode('depth'),
+  camera,
+);
+{
+  // Same shadow setup as the game: a small map around the point of interest.
+  const s = sky.sun.shadow;
+  sky.sun.castShadow = true;
+  const size = mobile ? 1024 : 2048;
+  s.mapSize.set(size, size);
+  s.camera.left = s.camera.bottom = -16;
+  s.camera.right = s.camera.top = 16;
+  s.camera.near = 1;
+  s.camera.far = 400;
+  s.bias = -0.0005;
+  s.normalBias = 0.03;
+}
+
 const camGeo = { lon: view.lon, lat: view.lat, h: 0 };
 const camH = (agl: number | undefined) =>
   view.agl ? (agl ?? groundGuess) + view.h : seaLevelToEllipsoid(view.lon, view.lat, view.h);
@@ -168,16 +265,6 @@ placeCamera();
 // ?shadow=1: a 4 m block 25 m ahead on the ground, casting the sun's shadow onto the terrain.
 const block = new Mesh(new BoxGeometry(4, 4, 4), new MeshStandardNodeMaterial({ color: 0xc03020 }));
 if (query.has('shadow')) {
-  renderer.shadowMap.enabled = true;
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  const s = sun.shadow.camera;
-  s.left = s.bottom = -20;
-  s.right = s.top = 20;
-  s.near = 1;
-  s.far = 400;
-  sun.shadow.bias = -0.0005;
-  sun.shadow.normalBias = 0.03;
   block.castShadow = true;
   scene.add(block);
 }
@@ -203,6 +290,7 @@ function rebase(east: number, north: number) {
   const o = frame.toGeodetic({ x: east, y: 0, z: -north });
   frame = new LocalFrame(o.lon, o.lat, o.h);
   world.setFrame(frame);
+  sky.setLocation(o.lon, o.lat);
   frame.toLocal(ecef, camera.position);
   const f = frame.dirToLocal(fwd, new Vector3());
   camera.up.set(0, 1, 0);
@@ -225,6 +313,47 @@ async function adapterName(): Promise<string> {
   return gl && ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : 'unknown';
 }
 
+const conditions = {
+  night: 0,
+  exposure: 1,
+  season,
+  snowLine: query.has('snowline') ? Number(query.get('snowline')) : SNOW_LINE[season],
+  lightDirection: sky.state.lightDirection,
+  time: 0,
+};
+const geo = { lon: 0, lat: 0, h: 0 };
+const local = new Vector3();
+/** One frame as the game does it: conditions, world, sky, then the post chain. */
+function step(dt: number) {
+  conditions.night = query.has('night')
+    ? Number(query.get('night'))
+    : nightFactor(sky.state.sunElevation);
+  conditions.exposure = sky.state.exposure;
+  conditions.time += dt;
+  world.setConditions(conditions);
+  world.update(camera);
+  frame.toGeodetic(camera.position, geo);
+  anchor.fromGeodetic(frame.origin.lon, frame.origin.lat, 0, local);
+  sky.update(camera, {
+    dt,
+    altitude: ellipsoidToSeaLevel(geo.lon, geo.lat, geo.h),
+    origin: { x: local.x, z: local.z },
+  });
+  // The shadow map covers the ground in front of the camera.
+  const ahead = camera.getWorldDirection(new Vector3()).setY(0).normalize().multiplyScalar(25);
+  const at = camera.position.clone().add(ahead);
+  if (query.has('shadow')) {
+    const g = frame.toGeodetic(at);
+    const h = world.groundHeight(g.lon, g.lat);
+    if (h !== undefined) frame.fromGeodetic(g.lon, g.lat, h + 2, block.position);
+    at.copy(block.position);
+  }
+  sky.sun.target.position.copy(at);
+  sky.sun.position.copy(at).addScaledVector(sky.state.lightDirection, 200);
+  sky.sun.target.updateMatrixWorld();
+  pipeline.render();
+}
+
 async function bench(n: number): Promise<number> {
   const b = renderer.backend as unknown as {
     device?: GPUDevice;
@@ -236,10 +365,7 @@ async function bench(n: number): Promise<number> {
   };
   await finish();
   const t0 = performance.now();
-  for (let i = 0; i < n; i++) {
-    world.update(camera);
-    renderer.render(scene, camera);
-  }
+  for (let i = 0; i < n; i++) step(1 / 60);
   await finish();
   return (performance.now() - t0) / n;
 }
@@ -287,7 +413,7 @@ let frameAcc = 0;
 let cpuAcc = 0;
 let samples = 0;
 let gpuMs: number | null = null;
-const stats = {
+const stats: DemoStats = {
   ready: false,
   frames: 0,
   backend,
@@ -299,12 +425,13 @@ const stats = {
   frameMs: 0,
   cpuMs: 0,
   cpuMaxMs: 0,
-  hitches: [] as Array<[number, number, number, number]>,
-  gpuMs: gpuMs as number | null,
+  hitches: [],
+  gpuMs,
   rebase,
   ground: (lon: number, lat: number) => world.ground(lon, lat),
   bench,
   adapter: await adapterName(),
+  conditions,
 };
 (window as unknown as { __demo: DemoStats }).__demo = stats;
 
@@ -327,19 +454,9 @@ renderer.setAnimationLoop((now: number) => {
       placeCamera();
     }
   }
-  if (query.has('shadow')) {
-    const ahead = camera.getWorldDirection(new Vector3()).setY(0).normalize().multiplyScalar(25);
-    const at = camera.position.clone().add(ahead);
-    const g = frame.toGeodetic(at);
-    const h = world.groundHeight(g.lon, g.lat);
-    if (h !== undefined) frame.fromGeodetic(g.lon, g.lat, h + 2, block.position);
-    sun.target.position.copy(block.position);
-    sun.position.copy(block.position).addScaledVector(sunDir, 200);
-  }
   const tu = performance.now();
-  world.update(camera);
+  step(dt);
   const updateMs = performance.now() - tu;
-  renderer.render(scene, camera);
   const cpu = performance.now() - t0;
 
   frames++;
@@ -374,7 +491,8 @@ renderer.setAnimationLoop((now: number) => {
   if (frames % 10 === 0) {
     const s = stats.world;
     hud.textContent =
-      `${backend}  ${mobile ? 'mobile' : 'desktop'}  depth ${depth}\n` +
+      `${backend}  ${mobile ? 'mobile' : 'desktop'}  ${season}  night ${conditions.night.toFixed(2)}  ` +
+      `exposure ${conditions.exposure.toPrecision(3)}\n` +
       `tiles ${s.tilesDrawn} drawn / ${s.tilesLoaded} loaded  z<=${s.maxZoom}\n` +
       `queue ${s.queued}  in flight ${s.inFlight}  uploads ${s.pendingUploads}\n` +
       `progress ${(stats.progress * 100).toFixed(0)} %  ${stats.loading ? 'loading' : 'done'}\n` +

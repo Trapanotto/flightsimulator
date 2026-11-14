@@ -6,8 +6,10 @@ import {
   LinearFilter,
   LinearMipmapLinearFilter,
   Mesh,
+  ClampToEdgeWrapping,
   NoColorSpace,
   RGBAFormat,
+  RGFormat,
   SRGBColorSpace,
   Texture,
   UnsignedByteType,
@@ -24,8 +26,10 @@ import {
   imageryZoomFor,
   tileId,
 } from '@geo';
+import type { DeviceClass } from '../layers';
+import { GROUND_SETTINGS, type GroundSettings } from './groundSettings';
 import { tileToRenderMatrix } from './placement';
-import type { TileOutput } from './protocol';
+import type { GroundOutput, TileOutput } from './protocol';
 import { Quadtree, type TileNode, type TileProvider, type ViewState } from './Quadtree';
 import type { TerrainMaterials, TerrainNodeMaterial } from './terrainMaterial';
 import { type JobHandle, type JobResult, WorkerPool } from './WorkerPool';
@@ -42,6 +46,8 @@ export interface StreamerSettings {
   workers: number;
   maxZoom: number;
   anisotropy: number;
+  /** Picks the ground preset (lights, roads, horizon); desktop if not given. */
+  device?: DeviceClass;
 }
 
 /** Switzerland: inside, tiles refine down to the full zoom; outside, they stay coarse. */
@@ -77,6 +83,48 @@ export function tileMaskTexture(data: Uint8Array, size: number): DataTexture {
   return t;
 }
 
+/**
+ * The ground texture of a tile (lights, road field) with the mip chain the worker computed:
+ * the lamp channels must be averaged as energy, which the GPU's own mipmaps would not do.
+ */
+export function tileGroundTexture(g: GroundOutput): DataTexture {
+  const top = g.mips[0]!;
+  const t = new DataTexture(
+    top.data,
+    top.width,
+    top.height,
+    g.channels === 4 ? RGBAFormat : RGFormat,
+    UnsignedByteType,
+  );
+  t.mipmaps = g.mips;
+  t.colorSpace = NoColorSpace;
+  t.flipY = false;
+  t.generateMipmaps = false;
+  t.minFilter = LinearMipmapLinearFilter;
+  t.magFilter = LinearFilter;
+  t.needsUpdate = true;
+  return t;
+}
+
+/** Horizon angles of a tile (horizon.ts): tiny, smooth, no mipmaps. */
+export function tileHorizonTexture(g: GroundOutput): DataTexture {
+  const t = new DataTexture(
+    g.horizon,
+    g.horizonSize * 2,
+    g.horizonSize,
+    RGBAFormat,
+    UnsignedByteType,
+  );
+  t.colorSpace = NoColorSpace;
+  t.flipY = false;
+  t.generateMipmaps = false;
+  t.minFilter = LinearFilter;
+  t.magFilter = LinearFilter;
+  t.wrapS = t.wrapT = ClampToEdgeWrapping;
+  t.needsUpdate = true;
+  return t;
+}
+
 /** A loaded tile: what the GPU draws and what height queries read. */
 export interface TileData {
   mesh: Mesh;
@@ -84,6 +132,8 @@ export interface TileData {
   frame: LocalFrame;
   image: Texture;
   mask: DataTexture;
+  ground: DataTexture;
+  horizon: DataTexture;
   maskBytes: Uint8Array;
   maskSize: number;
   surfaceArgs: [Uint16Array, Uint16Array, Float32Array, Uint16Array | Uint32Array];
@@ -115,8 +165,27 @@ export class TerrainStreamer implements TileProvider<TileData> {
   private readonly errors = new Map<TileNode<TileData>, number>();
   private readonly uploads: Upload[] = [];
   private frame: LocalFrame;
+  private readonly ground: GroundSettings;
   /** Counters for the demo and the performance report. */
-  readonly counters = { uploaded: 0, evicted: 0, failed: 0, absent: 0, cancelled: 0 };
+  readonly counters = {
+    uploaded: 0,
+    evicted: 0,
+    failed: 0,
+    absent: 0,
+    cancelled: 0,
+    /** Tiles built by the workers, their summed wall time and CPU time (ms). */
+    built: 0,
+    buildMs: 0,
+    bakeMs: 0,
+    /** Bytes of the ground data (lights, roads, horizon) of all tiles built, and lamps baked. */
+    groundBytes: 0,
+    lamps: 0,
+    /** Summed CPU time of the ground's parts in the workers, ms. */
+    lightsMs: 0,
+    roadsMs: 0,
+    horizonMs: 0,
+    mipsMs: 0,
+  };
 
   constructor(
     private readonly layer: TerrainLayer,
@@ -126,6 +195,8 @@ export class TerrainStreamer implements TileProvider<TileData> {
   ) {
     this.frame = frame;
     this.group.name = 'Terrain';
+    this.ground = GROUND_SETTINGS[settings.device ?? 'desktop'];
+    materials.configure(this.ground);
     const roots: TileKey[] = [];
     for (let y = ROOT_RANGE.y0; y <= ROOT_RANGE.y1; y++)
       for (let x = ROOT_RANGE.x0; x <= ROOT_RANGE.x1; x++) roots.push({ z: ROOT_ZOOM, x, y });
@@ -198,6 +269,14 @@ export class TerrainStreamer implements TileProvider<TileData> {
         imageSize,
         maskSize: z <= 9 ? Math.min(128, s.maskSize) : s.maskSize,
         vectorZoom,
+        ground: {
+          channels: this.ground.groundChannels,
+          roads: z >= this.ground.roadsMinZoom,
+          rows: z >= this.ground.roadsMinZoom,
+          horizonSize: this.ground.horizonSize,
+          context: this.ground.horizonContext,
+          terrainTemplate: this.layer.template,
+        },
       },
       node.priority,
       (r) => this.onResult(node, pending, r),
@@ -222,6 +301,17 @@ export class TerrainStreamer implements TileProvider<TileData> {
     this.jobs.delete(node);
     if (r.ok) {
       this.errors.delete(node);
+      this.counters.built++;
+      this.counters.buildMs += r.result.timing.totalMs;
+      this.counters.bakeMs += r.result.timing.cpuMs;
+      const g = r.result.ground;
+      this.counters.groundBytes +=
+        g.horizon.byteLength + g.mips.reduce((sum, m) => sum + m.data.byteLength, 0);
+      this.counters.lamps += g.lamps;
+      this.counters.lightsMs += g.timing.lights;
+      this.counters.roadsMs += g.timing.roads;
+      this.counters.horizonMs += g.timing.horizon;
+      this.counters.mipsMs += g.timing.mips;
       this.uploads.push({ node, out: r.result });
       return;
     }
@@ -262,8 +352,11 @@ export class TerrainStreamer implements TileProvider<TileData> {
     image.onUpdate = () => out.image.close();
 
     const mask = tileMaskTexture(out.mask, out.maskSize);
+    const ground = tileGroundTexture(out.ground);
+    const horizon = tileHorizonTexture(out.ground);
 
-    const mesh = new Mesh(geometry, this.materials.create(image, mask));
+    const material = this.materials.create(image, mask, ground, horizon, out.ground.lightScale);
+    const mesh = new Mesh(geometry, material);
     mesh.name = tileId(node.key);
     mesh.matrixAutoUpdate = false;
     // The quadtree already culled; three's own test would only cost time.
@@ -276,6 +369,8 @@ export class TerrainStreamer implements TileProvider<TileData> {
     const bytes =
       Math.round(imageSize * imageSize * 4 * 1.33) +
       Math.round(out.maskSize * out.maskSize * 4 * 1.33) +
+      out.ground.mips.reduce((sum, m) => sum + m.data.byteLength, 0) +
+      out.ground.horizon.byteLength +
       g.positions.byteLength +
       g.normals.byteLength +
       g.uvs.byteLength +
@@ -286,6 +381,8 @@ export class TerrainStreamer implements TileProvider<TileData> {
       frame: new LocalFrame(g.origin.lon, g.origin.lat, g.origin.h),
       image,
       mask,
+      ground,
+      horizon,
       maskBytes: out.mask,
       maskSize: out.maskSize,
       surfaceArgs: [out.u, out.v, g.heights, g.indices.subarray(0, g.surfaceIndexCount)],
@@ -313,6 +410,8 @@ export class TerrainStreamer implements TileProvider<TileData> {
       (d.mesh.material as TerrainNodeMaterial).dispose();
       d.image.dispose();
       d.mask.dispose();
+      d.ground.dispose();
+      d.horizon.dispose();
       this.counters.evicted++;
     }
     this.tree.markEvicted(node);

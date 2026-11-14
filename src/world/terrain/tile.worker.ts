@@ -10,6 +10,7 @@ import {
   decodeQuantizedMesh,
   fillTemplate,
   geoTileBounds,
+  geoTileWidthMetres,
   mercatorLat,
   mercatorTileRange,
   planMercatorWarp,
@@ -24,7 +25,10 @@ import {
   type WorkerRequest,
   type WorkerResponse,
 } from './protocol';
+import { type LoadedVector, bakeGround, ownField } from './groundBake';
+import type { HeightField } from './horizon';
 import { meanWidth } from './polygon';
+import { rowDirections } from './rows';
 import { buildTileGeometry } from './tileGeometry';
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -86,7 +90,7 @@ function isBlank(bmp: ImageBitmap): boolean {
  * The orthophoto of a geographic tile: Mercator tiles are pasted into a mosaic, then the mosaic
  * is redrawn in thin horizontal bands so that every row lands at its true latitude.
  */
-async function composeImage(job: TileJob, b: GeoBounds, signal: AbortSignal) {
+async function composeImage(job: TileJob, b: GeoBounds, signal: AbortSignal, clock: Clock) {
   const plan = planMercatorWarp(b, job.imageZoom, job.imageSize);
   const r = plan.range;
   const mosaic = new OffscreenCanvas(
@@ -116,6 +120,15 @@ async function composeImage(job: TileJob, b: GeoBounds, signal: AbortSignal) {
     }),
   );
 
+  return timed(clock, () => warpImage(job, plan, mosaic, missing));
+}
+
+function warpImage(
+  job: TileJob,
+  plan: ReturnType<typeof planMercatorWarp>,
+  mosaic: OffscreenCanvas,
+  missing: number,
+) {
   const out = new OffscreenCanvas(job.imageSize, job.imageSize);
   const ctx = out.getContext('2d')!;
   ctx.imageSmoothingEnabled = true;
@@ -133,7 +146,15 @@ async function composeImage(job: TileJob, b: GeoBounds, signal: AbortSignal) {
       job.imageSize,
       band.dy1 - band.dy0,
     );
-  return { image: out.transferToImageBitmap(), missing };
+  let rows: Uint8Array | undefined;
+  if (job.ground.rows) {
+    // Stripes of fields, read before the photo leaves for the GPU (see rows.ts): a window of
+    // about 6 m holds several rows and tramlines.
+    const pixels = ctx.getImageData(0, 0, job.imageSize, job.imageSize).data;
+    const metresPerTexel = geoTileWidthMetres(job.key) / job.maskSize;
+    rows = rowDirections(pixels, job.imageSize, job.maskSize, 6 / metresPerTexel);
+  }
+  return { image: out.transferToImageBitmap(), missing, rows };
 }
 
 // ---- Land-cover mask from vector tiles ----
@@ -242,12 +263,18 @@ function drawLayer(
   }
 }
 
-async function composeMask(job: TileJob, b: GeoBounds, signal: AbortSignal): Promise<Uint8Array> {
+async function composeMask(
+  job: TileJob,
+  b: GeoBounds,
+  signal: AbortSignal,
+  clock: Clock,
+): Promise<{ mask: Uint8Array; tiles: LoadedVector[] }> {
   const size = job.maskSize;
   const canvas = new OffscreenCanvas(size, size);
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, size, size);
+  let tiles: LoadedVector[] = [];
   if (job.vectorZoom >= 0) {
     const r = mercatorTileRange(b, job.vectorZoom);
     const loads: Array<Promise<{ tile: TileKey; vt: VectorTile | null }>> = [];
@@ -256,17 +283,61 @@ async function composeMask(job: TileJob, b: GeoBounds, signal: AbortSignal): Pro
         const tile = { z: job.vectorZoom, x, y };
         loads.push(vectorTile(tile.z, x, y, signal).then((vt) => ({ tile, vt })));
       }
-    const tiles = await Promise.all(loads);
-    // Additive drawing: channels of overlapping classes combine instead of covering each other.
-    ctx.globalCompositeOperation = 'lighter';
-    for (const rule of MASK_RULES)
-      for (const { tile, vt } of tiles)
-        if (vt) drawLayer(ctx, vt.layers[rule.layer], tile, b, size, rule);
+    tiles = await Promise.all(loads);
+    timed(clock, () => {
+      // Additive drawing: channels of overlapping classes combine instead of covering each other.
+      ctx.globalCompositeOperation = 'lighter';
+      for (const rule of MASK_RULES)
+        for (const { tile, vt } of tiles)
+          if (vt) drawLayer(ctx, vt.layers[rule.layer], tile, b, size, rule);
+    });
   }
-  return new Uint8Array(ctx.getImageData(0, 0, size, size).data.buffer);
+  const mask = timed(clock, () => new Uint8Array(ctx.getImageData(0, 0, size, size).data.buffer));
+  return { mask, tiles };
+}
+
+// ---- Coarse terrain of the surroundings (horizon) ----
+
+const fieldCache = new Map<string, Promise<HeightField | null>>();
+/** Cells per side of a context tile's height field. */
+const CONTEXT_FIELD = 64;
+
+function terrainField(template: string, key: TileKey): Promise<HeightField | null> {
+  const id = `${key.z}/${key.x}/${key.y}`;
+  let p = fieldCache.get(id);
+  if (!p) {
+    p = fetchRetry(fillTemplate(template, key.z, key.x, key.y), new AbortController().signal)
+      .then(async (res) => {
+        if (!res.ok) return null;
+        const qm = decodeQuantizedMesh(await res.arrayBuffer());
+        return ownField(qm, geoTileBounds(key), CONTEXT_FIELD);
+      })
+      .catch(() => null);
+    fieldCache.set(id, p);
+    if (fieldCache.size > 48) fieldCache.delete(fieldCache.keys().next().value!);
+  } else {
+    fieldCache.delete(id);
+    fieldCache.set(id, p);
+  }
+  return p;
+}
+
+/** CPU time of one job's synchronous work (drawing, decoding, baking), ms. */
+interface Clock {
+  cpu: number;
+}
+function timed<T>(clock: Clock, fn: () => T): T {
+  const t0 = performance.now();
+  try {
+    return fn();
+  } finally {
+    clock.cpu += performance.now() - t0;
+  }
 }
 
 async function build(job: TileJob, controller: AbortController): Promise<TileOutput> {
+  const start = performance.now();
+  const clock: Clock = { cpu: 0 };
   const b = geoTileBounds(job.key);
   const signal = controller.signal;
   const terrain = fetchRetry(job.terrainUrl, signal).then(async (res) => {
@@ -276,13 +347,34 @@ async function build(job: TileJob, controller: AbortController): Promise<TileOut
   });
   // Without terrain there is no tile: stop the imagery downloads too.
   terrain.catch(() => controller.abort());
-  const [buffer, img, mask] = await Promise.all([
+  const [buffer, img, { mask, tiles }] = await Promise.all([
     terrain,
-    composeImage(job, b, signal),
-    composeMask(job, b, signal),
+    composeImage(job, b, signal, clock),
+    composeMask(job, b, signal, clock),
   ]);
-  const qm = decodeQuantizedMesh(buffer);
-  const geometry = buildTileGeometry(qm, job.key);
+  const { qm, geometry } = timed(clock, () => {
+    const qm = decodeQuantizedMesh(buffer);
+    return { qm, geometry: buildTileGeometry(qm, job.key) };
+  });
+  // The mask's alpha carries the direction of field rows (0 = none).
+  if (img.rows) for (let i = 0; i < img.rows.length; i++) mask[i * 4 + 3] = img.rows[i]!;
+  const ground = await bakeGround(
+    {
+      key: job.key,
+      bounds: b,
+      mask,
+      size: job.maskSize,
+      tiles,
+      vectorZoom: job.vectorZoom,
+      qm,
+      job: job.ground,
+    },
+    {
+      vector: (z, x, y) => vectorTile(z, x, y, signal),
+      terrainField: (key) => terrainField(job.ground.terrainTemplate, key),
+    },
+    (fn) => timed(clock, fn),
+  );
   return {
     geometry,
     u: qm.u,
@@ -291,6 +383,8 @@ async function build(job: TileJob, controller: AbortController): Promise<TileOut
     mask,
     maskSize: job.maskSize,
     missingImagery: img.missing,
+    ground,
+    timing: { totalMs: performance.now() - start, cpuMs: clock.cpu },
   };
 }
 
@@ -319,6 +413,8 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       result.v.buffer,
       result.mask.buffer,
       result.image,
+      result.ground.horizon.buffer,
+      ...result.ground.mips.map((m) => m.data.buffer),
     );
   } catch (err) {
     const reason =
