@@ -10,6 +10,11 @@ export interface ViewPoints {
 }
 
 const UP = new Vector3(0, 1, 0);
+/**
+ * Where the pilot's eyes rest: a little below the horizon, so the instruments and the view
+ * ahead are both in sight (radians of the rig's pitch; negative looks down).
+ */
+const COCKPIT_PITCH = -0.3;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /**
@@ -41,7 +46,8 @@ export class CameraRig {
   setMode(mode: CameraMode) {
     if (mode === this.mode) return;
     this.mode = mode;
-    this.yaw = this.pitch = 0;
+    this.yaw = 0;
+    this.pitch = mode === 'cockpit' ? COCKPIT_PITCH : 0;
     this.first = true;
   }
 
@@ -80,7 +86,7 @@ export class CameraRig {
       if (flying && this.sinceInput > 4) {
         const k = Math.min(1, dt * 2.5);
         this.yaw -= this.yaw * k;
-        this.pitch -= this.pitch * k;
+        this.pitch -= (this.pitch - COCKPIT_PITCH) * k;
       }
       this.look.setFromAxisAngle(UP, Math.PI + this.yaw);
       this.q.setFromAxisAngle(new Vector3(1, 0, 0), this.pitch * 0.8);

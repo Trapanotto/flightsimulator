@@ -52,6 +52,7 @@ import { type FlightPlan, type UiActions, game, mountUi, settings, status, touch
 import { type Season, World } from '@world';
 import { RudderAssist } from './assist';
 import { CameraRig } from './camera';
+import { attachCockpitPointer } from './cockpitPointer';
 import { PROFILES, detectDevice } from './device';
 import { WorldEnvironment } from './environment';
 import { Flight } from './Flight';
@@ -94,6 +95,7 @@ export interface AppDebug {
   setControl: (id: string, value: number) => void;
   /** The interface's state (radio, checklist, cockpit values). */
   game: typeof game;
+  visual: () => AircraftVisual;
   /** What the loading screen is waiting for. */
   loading: () => { compiling: number; calm: number; modelReady: boolean };
   /** Test switch: a fixed reach of the shadow map in metres instead of the adaptive one. */
@@ -289,6 +291,19 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
 
   // ---- state ----
   const rig = new CameraRig();
+  /** Field of view in the cockpit, degrees: the wheel zooms in on the panel. */
+  let cockpitFov = 55;
+  // Before the rig's own listeners: a press on a switch must not also turn the head.
+  attachCockpitPointer(canvas, {
+    camera,
+    visual: () => visual,
+    active: () =>
+      game.view.value === 'cockpit' && game.screen.value === 'flight' && plan !== null && !!deck,
+    spec: (id) => flight?.aircraft.cockpit.specs.find((s) => s.id === id),
+    get: (id) => flight?.aircraft.cockpit.get(id) ?? 0,
+    set: (id, value, held) => setControl(id, value, held),
+    zoom: (factor) => (cockpitFov = Math.min(Math.max(cockpitFov * factor, 22), 70)),
+  });
   rig.attach(canvas);
   rig.autoOrbit = !shot;
   const local = new Vector3();
@@ -710,6 +725,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     loading: () => ({ compiling, calm, modelReady }),
     startFlight: (p) => actions.startFlight(p),
     setControl: (id, value) => setControl(id, value),
+    visual: () => visual,
     game,
   };
   window.__app = debug;
@@ -828,6 +844,15 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
         deck.update(dt, deckPosition);
         const mark = deck.highlighted;
         if (mark !== highlighted) visual.highlightControl((highlighted = mark));
+      }
+      if (!tour) {
+        // Zoomed in on the panel in the cockpit, the usual angle outside.
+        const base = canvas.clientWidth < canvas.clientHeight ? 70 : 55;
+        const fov = game.view.value === 'cockpit' ? cockpitFov * (base / 55) : base;
+        if (Math.abs(camera.fov - fov) > 0.01) {
+          camera.fov = fov;
+          camera.updateProjectionMatrix();
+        }
       }
       visual.setExposure(sky.state.exposure);
       visual.update(dt, aircraft.telemetry, aircraft.controls, tour ? undefined : aircraft.cockpit);
