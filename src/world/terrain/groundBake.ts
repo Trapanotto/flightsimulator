@@ -19,9 +19,15 @@ import {
 } from '@geo';
 import { HORIZON_CONTEXT_ZOOM } from './groundSettings';
 import { type HeightField, horizonMap, mosaic, rasterizeMesh } from './horizon';
-import { type LightRoad, bakeLights, encodeLights } from './lights';
+import {
+  DISTRICT_MARGIN,
+  DISTRICT_SIGMA,
+  type LightRoad,
+  bakeLights,
+  encodeLights,
+} from './lights';
 import type { GroundJob, GroundOutput } from './protocol';
-import { byteMips, fieldAt, fillPolygon, grid } from './raster';
+import { blur, byteMips, fieldAt, fillPolygon, grid } from './raster';
 import { type RoadLine, bakeRoads } from './roads';
 
 const M_PER_DEG_LAT = 111_132;
@@ -186,27 +192,31 @@ function toPixels(l: GeoLine, b: GeoBounds, size: number, offset = 0, scale = 1)
 }
 
 /**
- * Settled land 0..1 over the tile and a margin: residential areas of the generalised base map
- * (zoom 11 and coarser carry whole towns and villages as single polygons).
+ * Settled land 0..1 over the tile and a margin, on n x n cells: residential areas of the
+ * generalised base map (zoom 11 and coarser carry whole towns and villages as single polygons).
  */
-function settlementOf(
+export function settlementOf(
   tiles: LoadedVector[],
   b: GeoBounds,
   wide: GeoBounds,
   size: number,
   marginPx: number,
+  n = 256,
 ) {
-  const n = 256;
   const cell = (size + 2 * marginPx) / n;
   const g = grid(n, n);
   let any = false;
   for (const t of tiles)
     for (const poly of residentialOf(t)) {
-      if (!poly[0] || !overlaps(poly[0], wide)) continue;
+      // A feature may be a multipolygon whose parts lie far apart (the first ring alone said
+      // nothing about the others), so rings are tested one by one. A hole lies inside its
+      // outer ring, so even-odd filling stays right with the rings that are kept.
+      const rings = poly.filter((ring) => overlaps(ring, wide));
+      if (rings.length === 0) continue;
       any = true;
       fillPolygon(
         g,
-        poly.map((ring) => toPixels(ring, b, size, marginPx / cell, 1 / cell)),
+        rings.map((ring) => toPixels(ring, b, size, marginPx / cell, 1 / cell)),
         1,
       );
     }
@@ -247,6 +257,18 @@ function farmLights(tiles: LoadedVector[], b: GeoBounds, wide: GeoBounds, size: 
       out.push({ x: (h.lon - b.west) * sx, y: (b.north - h.lat) * sy, weight: 0.3 + h.r * 0.4 });
     }
   return out;
+}
+
+const around = (b: GeoBounds, metres: number, lat0: number): GeoBounds => {
+  const dLat = metres / M_PER_DEG_LAT;
+  const dLon = dLat / Math.cos((lat0 * Math.PI) / 180);
+  return { west: b.west - dLon, east: b.east + dLon, south: b.south - dLat, north: b.north + dLat };
+};
+
+/** True if the land-cover mask (RGBA, R = water) holds any water. */
+function anyWater(mask: Uint8Array): boolean {
+  for (let i = 0; i < mask.length; i += 4) if (mask[i]! >= 128) return true;
+  return false;
 }
 
 /** Loads the vector tiles of `zoom` covering `b`. */
@@ -311,23 +333,21 @@ export async function bakeGround(
   const widthM = (b.east - b.west) * M_PER_DEG_LAT * Math.cos((lat0 * Math.PI) / 180);
   const mpp = widthM / size;
   const marginPx = LIGHT_MARGIN / mpp;
-  const marginDeg = LIGHT_MARGIN / M_PER_DEG_LAT / Math.cos((lat0 * Math.PI) / 180);
-  const wide = {
-    west: b.west - marginDeg,
-    east: b.east + marginDeg,
-    south: b.south - marginDeg,
-    north: b.north + marginDeg,
-  };
+  const wide = around(b, LIGHT_MARGIN, lat0);
   // Coarse tiles (seen from tens of kilometres) take the main roads and the built-up areas
   // of zoom 9 and stand in for the lamps of the minor roads with an even glow: the vector
   // tiles that carry every street are large, and parsing them was most of the baking time.
   const coarse = inp.key.z <= COARSE_LIGHTS_MAX_ZOOM;
   const lightZoom = coarse ? 9 : Math.min(inp.key.z, VECTOR_TILE_MAX_ZOOM);
-  const tilesAt = (z: number) =>
-    z === inp.vectorZoom ? Promise.resolve(inp.tiles) : loadTiles(deps, wide, z);
+  const settleZoom = coarse ? 9 : SETTLEMENT_ZOOM;
+  // How built-up the wider surroundings are: coarse tiles weight their towns by it, and water
+  // mirrors the lit shores within a kilometre or so. Most land tiles need neither.
+  const district = coarse || anyWater(inp.mask) ? around(b, DISTRICT_MARGIN, lat0) : undefined;
+  const tilesAt = (z: number, over = wide) =>
+    z === inp.vectorZoom && over === wide ? Promise.resolve(inp.tiles) : loadTiles(deps, over, z);
   const [lightTiles, settleTiles, context] = await Promise.all([
     tilesAt(lightZoom),
-    tilesAt(coarse ? 9 : SETTLEMENT_ZOOM),
+    tilesAt(settleZoom, district),
     job.context ? contextField(deps, inp.key) : Promise.resolve(undefined),
   ]);
 
@@ -336,6 +356,11 @@ export async function bakeGround(
     const C = job.channels;
     const level0 = new Uint8Array(size * size * C);
     const settlement = settlementOf(settleTiles, b, wide, size, marginPx);
+    let districtField: ReturnType<typeof settlementOf>;
+    if (district) {
+      districtField = settlementOf(settleTiles, b, district, size, DISTRICT_MARGIN / mpp, 64);
+      if (districtField) blur(districtField.g, DISTRICT_SIGMA / (districtField.cell * mpp));
+    }
     const roads = lines(lightTiles, b, wide, size);
     const points = lightZoom >= FARM_MIN_ZOOM ? farmLights(lightTiles, b, wide, size) : [];
     const outside = settlement ? points.filter((p) => fieldAt(settlement, p.x, p.y) < 0.5) : points;
@@ -352,6 +377,7 @@ export async function bakeGround(
         return mask[i]! / 255;
       },
       missingMinor: coarse ? 1 : 0,
+      district: districtField,
     });
     const lightScale = encodeLights(lights, level0, C, 0);
     const t1 = performance.now();

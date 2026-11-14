@@ -36,9 +36,15 @@ export interface LightInput {
   dark?: (x: number, y: number) => number;
   /**
    * 0..1: share of the minor roads missing from the vector data at this zoom (coarse tiles
-   * carry only the main roads); their lamps are added back as an even glow of the settlement.
+   * carry only the main roads); their lamps are added back as a glow of the settlement.
    */
   missingMinor?: number;
+  /**
+   * Settled land blurred over a few hundred metres (DISTRICT_SIGMA), from a wide margin
+   * around the tile: how built-up the neighbourhood is. Brightens town centres over the edges
+   * of coarse tiles, and lights the water off a lit shore.
+   */
+  district?: Field;
 }
 
 export interface LightRaster {
@@ -46,6 +52,12 @@ export interface LightRaster {
   lamps: Float32Array;
   /** Luminance of lit ground and the glow of built-up areas, cd/m². */
   glow: Float32Array;
+  /**
+   * On water only: luminance of the shore's lights mirrored by the water at a grazing view,
+   * cd/m² (the shader breaks it into glints with the waves). Stored in the glow channel, which
+   * is empty on water.
+   */
+  reflection?: Float32Array;
   /** Lamps placed (inside the tile and its margin). */
   count: number;
 }
@@ -69,7 +81,65 @@ export const LAMP = {
   areaGlow: 0.0015,
   /** Average luminance the lamps of the minor roads add to a settlement, cd/m². */
   minorRoadsGlow: 0.18,
+  /**
+   * Of that, the share drawn as scattered points in the lamp channel rather than as glow:
+   * from tens of kilometres a town is a field of single lights, not an even orange patch.
+   */
+  minorSparkle: 0.6,
+  /**
+   * Width (m) over which the edge of a settlement fades: the generalised polygons cut through
+   * gardens and fields, real towns thin out over a street or two.
+   */
+  edgeSigma: 70,
+  /**
+   * Reflection on water: of the lamps' wide glow (urban) near the shore, and of a lit
+   * district (cd/m² for a district value of 1) further out.
+   */
+  reflectNear: 20,
+  reflectDistrict: 0.25,
 };
+
+/** Blur (m) of the district field (LightInput.district), and the margin it needs. */
+export const DISTRICT_SIGMA = 320;
+export const DISTRICT_MARGIN = 1100;
+
+/** A stable pseudo-random number 0..1 for an integer position. */
+function hash2(x: number, y: number): number {
+  let h = Math.imul(x ^ 0x27d4eb2d, 0x85ebca6b) ^ Math.imul(y + 0x165667b1, 0xc2b2ae35);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x2c1b3c6d);
+  h ^= h >>> 12;
+  return (h >>> 0) / 4294967296;
+}
+
+/**
+ * A copy of a field blurred by sigma metres. Below a cell the bilinear lookup is soft enough
+ * already (and the smallest box blur would smear over three cells).
+ */
+function blurred(f: Field, mpp: number, sigma: number): Field {
+  const cells = sigma / (f.cell * mpp);
+  if (cells < 1) return f;
+  // A wide blur needs no fine grid: averaging blocks of k x k cells first keeps it cheap.
+  const k = Math.max(1, Math.min(4, Math.floor(cells / 3)));
+  const w = Math.ceil(f.g.w / k);
+  const h = Math.ceil(f.g.h / k);
+  const g = grid(w, h);
+  const src = f.g.data;
+  const sw = f.g.w;
+  for (let y = 0; y < h; y++) {
+    const y0 = y * k;
+    const y1 = Math.min(y0 + k, f.g.h);
+    for (let x = 0; x < w; x++) {
+      const x0 = x * k;
+      const x1 = Math.min(x0 + k, sw);
+      let s = 0;
+      for (let yy = y0; yy < y1; yy++) for (let xx = x0; xx < x1; xx++) s += src[yy * sw + xx]!;
+      g.data[y * w + x] = s / ((y1 - y0) * (x1 - x0));
+    }
+  }
+  blur(g, cells / k);
+  return { g, margin: f.margin, cell: f.cell * k };
+}
 
 /** Spacing (m) and strength of the lamps of a road, or null where roads are dark. */
 export function lampSpec(
@@ -165,7 +235,12 @@ class GlowLayer {
 
 export function bakeLights(inp: LightInput): LightRaster {
   const { size, metresPerPixel: mpp } = inp;
-  const settlement = (x: number, y: number) => (inp.settlement ? fieldAt(inp.settlement, x, y) : 0);
+  const soft = inp.settlement && blurred(inp.settlement, mpp, LAMP.edgeSigma);
+  const settlement = (x: number, y: number) => (soft ? fieldAt(soft, x, y) : 0);
+  // Street lamps thin out across the faded edge instead of stopping at the polygon's line;
+  // the threshold is a hash of the lamp's place on a 10 m grid, so it does not flicker.
+  const lampsHere = (x: number, y: number) =>
+    settlement(x, y) > 0.2 + 0.55 * hash2(Math.round((x * mpp) / 10), Math.round((y * mpp) / 10));
   const texelArea = mpp * mpp;
   const cores = grid(size, size);
   const pool = new GlowLayer(size, mpp, LAMP.poolSigma);
@@ -202,7 +277,7 @@ export function bakeLights(inp: LightInput): LightRaster {
     if (x1 < -reach || y1 < -reach || x0 > size + reach || y0 > size + reach) continue;
     const outside = lampSpec(road.cls, road.ramp, road.tunnel, false);
     alongLine(p, settled.spacing / mpp, (x, y) => {
-      const spec = settlement(x, y) >= 0.5 ? settled : outside;
+      const spec = lampsHere(x, y) ? settled : outside;
       if (spec) lamp(x, y, spec.strength);
     });
   }
@@ -215,18 +290,68 @@ export function bakeLights(inp: LightInput): LightRaster {
   }
   const glow = new Float32Array(size * size);
   // Nothing lit near: the common case in the countryside and the mountains.
-  if (count === 0 && !inp.settlement) return { lamps: cores.data, glow, count };
+  if (count === 0 && !inp.settlement && !inp.district) return { lamps: cores.data, glow, count };
   pool.finish();
   urban.finish();
 
-  const even = LAMP.areaGlow + (inp.missingMinor ?? 0) * LAMP.minorRoadsGlow;
   addField(pool.field, glow, size);
   addField(urban.field, glow, size);
-  if (inp.settlement) addField(inp.settlement, glow, size, even);
+  if (soft) {
+    addField(soft, glow, size, LAMP.areaGlow);
+    const minor = (inp.missingMinor ?? 0) * LAMP.minorRoadsGlow;
+    if (minor > 0) addMinorRoads(inp, soft, minor, glow, cores.data);
+  }
+  let reflection: Float32Array | undefined;
+  let mirrored: Float32Array | undefined;
   if (inp.dark)
     for (let y = 0; y < size; y++)
-      for (let x = 0; x < size; x++) glow[y * size + x]! *= 1 - inp.dark(x + 0.5, y + 0.5);
-  return { lamps: cores.data, glow, count };
+      for (let x = 0; x < size; x++) {
+        const d = inp.dark(x + 0.5, y + 0.5);
+        if (d <= 0) continue;
+        const i = y * size + x;
+        glow[i]! *= 1 - d;
+        // Built at the first water texel: most tiles have none.
+        if (!mirrored) {
+          mirrored = new Float32Array(size * size);
+          reflection = new Float32Array(size * size);
+          addField(urban.field, mirrored, size, LAMP.reflectNear);
+          if (inp.district) addField(inp.district, mirrored, size, LAMP.reflectDistrict);
+        }
+        reflection![i] = d * mirrored[i]!;
+      }
+  return { lamps: cores.data, glow, reflection, count };
+}
+
+/**
+ * The lamps of the minor roads a coarse tile does not know: part glow, part single points
+ * scattered texel by texel (an energy-keeping random weight of mean 1), brighter in the centre
+ * of a large town than in a village or at its edge.
+ */
+function addMinorRoads(
+  inp: LightInput,
+  soft: Field,
+  minor: number,
+  glow: Float32Array,
+  lamps: Float32Array,
+) {
+  const { size } = inp;
+  const s = new Float32Array(size * size);
+  addField(soft, s, size);
+  const d = new Float32Array(size * size);
+  if (inp.district) addField(inp.district, d, size);
+  else d.fill(0.7);
+  const even = minor * (1 - LAMP.minorSparkle);
+  const points = minor * LAMP.minorSparkle;
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const i = y * size + x;
+      if (s[i]! <= 0) continue;
+      // A settled texel in a district of about 0.7 keeps the average.
+      const dense = s[i]! * (0.45 + 0.8 * Math.min(1, d[i]!));
+      const h = hash2(x * 7 + size, y * 13 + (size >> 1));
+      glow[i] = glow[i]! + even * dense;
+      lamps[i] = lamps[i]! + points * dense * 3 * h * h;
+    }
 }
 
 /**
@@ -242,15 +367,21 @@ export function encodeLights(
 ): [number, number] {
   let maxL = 0;
   let maxG = 0;
+  // The reflection lies on water, where the glow is empty: they share the channel.
+  let glow = r.glow;
+  if (r.reflection) {
+    glow = new Float32Array(glow);
+    for (let i = 0; i < glow.length; i++) glow[i] = glow[i]! + r.reflection[i]!;
+  }
   for (let i = 0; i < r.lamps.length; i++) {
     maxL = Math.max(maxL, r.lamps[i]!);
-    maxG = Math.max(maxG, r.glow[i]!);
+    maxG = Math.max(maxG, glow[i]!);
   }
   const sL = Math.max(maxL, 1e-6);
   const sG = Math.max(maxG, 1e-6);
   for (let i = 0; i < r.lamps.length; i++) {
     out[i * stride + offset] = Math.round(Math.sqrt(Math.max(r.lamps[i]!, 0) / sL) * 255);
-    out[i * stride + offset + 1] = Math.round(Math.sqrt(Math.max(r.glow[i]!, 0) / sG) * 255);
+    out[i * stride + offset + 1] = Math.round(Math.sqrt(Math.max(glow[i]!, 0) / sG) * 255);
   }
   return [maxL > 0 ? sL : 0, maxG > 0 ? sG : 0];
 }

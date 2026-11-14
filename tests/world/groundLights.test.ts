@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import type { VectorTile } from '@mapbox/vector-tile';
+import { vectorTilePointToLonLat } from '../../src/geo';
+import { settlementOf } from '../../src/world/terrain/groundBake';
 import {
   LAMP,
   alongLine,
@@ -23,6 +26,29 @@ function leftHalf(size: number) {
   const g = grid(6, 1);
   g.data.set([1, 1, 1, 0, 0, 0]);
   return { g, margin: size, cell: size / 2 };
+}
+/**
+ * A settlement field over a tile of `size` texels and a margin (texels), 1 west of tile column
+ * `edge`, with cells of `cell` texels; optionally pre-blurred by `sigma` texels (a district).
+ */
+function halfField(size: number, margin: number, cell: number, edge: number, sigma = 0) {
+  const n = Math.ceil((size + 2 * margin) / cell);
+  const g = grid(n, n);
+  for (let y = 0; y < n; y++)
+    for (let x = 0; x < n; x++) {
+      const px = (x + 0.5) * cell - margin;
+      g.data[y * n + x] = sigma > 0 ? 0.5 * erfc((px - edge) / (sigma * Math.SQRT2)) : +(px < edge);
+    }
+  return { g, margin, cell };
+}
+/** Complementary error function (Abramowitz and Stegun 7.1.26). */
+function erfc(x: number): number {
+  const t = 1 / (1 + 0.3275911 * Math.abs(x));
+  const y =
+    t *
+    (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+  const e = y * Math.exp(-x * x);
+  return x >= 0 ? e : 2 - e;
 }
 const everywhere = () => {
   const g = grid(1, 1);
@@ -118,14 +144,92 @@ describe('night lights', () => {
     expect(colSum(r.glow, size, 17, 32)).toBe(0);
   });
 
-  it('compensates the missing minor roads of coarse tiles with an even glow', () => {
-    const base = { size: 16, metresPerPixel: 100, roads: [], points: [], settlement: everywhere() };
+  it('compensates the missing minor roads of coarse tiles, partly as scattered points', () => {
+    const size = 32;
+    const base = { size, metresPerPixel: 100, roads: [], points: [], settlement: everywhere() };
     const without = bakeLights(base);
     const withMissing = bakeLights({ ...base, missingMinor: 1 });
-    expect(withMissing.glow[8 * 16 + 8]! - without.glow[8 * 16 + 8]!).toBeCloseTo(
-      LAMP.minorRoadsGlow,
-      4,
-    );
+    const n = size * size;
+    const dGlow = (sum(withMissing.glow) - sum(without.glow)) / n;
+    const dLamps = (sum(withMissing.lamps) - sum(without.lamps)) / n;
+    // The energy of the missing lamps is all there, on average...
+    expect((dGlow + dLamps) / LAMP.minorRoadsGlow).toBeGreaterThan(0.9);
+    expect((dGlow + dLamps) / LAMP.minorRoadsGlow).toBeLessThan(1.1);
+    expect(dLamps / (dGlow + dLamps)).toBeCloseTo(LAMP.minorSparkle, 1);
+    // ...but not as an even patch: single texels shine much brighter than others.
+    const pts = Array.from(withMissing.lamps);
+    expect(Math.max(...pts)).toBeGreaterThan(4 * Math.min(...pts) + dLamps);
+  });
+
+  it('fades a town out across the edge of its settlement polygon', () => {
+    // 2 m texels, settled land west of x = 128 (256 m into the tile).
+    const size = 256;
+    const mpp = 2;
+    const settlement = halfField(size, 80, 2, 128);
+    const glowOnly = bakeLights({ size, metresPerPixel: mpp, roads: [], points: [], settlement });
+    const row = (a: Float32Array, x: number) => a[128 * size + x]!;
+    // Even glow of the built-up area: full well inside, half at the line, gone well outside,
+    // over a width of a street or two rather than a single texel.
+    expect(row(glowOnly.glow, 20)).toBeCloseTo(LAMP.areaGlow, 5);
+    expect(row(glowOnly.glow, 128) / LAMP.areaGlow).toBeGreaterThan(0.3);
+    expect(row(glowOnly.glow, 128) / LAMP.areaGlow).toBeLessThan(0.7);
+    expect(row(glowOnly.glow, 220)).toBeLessThan(LAMP.areaGlow * 0.02);
+    expect(row(glowOnly.glow, 100)).toBeGreaterThan(row(glowOnly.glow, 115));
+    expect(row(glowOnly.glow, 115)).toBeGreaterThan(row(glowOnly.glow, 141));
+    expect(row(glowOnly.glow, 141)).toBeGreaterThan(row(glowOnly.glow, 156));
+    // Street lamps along roads crossing the edge thin out instead of stopping at one line.
+    const roads = Array.from({ length: 40 }, (_, k) => ({
+      cls: 'minor',
+      ramp: false,
+      tunnel: false,
+      points: [0, 3 + k * 6.3, 256, 3 + k * 6.3],
+    }));
+    const r = bakeLights({ size, metresPerPixel: mpp, roads, points: [], settlement });
+    const inside = colSum(r.lamps, size, 0, 64);
+    const fringeIn = colSum(r.lamps, size, 96, 128);
+    const fringeOut = colSum(r.lamps, size, 128, 160);
+    // Per metre of road: thinner just outside the line than deep inside.
+    expect(fringeOut).toBeLessThan(inside * 0.5 * 0.8);
+    expect(fringeOut).toBeGreaterThan(0);
+    expect(fringeOut).toBeLessThan(fringeIn);
+    expect(colSum(r.lamps, size, 200, 256)).toBe(0);
+  });
+
+  it('mirrors a lit shore in the water next to it, fading with distance', () => {
+    // A town on the west half, a lake on the east half (1 m texels).
+    const size = 256;
+    const settlement = halfField(size, 160, 2, 128);
+    const roads = Array.from({ length: 8 }, (_, k) => ({
+      cls: 'minor',
+      ramp: false,
+      tunnel: false,
+      points: [0, 16 + k * 32, 124, 16 + k * 32],
+    }));
+    const dark = (x: number) => (x > 128 ? 1 : 0);
+    const district = halfField(size, 1100, 16, 128, 320);
+    const r = bakeLights({
+      size,
+      metresPerPixel: 1,
+      roads,
+      points: [],
+      settlement,
+      dark,
+      district,
+    });
+    const refl = r.reflection!;
+    const at = (x: number) => refl[128 * size + x]!;
+    // Nothing on land, plenty on the water by the shore, less further out.
+    expect(colSum(refl, size, 0, 128)).toBe(0);
+    expect(at(140)).toBeGreaterThan(at(200));
+    expect(at(200)).toBeGreaterThan(at(250));
+    expect(at(250)).toBeGreaterThan(0);
+    // The water stays dark itself: the light is only in the reflection.
+    expect(colSum(r.glow, size, 129, 256)).toBe(0);
+    // The glow channel carries it on the water.
+    const out = new Uint8Array(size * size * 2);
+    const [, sG] = encodeLights(r, out, 2, 0);
+    const decoded = (out[(128 * size + 200) * 2 + 1]! / 255) ** 2 * sG;
+    expect(decoded / at(200)).toBeCloseTo(1, 1);
   });
 
   it('codes lamps and glow with square roots against their maxima', () => {
@@ -202,3 +306,31 @@ function rowSum(a: Float32Array, size: number, y0: number, y1: number) {
   for (let y = y0; y < y1; y++) for (let x = 0; x < size; x++) s += a[y * size + x]!;
   return s;
 }
+
+describe('settled land', () => {
+  it('finds every part of a multipolygon, not only the first ring', () => {
+    // One residential feature in a vector tile: a small part in its north-west corner and a
+    // large one in the middle, where the terrain tile lies.
+    const tile = { z: 11, x: 1072, y: 717 };
+    const square = (x0: number, y0: number, x1: number, y1: number) => [
+      { x: x0, y: y0 },
+      { x: x1, y: y0 },
+      { x: x1, y: y1 },
+      { x: x0, y: y1 },
+    ];
+    const feature = {
+      type: 3,
+      properties: { class: 'residential' },
+      loadGeometry: () => [square(10, 10, 200, 200), square(1500, 1500, 2600, 2600)],
+    };
+    const vt = {
+      layers: { landuse: { length: 1, extent: 4096, feature: () => feature } },
+    } as unknown as VectorTile;
+    const a = vectorTilePointToLonLat(tile, 4096, 1900, 1900, { lon: 0, lat: 0 });
+    const c = vectorTilePointToLonLat(tile, 4096, 2200, 2200, { lon: 0, lat: 0 });
+    const b = { west: a.lon, east: c.lon, north: a.lat, south: c.lat };
+    const f = settlementOf([{ tile, vt }], b, b, 64, 0, 16)!;
+    expect(f).toBeDefined();
+    expect(sum(f.g.data)).toBe(16 * 16);
+  });
+});

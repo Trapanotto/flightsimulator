@@ -118,6 +118,36 @@ const VIEWS: Record<string, View> = {
   },
   // The Eiger north face from the north (above Grindelwald), for low sun.
   northface: { lon: 7.995, lat: 46.635, h: 2300, look: { lon: 8.005, lat: 46.578, h: 2900 } },
+
+  // ---- Quality round: the plateau in winter, towns and shores at night ----
+  // Farmland west of Bern from 300 m above ground, looking east.
+  plateau300: {
+    lon: 7.33,
+    lat: 46.965,
+    h: 300,
+    agl: true,
+    look: { lon: 7.38, lat: 46.95, h: 560 },
+  },
+  // The plateau between Bern and Burgdorf from 2000 m above ground, looking north-east.
+  plateau2000: {
+    lon: 7.42,
+    lat: 46.93,
+    h: 2000,
+    agl: true,
+    look: { lon: 7.6, lat: 47.02, h: 550 },
+  },
+  // Bern from 1 km above the town, 2 km south-west of the old town.
+  bern1k: { lon: 7.425, lat: 46.935, h: 1550, look: { lon: 7.45, lat: 46.948, h: 540 } },
+  // Bern from about 15 km to the south-west.
+  bern15k: { lon: 7.3, lat: 46.86, h: 3200, look: { lon: 7.45, lat: 46.948, h: 540 } },
+  // Thun from 1 km above the lake's north end.
+  thun1k: { lon: 7.62, lat: 46.735, h: 1560, look: { lon: 7.628, lat: 46.758, h: 560 } },
+  // Thun and the Aare valley from about 15 km to the south-east, over the lake.
+  thun15k: { lon: 7.76, lat: 46.66, h: 3000, look: { lon: 7.628, lat: 46.758, h: 560 } },
+  // Low over Lake Thun looking at the lit town of Thun and the shore of Hilterfingen.
+  thunshore: { lon: 7.67, lat: 46.72, h: 760, look: { lon: 7.63, lat: 46.755, h: 560 } },
+  // Low over Lake Lucerne looking at the lit quays of Lucerne.
+  luzern: { lon: 8.345, lat: 47.03, h: 640, look: { lon: 8.31, lat: 47.052, h: 435 } },
 };
 
 /** A date in each season for the sun's path (2026). */

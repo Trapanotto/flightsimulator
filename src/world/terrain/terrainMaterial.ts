@@ -391,6 +391,7 @@ export class TerrainMaterials {
       { spring: u.season.x, autumn: u.season.y, winter: u.season.z },
       {
         crown: clamp(v(mid), -1, 1),
+        plot: clamp(wide.a.sub(0.5).mul(3), -1, 1),
         patch: clamp(v(wide).mul(0.7).add(huge.a.sub(0.5).mul(1.5)), -1, 1),
       },
     );
@@ -579,6 +580,8 @@ export class TerrainMaterials {
 
     // ---- Water ----
     let emissive: V3 = vec3(0);
+    // How brightly open water mirrors the lit shore (baked into the glow channel there).
+    let mirror: F = float(0);
     if (this.look.water) {
       const flow1 = vec2(1.1, 0.6).mul(time);
       const flow2 = vec2(-0.5, 0.9).mul(time);
@@ -598,6 +601,19 @@ export class TerrainMaterials {
       const r = reflect(view.negate(), nWater);
       const sky = mix(u.skyHorizon, u.skyZenith, pow(clamp(r.y, 0, 1), 0.5));
       emissive = sky.mul(fresnel).mul(open).mul(u.skyReflect);
+      // Shore lights stand on the horizon as seen from the water: only wave facets that send
+      // the view ray out nearly level catch them, so the light breaks into glints that crowd
+      // towards the shore and stretch towards the viewer, as on a real lake at night. Where the
+      // waves are still resolved, crests and troughs break the band into dashes.
+      const crests = smoothstep(0.42, 0.68, w1.r.add(w2.r).mul(0.5));
+      const glitter = mix(float(1), crests.mul(2.6).add(0.15), calm.sub(0.3).div(0.7));
+      // A rough surface still sends some of it up to a viewer high above (the 0.1 floor).
+      mirror = fresnel
+        .add(0.1)
+        .mul(smoothstep(0.7, 0.03, r.y).mul(1.5))
+        .add(fresnel.mul(smoothstep(0.1, 0.0, r.y)).mul(4))
+        .mul(glitter)
+        .mul(open);
       // The photo carries the real colour of each lake and river (green Aare, blue lakes); water
       // reflects little diffuse light, so it is darkened and mixed with a deep-water tone.
       albedo = mix(albedo, mix(u.waterColor, photoAlbedo.mul(0.45), 0.5), open);
@@ -622,7 +638,22 @@ export class TerrainMaterials {
     );
     // Lit snow reflects much more of the lamps' light than asphalt and grass.
     const glowBoost = float(1).add(snowAll.mul(2.5));
-    const nits = lamps.add(glowL.mul(glowBoost));
+    // The baked glow is smooth (lamp pools, windows of a quarter); the photo knows where the
+    // streets and roofs are. Gardens, parks and trees stay darker, and blocks vary, so a town
+    // reads as streets and houses rather than a lit polygon from any distance. About
+    // energy-neutral over a typical quarter.
+    const built = float(1).sub(veg).mul(float(1).sub(forest));
+    // From afar the photo and the blocks blur away in the mipmaps: there the light gathers into
+    // clusters of a hundred metres or two (centres, estates, industrial yards) instead.
+    const clusters = mix(
+      float(1),
+      smoothstep(0.42, 0.62, huge.r).mul(2.2),
+      smoothstep(4000, 25000, dist),
+    );
+    const structure = mix(float(0.3), float(1.45), built)
+      .mul(float(0.6).add(smoothstep(0.3, 0.7, wide.a).mul(0.8)))
+      .mul(clusters);
+    const nits = lamps.mul(clusters).add(glowL.mul(land.mul(structure).mul(glowBoost).add(mirror)));
     // The sky exposes for the dark land around; over a town the eye adapts to the lights.
     // A soft knee keeps lit streets from burning out on a moonless night (exposure ~4e6)
     // while they stay plainly visible under a full moon (~6e4).
