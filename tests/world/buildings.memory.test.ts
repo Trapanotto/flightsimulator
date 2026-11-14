@@ -295,9 +295,10 @@ describe('what stays on the CPU', () => {
     g.setIndex(indexAttribute(new Uint16Array([0, 1, 1])));
     const mesh = new Mesh(g);
     releaseAfterUpload(mesh, ['bLook']);
+    const renderer = { info: { render: { calls: 7 } } };
     const after = (scene: Scene) =>
       mesh.onAfterRender(
-        undefined as never,
+        renderer as never,
         scene,
         undefined as never,
         g,
@@ -309,6 +310,13 @@ describe('what stays on the CPU', () => {
     shadow.overrideMaterial = new Mesh().material as never;
     after(shadow);
     expect(g.getAttribute('bLook').array.length).toBe(8);
+    // Building shaders ahead walks the scene without a render call: nothing is uploaded yet.
+    after(new Scene());
+    after(new Scene());
+    expect(g.getAttribute('bLook').array.length).toBe(8);
+    expect(g.index!.array.length).toBe(3);
+    // The next render call has drawn it: now the copies go.
+    renderer.info.render.calls++;
     after(new Scene());
     const look = g.getAttribute('bLook') as BufferAttribute;
     expect(look.array.length).toBe(0);

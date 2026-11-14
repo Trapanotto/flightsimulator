@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.0-alpha.5 – Qualitätsrunde (2026-11-14)
+
+- **Laubbäume aus der Nähe:** Kronen aus einzelnen Laubbüscheln mit sichtbaren Ästen und
+  Blattstruktur statt glatter Klumpen; im Winter kahle Äste mit feinen Zweigen. Nachts
+  verlieren die Kronen ihre Farbe.
+- **Winter im Mittelland:** Wiesen matt oliv bis strohgelb, braune Äcker, Schneereste an
+  Nordhängen und in Mulden unterhalb der Schneegrenze.
+- **Nacht:** Siedlungslichter laufen am Rand weich aus und folgen Strassen und Dächern;
+  Uferlichter spiegeln sich in Seen. Behoben: Viele Orte hatten nachts kaum Lichter.
+- **Flugplätze:** Windsäcke zeigen Windrichtung und -stärke. Rote und grüne Lichter behalten
+  ihre Farbe (Gleitwinkelanzeige, Schwelle), Pistennummern sind im Anflug lesbar.
+- **Gebäude:** brauchen noch rund 40 % des Grafikspeichers (über Zürich 62 statt 168 MB am
+  Tag, am Handy 20 statt 56 MB).
+- **Flugzeuglichter:** bei Tageslicht nur noch schwach, nachts voll.
+
 ## 1.0.0-alpha.4 – Rundflug im Menü, kürzere Ladezeit (2026-11-14)
 
 - **Rundflug im Menü:** Hinter dem Hauptmenü fliegt die Cessna wieder eine Schleife durchs

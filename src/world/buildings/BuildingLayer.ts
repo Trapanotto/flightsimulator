@@ -838,10 +838,19 @@ export function decodeLift(
  * pass draws with a material of its own, which may read fewer). An empty array of the same
  * type keeps what the renderer still looks at later: the element type, and `count`, which
  * BufferAttribute sets once in its constructor.
+ *
+ * The copy goes one render call after the mesh was first seen, not at once: when shaders are
+ * built ahead (Renderer.compileAsync) the renderer walks the scene and comes by here before
+ * it has uploaded anything, and that walk is not a render call.
  */
 export function releaseAfterUpload(mesh: Object3D & { geometry: BufferGeometry }, names: string[]) {
-  mesh.onAfterRender = (_renderer, scene) => {
+  let seenAt = -1;
+  mesh.onAfterRender = (renderer, scene) => {
     if ((scene as Scene).overrideMaterial) return;
+    const calls = (renderer as unknown as { info: { render: { calls: number } } }).info.render
+      .calls;
+    if (seenAt < 0) seenAt = calls;
+    if (calls === seenAt) return;
     const g = mesh.geometry;
     const empty = (a: BufferAttribute) => {
       a.array =

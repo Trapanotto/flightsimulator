@@ -367,8 +367,11 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
 
   const vLo = varying(lo, 'vTreeLo') as N;
   const vHi = varying(hi, 'vTreeHi') as N;
-  const vDist = varying(d, 'vTreeDist') as N;
-  const vElev = varying(ground.sub(undulation), 'vTreeElev') as N;
+  // One varying for four numbers: a shader may pass 16 values on to its pixels, and in the
+  // game (shadows, the sky's light) the renderer takes several of them for itself.
+  const vMisc = varying(vec4(d, ground.sub(undulation), clusterPick, outer), 'vTreeMisc') as N;
+  const vDist = vMisc.x as N;
+  const vElev = vMisc.y as N;
   const vTreePos = varying(vec3(position.x, yTree, position.z), 'vTreeLocal') as N;
   const vWorld = varying(
     (modelWorldMatrix as N).mul(vec4(base.add(rotated), 1)).xyz,
@@ -386,8 +389,7 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
   let vTwig: N = vec4(0);
   if (leafy) {
     vLeaf = varying(metric.add(seed.mul(53)), 'vTreeLeaf') as N;
-    const vPick = varying(clusterPick, 'vTreePick') as N;
-    clusterPick = vPick;
+    clusterPick = vMisc.z as N;
     // The finest octave flickers once a leaf is smaller than a pixel: it fades out with distance.
     fine = float(1).sub(smoothstep(45, 160, vDist));
     const f = float(1).div(leaf.w);
@@ -406,7 +408,7 @@ export function buildTreeNodes(u: TreeUniforms, form: Form, lod: Lod, detail: 0 
     let thin: N;
     if (conifer) {
       // Needle sprays: a fringe of tips at the outer edge of each whorl.
-      const vOuter = varying(outer, 'vTreeOuter') as N;
+      const vOuter = vMisc.w as N;
       gapEdge = smoothstep(0.62, 1.0, vOuter).mul(0.9).max(silhouette.mul(0.5));
       thin = smoothstep(0.4, 1.0, vOuter).max(float(1).sub(facing));
     } else {
