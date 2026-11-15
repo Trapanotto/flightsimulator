@@ -24,6 +24,7 @@ import './styles/dialogs.css';
 import './styles/hangar.css';
 import './styles/school.css';
 import './styles/replay.css';
+import './styles/startpick.css';
 
 export { status } from './state';
 export {

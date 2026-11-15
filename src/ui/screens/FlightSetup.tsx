@@ -8,6 +8,7 @@ import {
   IconApproach,
   IconBack,
   IconChevronDown,
+  IconClose,
   IconCircuit,
   IconClimb,
   IconCloud,
@@ -18,6 +19,7 @@ import {
   IconOvercast,
   IconPlane,
   IconRunway,
+  IconSearch,
   IconStratus,
   IconSun,
 } from '../components/icons';
@@ -35,6 +37,7 @@ import {
   altitudeUnit,
   convertAltitude,
   formatClock,
+  formatSpec,
   formatSpeed,
   groupThousands,
   runwayHeading,
@@ -54,6 +57,7 @@ import {
   SEASON_CHOICES,
   type StartKind,
   WEATHER_CHOICES,
+  airAltitudeRange,
   availableScenarios,
   draftToPlan,
   planProblem,
@@ -62,9 +66,19 @@ import {
   scenarioAircraft,
   scenarioBlocker,
   scenarioDraft,
+  nearestAirport,
   usableEnds,
 } from '../plan';
 import { dayGradient, sunTimes, swissNowHours } from '../sun';
+import {
+  type SectionKey,
+  airportFacts,
+  isMainAirport,
+  labelPriority,
+  orderAirports,
+  readRecent,
+  rememberAirport,
+} from '../airportPick';
 import { SwissMap } from './SwissMap';
 
 const WEATHER_ICON: Record<WeatherChoice, () => preact.JSX.Element> = {
@@ -84,14 +98,74 @@ export function heightLabel(m: number): string {
   return `${groupThousands(r, lang.value)} ${altitudeUnit(units)}`;
 }
 
+const SECTION_TITLE: Record<SectionKey, MessageKey> = {
+  recent: 'setup.group.recent',
+  large: 'setup.group.large',
+  other: 'setup.group.other',
+  hits: 'setup.group.hits',
+  off: 'setup.group.off',
+};
+
+/** Elevation, longest runway with its surface, military: what tells fields apart. */
+/** An altitude above sea level as a pilot sets it: feet in hundreds, metres in fifties. */
+function altitudeLabel(m: number): string {
+  return heightLabel(m);
+}
+
+/** The altitude slider's step: 500 ft, or 100 m. */
+function altitudeStep(): number {
+  return settings.units.value === 'aviation' ? 500 * 0.3048 : 100;
+}
+
+function zoomLabels() {
+  return { in: t('map.zoomIn'), out: t('map.zoomOut'), reset: t('map.reset') };
+}
+
+function AirportFactsLine({ a }: { a: AirportOption }) {
+  const f = airportFacts(a);
+  const len = f.longest ? formatSpec('length', f.longest, settings.units.value, lang.value) : null;
+  const sep = (
+    <span class="apt-sep" aria-hidden="true">
+      ·
+    </span>
+  );
+  return (
+    <>
+      {heightLabel(a.elevation)}
+      {len && (
+        <>
+          {sep}
+          {len.value} {len.unit} {t(f.paved ? 'setup.paved' : 'setup.grass')}
+        </>
+      )}
+      {f.military && (
+        <>
+          {sep}
+          {t('setup.military')}
+        </>
+      )}
+    </>
+  );
+}
+
+/**
+ * The airports as a searchable list in sections: recently flown, airports, other airfields,
+ * and last those the chosen type may not use, with the reason. One radio group: arrows move
+ * through all of it, Enter in the search picks the first hit, the arrow down goes from the
+ * search into the list.
+ */
 function AirportList(props: {
   airports: AirportOption[];
   selected: string;
   onSelect: (icao: string) => void;
   /** The chosen type: airports it may not use are greyed out with the reason. */
   info?: AircraftInfo;
+  recent: readonly string[];
+  hovered: string | null;
+  onHover: (icao: string | null) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const query = useSignal('');
   if (!props.airports.length)
     return (
       <div class="empty">
@@ -100,55 +174,118 @@ function AirportList(props: {
       </div>
     );
   const category = categoryOf(props.info);
-  const anySelected = props.airports.some((a) => a.icao === props.selected);
+  const sections = orderAirports(props.airports, category, props.recent, query.value);
+  const shown = sections.flatMap((s) => s.airports);
+  const anySelected = shown.some((a) => a.icao === props.selected);
+  const firstUsable = sections.find((s) => s.key !== 'off')?.airports[0];
+  const radios = () =>
+    ref.current?.querySelectorAll<HTMLElement>('[role="radio"]:not([aria-disabled="true"])');
+  const typeName = props.info ? shortName(props.info) : '';
   return (
-    <div
-      ref={ref}
-      class="apt-list"
-      role="radiogroup"
-      aria-label={t('setup.airports')}
-      onKeyDown={(e) =>
-        arrowNav(e, ref.current, '[role="radio"]:not([aria-disabled="true"])', 'both')?.click()
-      }
-    >
-      {props.airports.map((a, i) => {
-        const on = a.icao === props.selected;
-        const e = airportEligibility(a, category);
-        const off = !e.ok;
-        return (
+    <div class="apt-pick">
+      <div class="apt-search">
+        <IconSearch size={18} />
+        <input
+          type="search"
+          class="apt-search-input"
+          aria-label={t('setup.search')}
+          aria-controls="setup-apt-list"
+          placeholder={t('setup.search.placeholder')}
+          autocomplete="off"
+          spellcheck={false}
+          value={query.value}
+          onInput={(e) => (query.value = (e.currentTarget as HTMLInputElement).value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && firstUsable) {
+              e.preventDefault();
+              props.onSelect(firstUsable.icao);
+            } else if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              const list = radios();
+              const on = [...(list ?? [])].find((el) => el.getAttribute('aria-checked') === 'true');
+              (on ?? list?.[0])?.focus();
+            } else if (e.key === 'Escape' && query.value) {
+              // Clears the search instead of closing the setup.
+              e.preventDefault();
+              e.stopPropagation();
+              query.value = '';
+            }
+          }}
+        />
+        {query.value && (
           <button
             type="button"
-            role="radio"
-            aria-checked={on}
-            aria-disabled={off ? 'true' : undefined}
-            title={off ? eligibilityText(e, props.info, 'long') : undefined}
-            tabIndex={on || (!anySelected && i === 0) ? 0 : -1}
-            data-autofocus={on ? '' : undefined}
-            class={`apt${on ? ' is-on' : ''}${off ? ' is-off' : ''}`}
-            key={a.icao}
-            onClick={() => !off && props.onSelect(a.icao)}
+            class="apt-search-clear"
+            aria-label={t('setup.search.clear')}
+            title={t('setup.search.clear')}
+            onClick={() => (query.value = '')}
           >
-            <span class="apt-icao">{a.icao}</span>
-            <span class="apt-name">{a.name}</span>
-            <span class="apt-meta num">
-              {off ? (
-                <span class="apt-why">
-                  <span class="visually-hidden">{eligibilityText(e, props.info, 'long')}</span>
-                  <span aria-hidden="true">{eligibilityText(e, props.info, 'short')}</span>
-                </span>
-              ) : (
-                <>
-                  {heightLabel(a.elevation)}
-                  <span class="apt-sep" aria-hidden="true">
-                    ·
-                  </span>
-                  {runwaySummary(a.runways)}
-                </>
-              )}
-            </span>
+            <IconClose size={16} />
           </button>
-        );
-      })}
+        )}
+      </div>
+      <div
+        ref={ref}
+        id="setup-apt-list"
+        class="apt-list"
+        role="radiogroup"
+        aria-label={t('setup.airports')}
+        onKeyDown={(e) =>
+          arrowNav(e, ref.current, '[role="radio"]:not([aria-disabled="true"])', 'both')?.click()
+        }
+      >
+        {!shown.length && (
+          <p class="apt-none" role="status">
+            {t('setup.search.none', { q: query.value.trim() })}
+          </p>
+        )}
+        {sections.map((s) => (
+          <section class={`apt-section is-${s.key}`} key={s.key} aria-labelledby={`apt-h-${s.key}`}>
+            <h3 class="caps apt-section-title" id={`apt-h-${s.key}`}>
+              {t(SECTION_TITLE[s.key], { type: typeName })}
+            </h3>
+            <div class="apt-grid">
+              {s.airports.map((a) => {
+                const on = a.icao === props.selected;
+                const e = airportEligibility(a, category);
+                const off = !e.ok;
+                const first = !anySelected && a === shown[0];
+                return (
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    aria-disabled={off ? 'true' : undefined}
+                    title={off ? eligibilityText(e, props.info, 'long') : undefined}
+                    tabIndex={on || first ? 0 : -1}
+                    data-autofocus={on ? '' : undefined}
+                    class={`apt${on ? ' is-on' : ''}${off ? ' is-off' : ''}${props.hovered === a.icao ? ' is-hover' : ''}`}
+                    key={a.icao}
+                    onClick={() => !off && props.onSelect(a.icao)}
+                    onMouseEnter={() => props.onHover(a.icao)}
+                    onMouseLeave={() => props.onHover(null)}
+                  >
+                    <span class="apt-name">{a.name}</span>
+                    <span class="apt-icao">{a.icao}</span>
+                    <span class="apt-meta num">
+                      {off ? (
+                        <span class="apt-why">
+                          <span class="visually-hidden">
+                            {eligibilityText(e, props.info, 'long')}
+                          </span>
+                          <span aria-hidden="true">{eligibilityText(e, props.info, 'short')}</span>
+                        </span>
+                      ) : (
+                        <AirportFactsLine a={a} />
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ))}
+      </div>
     </div>
   );
 }
@@ -170,12 +307,6 @@ export function pairRunways(ends: string[]): string {
     } else out.push(a);
   }
   return out.join('  ');
-}
-
-/** Two strips or fewer by name (14/32), more as a count, so the list row never overflows. */
-function runwaySummary(ends: string[]): string {
-  const strips = pairRunways(ends).split('  ').filter(Boolean);
-  return strips.length > 2 ? `${strips.length} ${t('setup.runways')}` : strips.join(' · ');
 }
 
 /** Name, engines, gear and the three numbers that matter most before a flight. */
@@ -491,6 +622,10 @@ function Advanced(props: {
                 route={dest ? { from: d.airport, to: d.destination } : undefined}
                 onSelect={(icao) => set({ destination: icao, destinationRunway: '' })}
                 isOff={(a) => !eligible(a, category)}
+                isMain={isMainAirport}
+                labelPriority={labelPriority}
+                zoomable
+                zoomLabels={zoomLabels()}
                 label={t('setup.destination.map')}
               />
             </div>
@@ -606,6 +741,9 @@ export function FlightSetup() {
     sanitizeDraft(readJson(storage, DRAFT_KEY), airports, aircraft),
   );
   const mode = useSignal<'free' | 'scenarios'>('free');
+  const hovered = useSignal<string | null>(null);
+  // Read once per visit: the list must not reshuffle while the pilot is choosing.
+  const recent = useMemo(() => readRecent(storage), []);
   const back = () => (nav.page.value = 'main');
   useDialog(ref, back);
 
@@ -643,6 +781,7 @@ export function FlightSetup() {
     if (!p) return;
     draft.value = rolled;
     writeJson(storage, DRAFT_KEY, rolled);
+    if (p.airport) rememberAirport(storage, p.airport);
     game.plan.value = p;
     actions.startFlight(p);
   };
@@ -652,13 +791,45 @@ export function FlightSetup() {
     if (sd) fly(sd);
   };
 
+  // An air start put on the map; the map taps place it instead of picking an airport.
+  const placing = d.start === 'air' && d.airPlace === 'map';
+  const place =
+    placing && d.airLon !== null && d.airLat !== null
+      ? { lon: d.airLon, lat: d.airLat, heading: d.airHeading }
+      : null;
+  const near = place ? nearestAirport(airports, place.lon, place.lat) : undefined;
+  const altRange = airAltitudeRange(category);
+  const selectAirport = (icao: string) => {
+    const a = airports.find((x) => x.icao === icao);
+    // With a place on the map, choosing an airport moves the place over it.
+    if (placing && a) set({ airport: icao, runway: '', airLon: a.lon, airLat: a.lat });
+    else set({ airport: icao, runway: '' });
+  };
+  const setAirPlace = (p: 'airport' | 'map') => {
+    // The first time on the map: above the chosen airport, lined up with its runway.
+    if (p === 'map' && d.airLon === null && airport)
+      set({
+        airPlace: p,
+        airLon: airport.lon,
+        airLat: airport.lat,
+        airHeading: runways[0] ? runwayHeading(runways[0]) % 360 : 0,
+        airAltitude: Math.max(
+          d.airAltitude,
+          airport.elevation + (defaults.airHeights[d.airHeight] ?? 900),
+        ),
+      });
+    else set({ airPlace: p });
+  };
+
   const timeText = d.time === 'now' ? t('setup.time.now') : formatClock(d.time);
   const startText =
-    d.start === 'air'
-      ? t('briefing.air', { h: heightLabel(defaults.airHeights[d.airHeight] ?? 0) })
-      : d.start === 'approach'
-        ? `${t('briefing.runway', { rwy: d.runway })} · ${t('briefing.approach', { d: t('setup.nm', { n: d.approachNm }) })}`
-        : t('briefing.runway', { rwy: d.runway });
+    d.start === 'air' && place
+      ? `${t('setup.start.air')} · ${altitudeLabel(d.airAltitude)} · ${String(d.airHeading).padStart(3, '0')}°`
+      : d.start === 'air'
+        ? t('briefing.air', { h: heightLabel(defaults.airHeights[d.airHeight] ?? 0) })
+        : d.start === 'approach'
+          ? `${t('briefing.runway', { rwy: d.runway })} · ${t('briefing.approach', { d: t('setup.nm', { n: d.approachNm }) })}`
+          : t('briefing.runway', { rwy: d.runway });
   const extras = advancedSummary(d);
   const scenarios = mode.value === 'scenarios';
 
@@ -708,27 +879,86 @@ export function FlightSetup() {
               label={d.start === 'approach' ? t('setup.airport') : t('setup.departure')}
               id="setup-departure"
             >
-              <div class="setup-map-wrap">
+              <div class={`setup-map-wrap setup-map-main${placing ? ' is-placing' : ''}`}>
                 <SwissMap
                   airports={airports}
                   selected={d.airport}
                   route={d.destination ? { from: d.airport, to: d.destination } : undefined}
-                  onSelect={(icao) => set({ airport: icao, runway: '' })}
+                  onSelect={placing ? undefined : selectAirport}
+                  onPlace={placing ? (lon, lat) => set({ airLon: lon, airLat: lat }) : undefined}
+                  place={place}
                   isOff={(a) => !eligible(a, category)}
-                  label={t('setup.map')}
+                  isMain={isMainAirport}
+                  labelPriority={labelPriority}
+                  hovered={hovered.value}
+                  onHover={(icao) => (hovered.value = icao)}
+                  zoomable
+                  zoomLabels={zoomLabels()}
+                  label={t(placing ? 'setup.map.place' : 'setup.map')}
                 />
-                {airport && (
+                {placing ? (
                   <div class="map-callout" aria-hidden="true">
-                    <span class="map-callout-icao">{airport.icao}</span>
-                    <span class="map-callout-name">{airport.name}</span>
+                    <span class="map-callout-icao">{t('setup.start.air')}</span>
+                    <span class="map-callout-name">
+                      {near ? t('setup.air.near', { name: near.name }) : t('setup.air.hint')}
+                    </span>
                   </div>
+                ) : (
+                  airport && (
+                    <div class="map-callout" aria-hidden="true">
+                      <span class="map-callout-icao">{airport.icao}</span>
+                      <span class="map-callout-name">{airport.name}</span>
+                    </div>
+                  )
                 )}
               </div>
+              {placing && (
+                <div class="air-controls">
+                  <label class="air-control">
+                    <span class="sub-label">{t('setup.altitude')}</span>
+                    <output class="air-value num">{altitudeLabel(d.airAltitude)}</output>
+                    <Slider
+                      label={t('setup.altitude')}
+                      min={altRange[0]}
+                      max={altRange[1]}
+                      step={altitudeStep()}
+                      value={d.airAltitude}
+                      valueText={altitudeLabel(d.airAltitude)}
+                      onInput={(v) => set({ airAltitude: v })}
+                    />
+                  </label>
+                  <label class="air-control">
+                    <span class="sub-label">{t('setup.heading')}</span>
+                    <output class="air-value num">
+                      <span
+                        class="air-arrow"
+                        aria-hidden="true"
+                        style={{ transform: `rotate(${d.airHeading}deg)` }}
+                      >
+                        ↑
+                      </span>
+                      {String(d.airHeading).padStart(3, '0')}°
+                    </output>
+                    <Slider
+                      label={t('setup.heading')}
+                      min={0}
+                      max={355}
+                      step={5}
+                      value={d.airHeading}
+                      valueText={`${d.airHeading}°`}
+                      onInput={(v) => set({ airHeading: v })}
+                    />
+                  </label>
+                </div>
+              )}
               <AirportList
                 airports={airports}
                 selected={d.airport}
                 info={info}
-                onSelect={(icao) => set({ airport: icao, runway: '' })}
+                recent={recent}
+                hovered={hovered.value}
+                onHover={(icao) => (hovered.value = icao)}
+                onSelect={selectAirport}
               />
             </Field>
           </div>
@@ -756,7 +986,7 @@ export function FlightSetup() {
                   ]}
                 />
               </Field>
-              {runways.length > 0 && (
+              {runways.length > 0 && !placing && (
                 <Field label={t('setup.runway')} id="setup-runway">
                   <Segmented<string>
                     label={t('setup.runway')}
@@ -772,6 +1002,22 @@ export function FlightSetup() {
                 </Field>
               )}
               {d.start === 'air' && (
+                <div class="start-height">
+                  <Field label={t('setup.air.place')} id="setup-air-place">
+                    <Segmented<'airport' | 'map'>
+                      label={t('setup.air.place')}
+                      value={d.airPlace}
+                      onChange={setAirPlace}
+                      options={[
+                        { value: 'airport', label: t('setup.air.overAirport') },
+                        { value: 'map', label: t('setup.air.onMap') },
+                      ]}
+                    />
+                    {placing && <p class="field-hint">{t('setup.air.hint')}</p>}
+                  </Field>
+                </div>
+              )}
+              {d.start === 'air' && !placing && (
                 <div class="start-height">
                   <Field label={t('setup.height')} id="setup-height">
                     <Segmented<number>
@@ -846,7 +1092,7 @@ export function FlightSetup() {
           {airport ? (
             <>
               <span class="summary-main">
-                <span class="summary-icao">{airport.icao}</span>
+                <span class="summary-icao">{(near ?? airport).icao}</span>
                 {d.destination && d.destination !== airport.icao && (
                   <span class="summary-dest">
                     <span aria-hidden="true">→ </span>
@@ -854,7 +1100,7 @@ export function FlightSetup() {
                     {d.destination}
                   </span>
                 )}
-                <span class="summary-name">{airport.name}</span>
+                <span class="summary-name">{(near ?? airport).name}</span>
               </span>
               <span class="summary-sub">
                 {startText} · {timeText} · {t(`weather.${d.weather}`)}

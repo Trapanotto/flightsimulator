@@ -265,6 +265,18 @@ export const IconMinus = (p: P) => (
     <path d="M5.5 12h13" />
   </Icon>
 );
+/** The whole map again: four corners pointing out. */
+export const IconExpand = (p: P) => (
+  <Icon {...p}>
+    <path d="M4.5 9V4.5H9M15 4.5h4.5V9M19.5 15v4.5H15M9 19.5H4.5V15" />
+  </Icon>
+);
+export const IconSearch = (p: P) => (
+  <Icon {...p}>
+    <circle cx="10.5" cy="10.5" r="6" />
+    <path d="m15 15 5 5" />
+  </Icon>
+);
 export const IconCheck = (p: P) => (
   <Icon {...p}>
     <path d="M5 12.5l4.5 4.5L19 7.5" />

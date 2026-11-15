@@ -56,6 +56,24 @@ export const FAILURE_IDS: readonly FailureId[] = [
 export const FAILURE_MINUTES = [1, 3, 5, 10, 20] as const;
 
 export type StartKind = 'runway' | 'air' | 'approach';
+
+/** Where on the map an air start may be put: around Switzerland, a margin included. */
+export const AIR_LON_RANGE = [5.6, 10.8] as const;
+export const AIR_LAT_RANGE = [45.6, 48.0] as const;
+
+const FT = 0.3048;
+
+/** An air start placed on the map: 6000 ft above sea level until the pilot says otherwise. */
+export const AIR_ALTITUDE_DEFAULT = 6000 * FT;
+
+/**
+ * Altitudes above sea level offered for a start placed on the map, metres: from 2000 ft up
+ * to what the kind of aircraft flies at.
+ */
+export function airAltitudeRange(category: Category): readonly [number, number] {
+  const top = { piston: 14_000, turboprop: 28_000, airliner: 39_000, fighter: 45_000 }[category];
+  return [2000 * FT, top * FT];
+}
 export type FailureMode = 'none' | 'random' | 'chosen';
 
 /**
@@ -69,6 +87,18 @@ export interface SetupDraft {
   start: StartKind;
   /** Index into the type's air start heights (three for every type). */
   airHeight: number;
+  /**
+   * An air start above the chosen airport (lined up with its runway), or anywhere the pilot
+   * put it on the map, at an altitude above sea level and a heading of the pilot's choice.
+   */
+  airPlace: 'airport' | 'map';
+  /** The map's place, degrees; null until the pilot has put one. */
+  airLon: number | null;
+  airLat: number | null;
+  /** Metres above sea level. */
+  airAltitude: number;
+  /** Degrees true, 0..359. */
+  airHeading: number;
   /** One of the type's approach distances. */
   approachNm: number;
   aircraft: AircraftId | '';
@@ -118,6 +148,11 @@ export function defaultDraft(
     runway: (home && usableEnds(home, category)[0]) ?? '',
     start: 'runway',
     airHeight: 1,
+    airPlace: 'airport',
+    airLon: null,
+    airLat: null,
+    airAltitude: AIR_ALTITUDE_DEFAULT,
+    airHeading: 0,
     approachNm: typeDefaults(info).approachNm,
     aircraft: info?.id ?? '',
     time: 'now',
@@ -196,11 +231,26 @@ export function sanitizeDraft(
       ? o.airHeight
       : d.airHeight;
 
+  const inMap = (v: unknown, [lo, hi]: readonly [number, number]) =>
+    typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi ? v : null;
+  const airLon = inMap(o.airLon, AIR_LON_RANGE);
+  const airLat = inMap(o.airLat, AIR_LAT_RANGE);
+  const [altLo, altHi] = airAltitudeRange(category);
+  const alt = inMap(o.airAltitude, [0, 20_000]);
+
   return {
     airport: icao,
     runway,
     start: oneOf<StartKind>(o.start, ['runway', 'air', 'approach'], 'runway'),
     airHeight,
+    airPlace: oneOf<'airport' | 'map'>(o.airPlace, ['airport', 'map'], 'airport'),
+    airLon: airLon !== null && airLat !== null ? airLon : null,
+    airLat: airLon !== null && airLat !== null ? airLat : null,
+    airAltitude: alt === null ? d.airAltitude : Math.min(altHi, Math.max(altLo, alt)),
+    airHeading:
+      typeof o.airHeading === 'number' && Number.isFinite(o.airHeading)
+        ? ((Math.round(o.airHeading) % 360) + 360) % 360
+        : 0,
     // Kept as near as a new type allows; nonsense falls back to the type's default.
     approachNm:
       typeof o.approachNm === 'number' &&
@@ -264,8 +314,21 @@ export function draftToPlan(
   const ends = usableEnds(airport, categoryOf(info));
   const runway = ends.includes(draft.runway) ? draft.runway : (ends[0] ?? '');
   const heights = defaults.airHeights;
-  const start: FlightPlan['start'] =
-    draft.start === 'air' || !runway
+  const placed =
+    draft.start === 'air' &&
+    draft.airPlace === 'map' &&
+    draft.airLon !== null &&
+    draft.airLat !== null;
+  const start: FlightPlan['start'] = placed
+    ? {
+        kind: 'air',
+        lon: draft.airLon!,
+        lat: draft.airLat!,
+        altitude: draft.airAltitude,
+        headingDeg: draft.airHeading,
+        speed: defaults.airSpeed,
+      }
+    : draft.start === 'air' || !runway
       ? {
           kind: 'air',
           lon: airport.lon,
@@ -285,7 +348,10 @@ export function draftToPlan(
     time: draft.time,
     weather: draft.weather,
     season: draft.season,
-    airport: airport.icao,
+    // A place on the map belongs to the airport nearest to it (briefing, radio, weather).
+    airport: placed
+      ? (nearestAirport(airports, draft.airLon!, draft.airLat!)?.icao ?? airport.icao)
+      : airport.icao,
     coldStart: start.kind === 'runway' && draft.coldStart,
     atc: draft.atc,
     failures: draftFailures(draft),
@@ -295,6 +361,25 @@ export function draftToPlan(
       ? { airport: dest.icao, runway: draft.destinationRunway }
       : { airport: dest.icao };
   return plan;
+}
+
+/** The airport nearest to a place (flat-earth distance, fine across Switzerland). */
+export function nearestAirport(
+  airports: readonly AirportOption[],
+  lon: number,
+  lat: number,
+): AirportOption | undefined {
+  const k = Math.cos((lat * Math.PI) / 180);
+  let best: AirportOption | undefined;
+  let bestD = Infinity;
+  for (const a of airports) {
+    const d = ((a.lon - lon) * k) ** 2 + (a.lat - lat) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = a;
+    }
+  }
+  return best;
 }
 
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
