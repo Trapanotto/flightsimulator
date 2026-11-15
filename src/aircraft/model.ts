@@ -78,6 +78,8 @@ export interface GlowDef {
   cone?: [number, number];
   /** Size as a share of the screen height. */
   screen: number;
+  /** The lamp sits on a moving part (a gear leg): the glow follows its anchor every frame. */
+  follow?: boolean;
 }
 
 /** Brightness of the exterior lights, by lamp material and by glow kind. */
@@ -114,6 +116,13 @@ export interface ModelConfig {
   disc: { tip: number; hub: number };
   /** Where the landing light sits if the model has no Glow_Landing (model frame). */
   landingLight: [number, number, number];
+  /**
+   * On quality 'low' LOD1 is the nearest level outside, and the full cockpit moves into it
+   * (with the glow anchors): the exterior budget of a phone.
+   */
+  lowNearest?: boolean;
+  /** Largest skin textures on quality 'low': the base colour, and the other maps. */
+  lowTextureMax?: { map: number; other: number };
   /** Materials whose meshes cast no shadow, and those that receive none. */
   noShadow: RegExp;
   noReceive: RegExp;
@@ -135,6 +144,8 @@ interface Glow {
   dir: { value: Vector3 };
   localDir: Vector3;
   local: Vector3;
+  /** Followed anchor (a lamp on a moving part). */
+  anchor?: Object3D;
 }
 
 function asVec3(v: unknown): Vector3 | undefined {
@@ -190,7 +201,13 @@ export abstract class AircraftModel implements AircraftVisual {
     const lod0 = scene.getObjectByName('LOD0')!;
     const lod1 = scene.getObjectByName('LOD1')!;
     const lod2 = scene.getObjectByName('LOD2')!;
-    this.lod0 = lod0;
+    const low = quality === 'low' && !!cfg.lowNearest;
+    if (low) {
+      // The token cabin of LOD1 makes way for the full cockpit; everything else of LOD0 goes.
+      lod1.getObjectByName('Cockpit_lod1')?.removeFromParent();
+      lod1.add(lod0.getObjectByName('Cockpit')!);
+    }
+    this.lod0 = low ? lod1 : lod0;
     // Anchors and the eye are read in the model frame before the levels are re-parented.
     const eye = new Vector3();
     scene.getObjectByName('Eye')!.getWorldPosition(eye);
@@ -208,11 +225,16 @@ export abstract class AircraftModel implements AircraftVisual {
       return { x: p.x, y: p.y - below, z: p.z };
     });
     for (const level of [lod0, lod1, lod2]) level.removeFromParent();
-    this.lod.addLevel(lod0, cfg.lodDistances[0]);
-    this.lod.addLevel(lod1, cfg.lodDistances[1]);
+    if (low) {
+      this.lod.addLevel(lod1, cfg.lodDistances[0]);
+      lod0.traverse((o) => (o as Mesh).geometry?.dispose());
+    } else {
+      this.lod.addLevel(lod0, cfg.lodDistances[0]);
+      this.lod.addLevel(lod1, cfg.lodDistances[1]);
+    }
     this.lod.addLevel(lod2, cfg.lodDistances[2]);
     this.object.add(this.lod);
-    this.collectPivots(lod0);
+    if (!low) this.collectPivots(lod0);
     this.collectPivots(lod1);
     this.collectPivots(lod2);
   }
@@ -359,13 +381,20 @@ export abstract class AircraftModel implements AircraftVisual {
           if (v && (v as Texture).isTexture) this.textures.push(v as Texture);
       }
     });
-    if (quality === 'low') this.shrinkTextures(1024);
+    if (quality === 'low')
+      this.shrinkTextures(this.cfg.lowTextureMax ?? { map: 1024, other: 1024 });
   }
 
   /** Mobile: halve the skin textures in place (less memory and upload, same model). */
-  private shrinkTextures(max: number) {
+  private shrinkTextures(limit: { map: number; other: number }) {
+    const colour = new Set<Texture>();
+    for (const m of this.materials) {
+      const map = (m as { map?: Texture | null }).map;
+      if (map) colour.add(map);
+    }
     for (const t of this.textures) {
       const img = t.image as { width?: number; height?: number } | undefined;
+      const max = colour.has(t) ? limit.map : limit.other;
       if (!img?.width || !img.height || img.width <= max || t instanceof CanvasTexture) continue;
       const k = max / Math.max(img.width, img.height);
       const c = document.createElement('canvas');
@@ -388,7 +417,7 @@ export abstract class AircraftModel implements AircraftVisual {
       // Created once with the aircraft; switching it off only zeroes the intensity, so the
       // scene's light count (and every shader) stays the same.
       const spot = new SpotLight(0xfff2dc, 0, 450, 0.2, 0.55, 1.6);
-      const lamp = this.glows.find((g) => g.kind === 'Landing');
+      const lamp = this.glows.find((g) => g.kind.startsWith('Landing'));
       spot.position.copy(lamp ? lamp.local : new Vector3(...this.cfg.landingLight));
       spot.target.position.copy(spot.position).add(new Vector3(0, -2.2, 20));
       spot.castShadow = false;
@@ -415,7 +444,7 @@ export abstract class AircraftModel implements AircraftVisual {
     for (const [kind, d] of Object.entries(this.cfg.glows)) {
       const anchors: Object3D[] = [];
       lod0.traverse((o) => {
-        if (o.name === `Glow_${kind}`) anchors.push(o);
+        if (o.name === `Glow_${kind}` || o.name === `Glow_${kind}_lod1`) anchors.push(o);
       });
       for (const anchor of anchors) {
         const local = anchor.getWorldPosition(new Vector3());
@@ -453,7 +482,16 @@ export abstract class AircraftModel implements AircraftVisual {
         sprite.frustumCulled = false;
         this.object.add(sprite);
         this.track(m);
-        this.glows.push({ sprite, kind, intensity, pos, dir, localDir: dirLocal, local });
+        this.glows.push({
+          sprite,
+          kind,
+          intensity,
+          pos,
+          dir,
+          localDir: dirLocal,
+          local,
+          anchor: d.follow ? anchor : undefined,
+        });
       }
     }
   }
@@ -499,6 +537,16 @@ export abstract class AircraftModel implements AircraftVisual {
     return n;
   }
 
+  /** Bytes of every texture of the aircraft on the graphics card (with mipmaps). */
+  get textureBytes(): number {
+    let n = 0;
+    for (const t of new Set(this.textures)) {
+      const img = t.image as { width?: number; height?: number } | undefined;
+      if (img?.width && img.height) n += img.width * img.height * 4 * 1.33;
+    }
+    return n;
+  }
+
   setExposure(exposure: number): void {
     this.glowVisibility = glowVisibility(exposure);
     this.cockpit.setExposure(exposure);
@@ -512,7 +560,7 @@ export abstract class AircraftModel implements AircraftVisual {
   }
 
   /** The lights that are on: the systems' switches when present, else a pilot's habits. */
-  protected lightSwitches(t: Telemetry): AircraftLights {
+  protected lightSwitches(t: Telemetry, _cockpit?: Cockpit): AircraftLights {
     return { ...(t.systems?.lights ?? autoLights(t)), ...this.lightsOverride };
   }
 
@@ -529,7 +577,7 @@ export abstract class AircraftModel implements AircraftVisual {
   ): void;
 
   update(dt: number, t: Telemetry, c: ControlInput, cockpit?: Cockpit): void {
-    const L = this.lightSwitches(t);
+    const L = this.lightSwitches(t, cockpit);
     this.animate(dt, t, c, cockpit, L);
     this.first = false;
     const levels = this.lightLevels(
@@ -543,7 +591,13 @@ export abstract class AircraftModel implements AircraftVisual {
     for (const [name, k] of this.lamps) k.value = levels.lamps[name] ?? 0;
     this.object.updateWorldMatrix(true, false);
     const q = this.object.getWorldQuaternion(tmpQ);
+    let inv: Matrix4 | undefined;
     for (const g of this.glows) {
+      if (g.anchor) {
+        inv ??= tmpM.copy(this.object.matrixWorld).invert();
+        g.local.copy(g.anchor.getWorldPosition(tmpV)).applyMatrix4(inv);
+        g.sprite.position.copy(g.local);
+      }
       const lv = (levels.glows[g.kind] ?? 0) * this.glowScale * this.glowVisibility;
       g.intensity.value = lv;
       g.sprite.visible = lv > 0;

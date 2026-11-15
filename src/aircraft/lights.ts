@@ -10,6 +10,9 @@ export interface AircraftLights {
   strobe: boolean;
   landing: boolean;
   taxi: boolean;
+  /** Phase 4, on types that have them: recognition lights and the wing-inspection light. */
+  recognition?: boolean;
+  ice?: boolean;
 }
 
 /**

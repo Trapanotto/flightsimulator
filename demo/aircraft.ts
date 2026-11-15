@@ -1,7 +1,13 @@
-// Demo of the aircraft package: one Cessna 172S on a ground plane, fed with fake telemetry.
+// Demo of the aircraft package: one aircraft on a ground plane, fed with fake telemetry.
 // Served by Vite at /flightsimulator/demo/aircraft.html.
+//   ?type=c172|pc12  the aircraft (default c172)
 //   ?view=front-left|side|top|rear|front|cockpit|panel|tail|orbit   camera
-//   ?state=parked|cruise|climb-turn|landing                         fake telemetry
+//   ?state=parked|cruise|climb-turn|landing (pc12 also: ramp, takeoff, reverse)  fake telemetry
+//   ?orbit=azimuth,elevation,distance  outside camera round the aircraft (degrees, metres;
+//                                      azimuth 0 = ahead, 90 = left side)
+//   ?cam=x,y,z&target=x,y,z  outside camera and target in the model frame (metres)
+//   ?aim=<node>       cockpit view aimed at a named node (Disp_PFD1, Ctl_battery, ...)
+//   ?gear=0..1 ?flaps=0..1  pc12: freeze the gear or flap position   ?noshadow=1  no shadows
 //   ?webgl=1        force the WebGL 2 fallback      ?device=mobile   low quality
 //   ?night=1        dark scene to judge the lights   ?shot=1          fixed frame, no text
 //   ?look=yaw,pitch  cockpit look (the app's drag-to-look values)   ?fov=55   cockpit field of view
@@ -44,6 +50,7 @@ import {
   C172_CONTROLS,
   CockpitPanel,
   type ControlInput,
+  PC12_CONTROLS,
   type SystemsTelemetry,
   type Telemetry,
   type Waypoint,
@@ -61,6 +68,8 @@ const demoWindow = window as unknown as {
 };
 
 const q = new URLSearchParams(location.search);
+const type = q.get('type') === 'pc12' ? 'pc12' : 'c172';
+const pc12 = type === 'pc12';
 const view = q.get('view') ?? 'front-left';
 const stateName = q.get('state') ?? 'climb-turn';
 const night = q.has('night');
@@ -187,7 +196,186 @@ const STATES: Record<string, DemoState> = {
   },
 };
 
-const st = STATES[stateName] ?? STATES['climb-turn']!;
+/** A turboprop's engine telemetry: torque share, Np, and what goes with them. */
+const turbine = (running: boolean, torque: number, np: number, extra: object = {}) => ({
+  running,
+  rpm: np,
+  propRpm: np,
+  power: torque,
+  torque,
+  n2: running ? 66 + 34 * torque : 0,
+  turbineTemperature: running ? 500 + 300 * torque : 18,
+  fuelFlow: running ? (70 + 330 * torque) / 2.20462 / 3600 : 0,
+  ...extra,
+});
+const STATES_PC12: Record<string, DemoState> = {
+  parked: {
+    telemetry: {
+      ias: 0,
+      groundSpeed: 0,
+      altitude: 510,
+      headingDeg: 140,
+      onGround: true,
+      gear: 1,
+      flaps: 0,
+      elevator: -0.1,
+      fuel: 900,
+      engines: [turbine(false, 0, 0)],
+    },
+    controls: { throttle: [0], flaps: 0, pitch: -0.1, parkingBrake: true, condition: [0] },
+    turnRate: 0,
+    height: 0,
+  },
+  ramp: {
+    telemetry: {
+      ias: 0,
+      groundSpeed: 4,
+      altitude: 510,
+      headingDeg: 140,
+      onGround: true,
+      gear: 1,
+      flaps: 15 / 40,
+      fuel: 900,
+      agl: 0,
+      engines: [turbine(true, 0.08, 1000)],
+    },
+    controls: { throttle: [0.05], flaps: 1 / 3, condition: [0.5] },
+    turnRate: 0,
+    height: 0,
+  },
+  takeoff: {
+    telemetry: {
+      ias: 70 * KT,
+      groundSpeed: 70 * KT,
+      altitude: 510,
+      headingDeg: 140,
+      onGround: true,
+      gear: 1,
+      flaps: 15 / 40,
+      elevator: 0.2,
+      fuel: 900,
+      agl: 0,
+      engines: [turbine(true, 0.98, 1700)],
+    },
+    controls: { throttle: [1], flaps: 1 / 3, pitch: 0.2, condition: [1] },
+    turnRate: 0,
+    height: 0,
+  },
+  reverse: {
+    telemetry: {
+      ias: 45 * KT,
+      groundSpeed: 45 * KT,
+      altitude: 510,
+      headingDeg: 140,
+      onGround: true,
+      gear: 1,
+      flaps: 1,
+      fuel: 700,
+      agl: 0,
+      engines: [turbine(true, 0.4, 1650, { reversing: true })],
+    },
+    controls: { throttle: [0.6], flaps: 1, reverse: true, condition: [1] },
+    turnRate: 0,
+    height: 0,
+  },
+  cruise: {
+    telemetry: {
+      ias: 182 * KT,
+      groundSpeed: 268 * KT,
+      altitude: 24000 * FT,
+      verticalSpeed: 0,
+      headingDeg: 64,
+      pitch: 1.2 * DEG,
+      onGround: false,
+      gear: 0,
+      flaps: 0,
+      elevator: 0.04,
+      fuel: 820,
+      agl: 22300 * FT,
+      mach: 0.43,
+      engines: [turbine(true, 0.83, 1700)],
+    },
+    controls: {
+      throttle: [0.85],
+      flaps: 0,
+      pitch: 0.04,
+      pitchTrim: 0.15,
+      gearDown: false,
+      condition: [1],
+    },
+    turnRate: 0,
+    height: 4,
+  },
+  'climb-turn': {
+    telemetry: {
+      ias: 140 * KT,
+      groundSpeed: 150 * KT,
+      altitude: 6500 * FT,
+      verticalSpeed: (1400 * FT) / 60,
+      headingDeg: 210,
+      pitch: 7.5 * DEG,
+      bank: 22 * DEG,
+      beta: 1 * DEG,
+      onGround: false,
+      gear: 0,
+      flaps: 0,
+      elevator: 0.3,
+      aileron: 0.3,
+      rudder: 0.15,
+      fuel: 1000,
+      agl: 3600 * FT,
+      engines: [turbine(true, 0.98, 1700)],
+    },
+    controls: {
+      throttle: [1],
+      flaps: 0,
+      pitch: 0.3,
+      roll: 0.3,
+      yaw: 0.15,
+      pitchTrim: 0.35,
+      gearDown: false,
+      condition: [1],
+    },
+    turnRate: 2.5,
+    height: 4,
+  },
+  landing: {
+    telemetry: {
+      ias: 95 * KT,
+      groundSpeed: 88 * KT,
+      altitude: 2700 * FT,
+      verticalSpeed: (-480 * FT) / 60,
+      headingDeg: 316,
+      pitch: 1.5 * DEG,
+      bank: -4 * DEG,
+      beta: -1 * DEG,
+      onGround: false,
+      gear: 1,
+      flaps: 1,
+      elevator: 0.2,
+      aileron: -0.12,
+      rudder: -0.1,
+      fuel: 600,
+      agl: 640 * FT,
+      engines: [turbine(true, 0.32, 1700)],
+    },
+    controls: {
+      throttle: [0.32],
+      flaps: 1,
+      pitch: 0.2,
+      roll: -0.12,
+      yaw: -0.1,
+      pitchTrim: 0.5,
+      condition: [1],
+    },
+    turnRate: -0.5,
+    height: 4,
+  },
+};
+
+const st = pc12
+  ? (STATES_PC12[stateName] ?? STATES_PC12['climb-turn']!)
+  : (STATES[stateName] ?? STATES['climb-turn']!);
 const telemetry: Telemetry = {
   time: 0,
   ias: 0,
@@ -229,8 +417,10 @@ const controls: ControlInput = {
   parkingBrake: false,
   pitchTrim: 0,
   mixture: [1],
+  ...(pc12 ? { condition: [1], reverse: false, rollTrim: 0, yawTrim: 0 } : {}),
   ...st.controls,
 };
+if (pc12) controls.gearDown = st.controls.gearDown ?? true;
 
 const canvas = document.getElementById('c') as HTMLCanvasElement;
 const renderer = new WebGPURenderer({ canvas, antialias: true, forceWebGL: q.has('webgl') });
@@ -240,7 +430,7 @@ const backend = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBack
   : 'WebGL 2';
 renderer.toneMapping = ACESFilmicToneMapping;
 renderer.toneMappingExposure = night ? 1.0 : 0.85;
-renderer.shadowMap.enabled = true;
+renderer.shadowMap.enabled = !q.has('noshadow');
 renderer.shadowMap.type = PCFSoftShadowMap;
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 
@@ -273,7 +463,7 @@ ground.receiveShadow = true;
 scene.add(ground);
 
 const quality = q.get('device') === 'mobile' || q.get('quality') === 'low' ? 'low' : 'high';
-const ac = await loadAircraftVisual('c172', { quality, landingLightSpot: night });
+const ac = await loadAircraftVisual(type, { quality, landingLightSpot: night });
 scene.add(ac.object);
 const wheelY = Math.min(...ac.wheelContacts.map((w) => w.y));
 ac.object.position.y = -wheelY + st.height;
@@ -285,7 +475,8 @@ ac.setExposure(night ? 400 : 4.2);
 
 // ---- the cockpit's controls, bound to the control input as the simulation does ----------
 const engineRunning = telemetry.engines[0]!.running;
-const panel = new CockpitPanel(C172_CONTROLS);
+const CONTROLS = pc12 ? PC12_CONTROLS : C172_CONTROLS;
+const panel = new CockpitPanel(CONTROLS);
 panel.bind(
   'throttle',
   () => controls.throttle[0] ?? 0,
@@ -301,6 +492,33 @@ panel.bind(
   () => Math.round(controls.flaps * 3),
   (v) => (controls.flaps = v / 3),
 );
+if (pc12) {
+  panel.bind(
+    'gear',
+    () => (controls.gearDown ? 1 : 0),
+    (v) => (controls.gearDown = v >= 0.5),
+  );
+  panel.bind(
+    'reverse',
+    () => (controls.reverse ? 1 : 0),
+    (v) => (controls.reverse = v >= 0.5),
+  );
+  panel.bind(
+    'condition',
+    () => Math.round((controls.condition?.[0] ?? 1) * 2),
+    (v) => (controls.condition = [v / 2]),
+  );
+  panel.bind(
+    'aileronTrim',
+    () => controls.rollTrim ?? 0,
+    (v) => (controls.rollTrim = v),
+  );
+  panel.bind(
+    'rudderTrim',
+    () => controls.yawTrim ?? 0,
+    (v) => (controls.yawTrim = v),
+  );
+}
 panel.bind(
   'trim',
   () => controls.pitchTrim,
@@ -312,13 +530,44 @@ panel.bind(
   (v) => (controls.parkingBrake = v >= 0.5),
 );
 {
-  const keep = { ...controls, throttle: [...controls.throttle], mixture: [...controls.mixture] };
+  const keep = {
+    ...controls,
+    throttle: [...controls.throttle],
+    mixture: [...controls.mixture],
+    condition: controls.condition ? [...controls.condition] : undefined,
+  };
   panel.reset(engineRunning);
   // The demo state's levers win over the reset.
   Object.assign(controls, keep);
   if (night) for (const id of ['lightPanel']) panel.set(id, 0.8);
   if (night && engineRunning)
     for (const id of ['lightNav', 'lightBeacon', 'lightStrobe']) panel.set(id, 1);
+  if (pc12 && night) {
+    panel.set('lightCabin', 0.4);
+    if (engineRunning) for (const id of ['lightRecognition', 'lightLanding']) panel.set(id, 1);
+    if (engineRunning && stateName === 'landing') panel.set('lightTaxi', 1);
+  }
+  if (pc12 && engineRunning) {
+    // What a crew would have set up by now.
+    panel.set('pitotHeat', 1);
+    panel.set('minimums', 200);
+    panel.set(
+      'headingBug',
+      Math.round(telemetry.headingDeg + (stateName === 'climb-turn' ? 40 : 0)) % 360,
+    );
+    panel.set('obs1', 316);
+    panel.set('obs2', 280);
+    panel.set(
+      'apAltitude',
+      stateName === 'cruise' ? 24000 : stateName === 'landing' ? 5000 : 12000,
+    );
+    panel.set('nav1Active', 110_300);
+    panel.set('nav2Active', 116_600);
+    panel.set('com1Active', 120_225);
+    panel.set('navSource', stateName === 'landing' ? 0 : 1);
+    panel.set('mapRange', stateName === 'cruise' ? 80 : 20);
+    if (stateName === 'landing') panel.set('dmeSource', 0);
+  }
 }
 
 // ---- fake systems, instruments and avionics (the real ones are connected in the app) ---------
@@ -577,9 +826,312 @@ function fakeStep(dt: number) {
 }
 const MS_TO_KT_DEMO = 1 / KT;
 
+// ---- the PC-12's fakes: a turboprop, its systems, gear and flaps, Apex-like avionics --------
+const fake12 = {
+  ng: telemetry.engines[0]!.n2 ?? 0,
+  np: telemetry.engines[0]!.propRpm ?? 0,
+  itt: telemetry.engines[0]!.turbineTemperature ?? 15,
+  torque: telemetry.engines[0]!.torque ?? 0,
+  oilT: telemetry.engines[0]!.running ? 75 : 15,
+  identUntil: -1,
+  ap: {
+    engaged: stateName === 'cruise' || stateName === 'landing',
+    yd: stateName === 'cruise' || stateName === 'landing' || stateName === 'climb-turn',
+    fd: telemetry.engines[0]!.running && stateName !== 'ramp',
+    lateral: (stateName === 'cruise'
+      ? 'nav'
+      : stateName === 'landing'
+        ? 'apr'
+        : 'hdg') as AutopilotTelemetry['lateral'],
+    lateralArmed: undefined as AutopilotTelemetry['lateralArmed'],
+    vertical: (stateName === 'cruise'
+      ? 'alt'
+      : stateName === 'landing'
+        ? 'gs'
+        : 'flc') as AutopilotTelemetry['vertical'],
+    verticalArmed: (stateName === 'climb-turn'
+      ? 'alt'
+      : undefined) as AutopilotTelemetry['verticalArmed'],
+    vs: 1000,
+    speed: 140,
+    armedAt: 0,
+    offAt: -10,
+  },
+  lon: stateName === 'cruise' ? 7.2 : 8.45,
+  lat: stateName === 'cruise' ? 46.6 : 47.37,
+};
+const PLAN_PC12: Waypoint[] = [
+  { ident: 'LSGG', lon: 6.109, lat: 46.238 },
+  { ident: 'PAS', lon: 6.66, lat: 46.42 },
+  { ident: 'WIL', lon: 7.13, lat: 47.18 },
+  { ident: 'TRA', lon: 8.44, lat: 47.69 },
+  { ident: 'LSZH', lon: 8.549, lat: 47.458 },
+];
+const uiPc12 = {
+  gearPos: q.has('gear') ? Number(q.get('gear')) : -1,
+  flapPos: q.has('flaps') ? Number(q.get('flaps')) : -1,
+  fuelL: 1100,
+  fuelR: 1050,
+  locDev: 0.12,
+  gsDev: -0.18,
+};
+
+function fakeStepPc12(dt: number) {
+  const t = telemetry;
+  const e = t.engines[0]!;
+  const v = (id: string) => panel.get(id);
+  const thr = controls.throttle[0] ?? 0;
+  const cond = Math.round((controls.condition?.[0] ?? 1) * 2);
+  const fuelOk = v('fuelShutoff') >= 0.5;
+  const bat = v('battery') >= 0.5 || v('battery2') >= 0.5;
+  const starting = v('starter') >= 0.5 && bat;
+  if (ui.systems) {
+    // Lights off and runs with the condition lever out of cut-off and fuel; the starter
+    // spins the gas generator up to light-off.
+    if (!e.running && starting && fake12.ng > 13 && cond >= 1 && fuelOk) e.running = true;
+    if (cond === 0 || !fuelOk) e.running = false;
+    const rev = !!controls.reverse;
+    const power = e.running ? (rev ? 0.15 + 0.45 * thr : thr) : 0;
+    const ngT = e.running ? (cond === 1 ? 64 : 68) + 36 * power : starting ? 18 : 0;
+    fake12.ng += (ngT - fake12.ng) * Math.min(1, dt * (e.running ? 1.2 : 0.4));
+    const npT = e.running
+      ? t.onGround && thr < 0.1 && !rev
+        ? cond === 1
+          ? 950
+          : 1150
+        : 1700
+      : Math.min(t.ias * 4, 300);
+    fake12.np += (npT - fake12.np) * Math.min(1, dt * 0.8);
+    fake12.torque += ((e.running ? 0.04 + 0.96 * power : 0) - fake12.torque) * Math.min(1, dt * 2);
+    const ittT = e.running ? 480 + 330 * power : starting ? 640 : 20;
+    fake12.itt += (ittT - fake12.itt) * Math.min(1, dt * 0.7);
+    e.n2 = fake12.ng;
+    e.propRpm = fake12.np;
+    e.rpm = fake12.np;
+    e.torque = fake12.torque;
+    e.power = fake12.torque;
+    e.turbineTemperature = fake12.itt;
+    e.fuelFlow = e.running ? (75 + 340 * power) / 2.20462 / 3600 : 0;
+    e.reversing = e.running && rev;
+    e.starting = starting && !e.running;
+  }
+  // Gear and flaps follow their levers (7 s gear transit, 10 s full flap travel).
+  const gearT = controls.gearDown ? 1 : 0;
+  t.gear =
+    uiPc12.gearPos >= 0
+      ? uiPc12.gearPos
+      : t.gear + Math.sign(gearT - t.gear) * Math.min(Math.abs(gearT - t.gear), dt / 7);
+  const flapT = [0, 15, 30, 40][Math.round(controls.flaps * 3)]! / 40;
+  t.flaps =
+    uiPc12.flapPos >= 0
+      ? uiPc12.flapPos
+      : t.flaps + Math.sign(flapT - t.flaps) * Math.min(Math.abs(flapT - t.flaps), dt / 10);
+  const gen = (v('generator1') >= 0.5 || v('generator2') >= 0.5) && e.running && !ui.altFail;
+  const bus = gen ? 28.4 : bat ? 24.6 : 0;
+  const avionicsOn = bus > 20 && v('avionics') >= 0.5;
+  fake12.oilT += ((e.running ? 70 + 18 * fake12.torque : 15) - fake12.oilT) * Math.min(1, dt / 40);
+  const oilP = e.running ? 92 + 35 * Math.min(fake12.ng / 104, 1) : 0;
+  const lit = (id: string) => v(id) >= 0.5 && bus > 8;
+  const systems: SystemsTelemetry = {
+    busVolts: bus,
+    batteryAmps: gen ? 6 : bat ? -18 - (avionicsOn ? 12 : 0) : 0,
+    batteryCharge: 0.9,
+    avionicsPowered: avionicsOn,
+    fuelLeft: uiPc12.fuelL / 2.20462,
+    fuelRight: uiPc12.fuelR / 2.20462,
+    fuelAvailable: fuelOk,
+    vacuum: 0,
+    oilTemperature: fake12.oilT,
+    oilPressure: oilP,
+    egt: 0,
+    carbIce: 0,
+    airframeIce: 0,
+    pitotBlocked: false,
+    lights: {
+      beacon: lit('lightBeacon'),
+      landing: lit('lightLanding'),
+      taxi: lit('lightTaxi'),
+      nav: lit('lightNav'),
+      strobe: lit('lightStrobe'),
+    },
+    panelLight: bus > 8 ? v('lightPanel') : 0,
+    annunciators: {
+      lowVolts: bus > 0 && bus < 25,
+      lowFuelLeft: uiPc12.fuelL < 150,
+      lowFuelRight: uiPc12.fuelR < 150,
+      lowVacuum: false,
+      oilPressure: e.running && oilP < 60,
+    },
+  };
+  t.systems = ui.systems ? systems : undefined;
+  t.instruments = undefined;
+  // Avionics: radio swaps, the autopilot's keys, an ILS on NAV 1, a flight plan on the FMS.
+  for (const r of ['com1', 'com2', 'nav1', 'nav2']) {
+    if (pressed(`${r}Swap`) && avionicsOn) {
+      const a = v(`${r}Active`);
+      panel.set(`${r}Active`, v(`${r}Standby`));
+      panel.set(`${r}Standby`, a);
+    }
+  }
+  const ap = fake12.ap;
+  const kt = t.ias / KT;
+  if (avionicsOn) {
+    if (pressed('apEngage')) {
+      ap.engaged = !ap.engaged;
+      if (ap.engaged) [ap.fd, ap.yd] = [true, true];
+      else ap.offAt = t.time;
+    }
+    if (pressed('apDisconnect') && ap.engaged) [ap.engaged, ap.offAt] = [false, t.time];
+    if (pressed('yawDamper')) ap.yd = !ap.yd;
+    if (pressed('flightDirector') && !ap.engaged) ap.fd = !ap.fd;
+    const mode = (id: string) => {
+      if (!pressed(id)) return false;
+      ap.fd = true;
+      return true;
+    };
+    if (mode('apHdg')) ap.lateral = ap.lateral === 'hdg' ? 'roll' : 'hdg';
+    if (mode('apNav')) [ap.lateralArmed, ap.armedAt] = ['nav', t.time];
+    if (mode('apApr')) [ap.lateralArmed, ap.armedAt] = ['apr', t.time];
+    if (mode('apAlt')) ap.vertical = ap.vertical === 'alt' ? 'pitch' : 'alt';
+    if (mode('apVs')) [ap.vertical, ap.vs] = ['vs', Math.round((t.verticalSpeed / FT) * 0.6) * 100];
+    if (mode('apFlc')) [ap.vertical, ap.speed] = ['flc', Math.round(kt)];
+    if (pressed('apVsUp')) {
+      if (ap.vertical === 'flc') ap.speed -= 1;
+      else [ap.vertical, ap.vs] = ['vs', ap.vs + 100];
+    }
+    if (pressed('apVsDown')) {
+      if (ap.vertical === 'flc') ap.speed += 1;
+      else [ap.vertical, ap.vs] = ['vs', ap.vs - 100];
+    }
+    if (pressed('headingSync')) panel.set('headingBug', Math.round(t.headingDeg) % 360);
+    if (pressed('goAround'))
+      [ap.engaged, ap.lateral, ap.vertical, ap.fd] = [false, 'roll', 'pitch', true];
+    if (ap.lateralArmed && t.time - ap.armedAt > 3) {
+      ap.lateral = ap.lateralArmed;
+      if (ap.lateralArmed === 'apr') ap.verticalArmed = 'gs';
+      ap.lateralArmed = undefined;
+    }
+  } else
+    for (const id of ['apEngage', 'apHdg', 'apNav', 'apApr', 'apAlt', 'apVs', 'apFlc']) pressed(id);
+  if (pressed('xpdrIdent')) fake12.identUntil = t.time + 18;
+  fake12.lon +=
+    (t.groundSpeed * dt * Math.sin(t.trackDeg * DEG)) / 1852 / 60 / Math.cos(fake12.lat * DEG);
+  fake12.lat += (t.groundSpeed * dt * Math.cos(t.trackDeg * DEG)) / 1852 / 60;
+  const active = stateName === 'cruise' ? 3 : 4;
+  const wp = PLAN_PC12[active]!;
+  const prev = PLAN_PC12[active - 1]!;
+  const dE = (wp.lon - fake12.lon) * 60 * Math.cos(fake12.lat * DEG);
+  const dN = (wp.lat - fake12.lat) * 60;
+  const legE = (wp.lon - prev.lon) * 60 * Math.cos(fake12.lat * DEG);
+  const legN = (wp.lat - prev.lat) * 60;
+  const legLen = Math.hypot(legE, legN);
+  const ils = stateName === 'landing';
+  const nav = (n: 1 | 2) => {
+    const valid = n === 1 ? ui.nav1 : ui.nav2;
+    return {
+      frequency: v(`nav${n}Active`),
+      standby: v(`nav${n}Standby`),
+      valid,
+      ident: valid ? (n === 1 ? (ils ? 'IZH' : 'KLO') : 'TRA') : '',
+      localizer: n === 1 && ils,
+      course: n === 1 && ils ? 316 : v(`obs${n}`),
+      deviation: n === 1 ? (ils ? uiPc12.locDev : ui.dev1) : ui.dev2,
+      toFrom: valid ? ('to' as const) : ('off' as const),
+      bearing: valid ? (n === 1 ? 312 : 30) : undefined,
+      glideSlope: n === 1 && valid && ils ? uiPc12.gsDev : undefined,
+    };
+  };
+  const dmeNav = v('dmeSource') >= 0.5 ? ui.nav2 : ui.nav1;
+  const gskt = t.groundSpeed / KT;
+  // Flight director: towards the heading bug (or the course), and the vertical mode's target.
+  const hdgErr = ((((v('headingBug') - t.headingDeg) % 360) + 540) % 360) - 180;
+  const fdBank =
+    ap.lateral === 'hdg'
+      ? Math.max(-25, Math.min(25, hdgErr * 1.2))
+      : ap.lateral === 'roll'
+        ? t.bank / DEG
+        : -uiPc12.locDev * 15;
+  const vsErr = (ap.vertical === 'vs' ? ap.vs : 0) - (t.verticalSpeed / FT) * 60;
+  const fdPitch =
+    t.pitch / DEG +
+    (ap.vertical === 'vs'
+      ? vsErr * 0.002
+      : ap.vertical === 'flc'
+        ? (kt - ap.speed) * 0.3
+        : ap.vertical === 'gs'
+          ? uiPc12.gsDev * 2.5
+          : 0);
+  const avionics: AvionicsTelemetry = {
+    powered: avionicsOn,
+    com1: { active: v('com1Active'), standby: v('com1Standby') },
+    com2: { active: v('com2Active'), standby: v('com2Standby') },
+    nav1: nav(1),
+    nav2: nav(2),
+    dme: {
+      source: v('dmeSource') >= 0.5 ? 'nav2' : 'nav1',
+      distanceNm: dmeNav ? (ils ? 4.6 : ui.dme) : undefined,
+      groundSpeedKt: dmeNav ? gskt : undefined,
+      minutes: dmeNav && gskt > 30 ? ((ils ? 4.6 : ui.dme) / gskt) * 60 : undefined,
+    },
+    adf: {
+      frequency: v('adfFrequency'),
+      valid: ui.adf,
+      ident: ui.adf ? 'ZH' : '',
+      relativeBearing: ui.adf ? ui.adfBearing : undefined,
+    },
+    transponder: {
+      code: v('xpdrCode'),
+      mode: (['off', 'standby', 'on', 'alt'] as const)[Math.round(v('xpdrMode'))]!,
+      ident: t.time < fake12.identUntil,
+      reply: v('xpdrMode') >= 2 && t.time % 2 < 0.12,
+    },
+    markers: {
+      outer: ui.markers.includes('o'),
+      middle: ui.markers.includes('m'),
+      inner: ui.markers.includes('i'),
+    },
+    autopilot: {
+      engaged: ap.engaged,
+      lateral: ap.lateral,
+      lateralArmed: ap.lateralArmed,
+      vertical: ap.vertical,
+      verticalArmed: ap.verticalArmed,
+      selectedAltitude: v('apAltitude'),
+      selectedVerticalSpeed: ap.vs,
+      disconnectWarning: t.time - ap.offAt < 2.5,
+      yawDamper: ap.yd,
+      flightDirector: ap.fd ? { pitch: fdPitch * DEG, bank: fdBank * DEG } : undefined,
+      selectedSpeed: ap.speed,
+    },
+    gps: {
+      plan: PLAN_PC12,
+      active,
+      distanceNm: Math.hypot(dE, dN),
+      bearing: (Math.atan2(dE, dN) / DEG + 360) % 360,
+      desiredTrack: (Math.atan2(legE, legN) / DEG + 360) % 360,
+      crossTrackNm: legLen > 0 ? (dN * legE - dE * legN) / legLen : 0,
+      groundSpeedKt: gskt,
+      track: t.trackDeg,
+      lon: fake12.lon,
+      lat: fake12.lat,
+    },
+  };
+  t.avionics = ui.avionics ? avionics : undefined;
+}
+
 // ---- camera ---------------------------------------------------------------------------------
 const camera = new PerspectiveCamera(40, 1, 0.05, 2000);
-const target = new Vector3(0, ac.object.position.y - 0.2, 0.4);
+/** The PC-12 is about 1.6 times the Cessna: the same framings from further away. */
+const S = pc12 ? 1.6 : 1;
+const target = pc12
+  ? new Vector3(0, ac.object.position.y - 0.5, 0.9)
+  : new Vector3(0, ac.object.position.y - 0.2, 0.4);
+const vec = (s: string | null) => {
+  const v = s?.split(',').map(Number);
+  return v && v.length === 3 && v.every(Number.isFinite)
+    ? new Vector3(v[0], v[1], v[2])
+    : undefined;
+};
 const cams: Record<string, [number, number, number]> = {
   'front-left': [7.5, 1.6, 9.5],
   side: [17, 0.4, 0.4],
@@ -626,15 +1178,39 @@ if (inCockpit) {
   if (view === 'cockpit') {
     camera.fov = Number(q.get('fov') ?? 55);
     applyLook();
+  } else if (pc12) {
+    camera.up.set(0, 1, 0).applyQuaternion(ac.object.quaternion);
+    camera.fov = Number(q.get('fov') ?? 47);
+    camera.lookAt(ac.object.localToWorld(new Vector3(e.x - 0.36, e.y - 0.36, e.z + 0.72)));
   } else {
     camera.up.set(0, 1, 0).applyQuaternion(ac.object.quaternion);
     camera.fov = 28;
     camera.lookAt(ac.object.localToWorld(new Vector3(e.x - 0.03, e.y - 0.62, e.z + 0.98)));
   }
+  const aimNode = q.get('aim') ? ac.object.getObjectByName(q.get('aim')!) : undefined;
+  if (aimNode) {
+    ac.object.updateMatrixWorld(true);
+    const w = aimNode.getWorldPosition(new Vector3());
+    aimAt(ac.object.worldToLocal(w));
+    camera.fov = Number(q.get('fov') ?? 30);
+  }
 } else {
-  const p = cams[view] ?? cams['front-left']!;
+  const p = (cams[view] ?? cams['front-left']!).map((c) => c * S) as [number, number, number];
   camera.position.set(p[0], ac.object.position.y + p[1], p[2]);
-  if (view === 'side') camera.fov = 30;
+  const orbit = q.get('orbit')?.split(',').map(Number);
+  if (orbit && orbit.length === 3) {
+    const [az, el, dist] = orbit.map((v, i) => (i < 2 ? v * DEG : v)) as [number, number, number];
+    camera.position
+      .set(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el))
+      .multiplyScalar(dist)
+      .add(target);
+  }
+  const camArg = vec(q.get('cam'));
+  const targetArg = vec(q.get('target'));
+  if (camArg) camera.position.copy(camArg).add(ac.object.position);
+  if (targetArg) target.copy(targetArg).add(ac.object.position);
+  if (q.has('fov')) camera.fov = Number(q.get('fov'));
+  if (view === 'side' && !q.has('fov')) camera.fov = 30;
   // Zoomed in, so the reduced models can be judged at their switching distance.
   if (view === 'far') camera.fov = 12;
   if (view === 'distant') camera.fov = 4;
@@ -658,7 +1234,7 @@ new ResizeObserver(resize).observe(canvas);
 resize();
 
 // ---- clicking the cockpit: the rules the app will use (src/aircraft/controlClicks.ts) --------
-const SPECS = new Map(C172_CONTROLS.map((s) => [s.id, s]));
+const SPECS = new Map(CONTROLS.map((s) => [s.id, s]));
 const raycaster = new Raycaster();
 const ndc = new Vector2();
 const clicks: { control: string; side: number; step?: number; value: number }[] = [];
@@ -792,11 +1368,54 @@ const addSlider = (
   box.append(l);
 };
 if (!shot) {
+  if (pc12) {
+    const slider = (
+      key: keyof typeof uiPc12,
+      label: string,
+      min: number,
+      max: number,
+      s: number,
+    ) => {
+      const l = document.createElement('label');
+      const i = document.createElement('input');
+      i.type = 'range';
+      i.min = String(min);
+      i.max = String(max);
+      i.step = String(s);
+      i.value = String(uiPc12[key]);
+      i.oninput = () => (uiPc12[key] = Number(i.value));
+      l.append(`${label} `, i);
+      box.append(l);
+    };
+    slider('gearPos', 'gear (-1 = lever)', -1, 1, 0.01);
+    slider('flapPos', 'flaps (-1 = lever)', -1, 1, 0.01);
+    slider('fuelL', 'fuel L lb', 0, 1352, 10);
+    slider('fuelR', 'fuel R lb', 0, 1352, 10);
+    slider('locDev', 'LOC dev', -1, 1, 0.02);
+    slider('gsDev', 'GS dev', -1, 1, 0.02);
+    const rev = document.createElement('label');
+    const ri = document.createElement('input');
+    ri.type = 'checkbox';
+    ri.checked = !!controls.reverse;
+    ri.onchange = () => panel.set('reverse', ri.checked ? 1 : 0);
+    rev.append(ri, ' reverse');
+    box.append(rev);
+    const thr = document.createElement('label');
+    const ti = document.createElement('input');
+    ti.type = 'range';
+    ti.min = '0';
+    ti.max = '1';
+    ti.step = '0.01';
+    ti.value = String(controls.throttle[0] ?? 0);
+    ti.oninput = () => panel.set('throttle', Number(ti.value));
+    thr.append('power lever ', ti);
+    box.append(thr);
+  }
   addCheck('systems', 'fake systems');
   addCheck('instruments', 'fake instruments');
   addCheck('avionics', 'fake avionics');
-  addCheck('vacuumFail', 'vacuum failed');
-  addCheck('altFail', 'alternator failed');
+  if (!pc12) addCheck('vacuumFail', 'vacuum failed');
+  addCheck('altFail', pc12 ? 'generators failed' : 'alternator failed');
   addCheck('nav1', 'NAV 1 signal');
   addCheck('ils', 'NAV 1 is an ILS');
   addSlider('dev1', 'NAV 1 dev', -1, 1, 0.05);
@@ -806,10 +1425,12 @@ if (!shot) {
   addSlider('dme', 'DME NM', 0, 120, 0.1);
   addCheck('adf', 'ADF signal');
   addSlider('adfBearing', 'ADF rel brg', 0, 359, 1);
-  addSlider('fuelL', 'fuel L gal', 0, 26.5, 0.5);
-  addSlider('fuelR', 'fuel R gal', 0, 26.5, 0.5);
+  if (!pc12) {
+    addSlider('fuelL', 'fuel L gal', 0, 26.5, 0.5);
+    addSlider('fuelR', 'fuel R gal', 0, 26.5, 0.5);
+  }
   const sel = document.createElement('select');
-  for (const id of ['', ...C172_CONTROLS.map((c) => c.id)])
+  for (const id of ['', ...CONTROLS.map((c) => c.id)])
     sel.add(new Option(id || '(no highlight)', id));
   sel.value = ui.highlight;
   sel.onchange = () => ac.highlightControl(sel.value || null);
@@ -825,7 +1446,8 @@ const step = () => {
   telemetry.time += DT;
   telemetry.headingDeg = (((startHeading + st.turnRate * telemetry.time) % 360) + 360) % 360;
   telemetry.trackDeg = telemetry.headingDeg;
-  fakeStep(DT);
+  if (pc12) fakeStepPc12(DT);
+  else fakeStep(DT);
   ac.update(DT, telemetry, controls, panel);
 };
 // Let the instrument lags settle.
@@ -848,6 +1470,17 @@ demoWindow.__demo = {
   ui,
   look,
   applyLook,
+  /** Draw calls and triangles of the last frame, texture memory of the aircraft (MB). */
+  stats() {
+    const r = renderer.info.render as { drawCalls?: number; calls: number; triangles: number };
+    const a = ac as unknown as { textureBytes?: number; canvasBytes?: number };
+    return {
+      drawCalls: r.drawCalls ?? r.calls,
+      triangles: r.triangles,
+      textureMB: Math.round(((a.textureBytes ?? 0) / 1048576) * 10) / 10,
+      canvasMB: Math.round(((a.canvasBytes ?? 0) / 1048576) * 10) / 10,
+    };
+  },
   /** Points the eye at a control's hit box and returns its screen position (CSS pixels). */
   aim(id: string, offset = 0) {
     const boxes = (
@@ -875,7 +1508,7 @@ demoWindow.__demo = {
   },
 } as typeof demoWindow.__demo;
 const info = document.getElementById('info')!;
-info.textContent = `${backend} · state ${stateName} · view ${view} · ${quality}`;
+info.textContent = `${type} · ${backend} · state ${stateName} · view ${view} · ${quality}`;
 let frames = 0;
 renderer.setAnimationLoop(() => {
   if (!shot) {

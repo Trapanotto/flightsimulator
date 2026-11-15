@@ -72,7 +72,7 @@ export interface AircraftVisual {
 
 /** A cockpit control under the pointer. */
 export interface ControlHit {
-  /** Name of the control, see `C172_CONTROLS` in the sim package. */
+  /** Name of the control, see `C172_CONTROLS` and `PC12_CONTROLS` in the sim package. */
   control: string;
   /** Distance along the ray, metres. */
   distance: number;
@@ -114,6 +114,10 @@ export async function loadAircraftVisual(
     case 'c172': {
       const { loadC172 } = await import('./C172Visual');
       return loadC172(options);
+    }
+    case 'pc12': {
+      const { loadPC12 } = await import('./PC12Visual');
+      return loadPC12(options);
     }
     default:
       throw new Error(`loadAircraftVisual('${String(id)}'): no model for this type`);
