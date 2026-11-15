@@ -15,7 +15,21 @@ const SCENES = [
   { name: 'home-mobile', query: 'shot=1&device=mobile', width: 390, height: 844 },
   // The fallback for browsers without WebGPU has to keep working.
   { name: 'home-webgl', query: 'shot=1&webgl=1', width: 1280, height: 720 },
+  // The home screen is interface only; these draw the world: a Cessna lined up at Bern,
+  // frozen in the photo mode with its panel hidden.
+  { name: 'flight-desktop', query: 'shot=1', width: 1280, height: 720, flight: true },
+  { name: 'flight-mobile', query: 'shot=1&device=mobile', width: 844, height: 390, flight: true },
+  { name: 'flight-webgl', query: 'shot=1&webgl=1', width: 1280, height: 720, flight: true },
 ];
+const FLIGHT = {
+  aircraft: 'c172',
+  start: { kind: 'runway', airport: 'LSZB', runway: '14' },
+  time: 11,
+  weather: 'clear',
+  season: 'summer',
+  airport: 'LSZB',
+  atc: false,
+};
 /** A scene fails when more than this share of its pixels differ. */
 const MAX_DIFF = 0.01;
 
@@ -56,6 +70,17 @@ try {
     await page.goto(`${base}?${scene.query}`);
     await page.waitForFunction(() => window.__app?.ready, null, { timeout: 120_000 });
     await page.evaluate(() => document.fonts.ready);
+    if (scene.flight) {
+      await page.evaluate((plan) => window.__app.startFlight(plan), FLIGHT);
+      await page.waitForFunction(() => window.__app.game.screen.value === 'flight', null, {
+        timeout: 120_000,
+      });
+      // The chase camera eases into its place behind the aircraft first.
+      await page.waitForTimeout(3000);
+      await page.evaluate(() => window.__app.actions.openPhoto());
+      await page.waitForTimeout(400);
+      await page.keyboard.press('KeyH');
+    }
     // Let the last terrain tiles fade in and the sky settle.
     await page.waitForTimeout(2500);
     const backend = await page.evaluate(() => window.__app.backend);
