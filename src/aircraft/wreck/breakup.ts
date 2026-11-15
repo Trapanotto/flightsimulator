@@ -345,8 +345,9 @@ export function sizeFactor(length: number): number {
  * Fire and its light against the sky's exposure (about 4 at noon, up to 1e5 on a moonlit
  * night). A fire has a fixed brightness, so it would glare ever more as the eye adapts to the
  * dark; but the eye adapts to the fire it looks at too. So the gain rises only slowly and
- * stops: a clear orange glow at night, a fire that still reads against a sunlit field by day.
+ * stops early: the fire stays yellow-orange at night instead of burning out to white, and
+ * still reads against a sunlit field by day.
  */
 export function fireGain(exposure: number): number {
-  return Math.min(3, Math.max(1, (exposure / 4.2) ** 0.3));
+  return Math.min(1.3, Math.max(1, (exposure / 4.2) ** 0.2));
 }
