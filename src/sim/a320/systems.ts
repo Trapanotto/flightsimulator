@@ -131,7 +131,11 @@ export class A320Systems {
     // EGT peaks during the light-off, settles at about 400 °C at no load.
     const ambient = t.engines[0]!.turbineTemperature ?? 15;
     const egtTarget =
-      this.apuN > 0.1 ? (this.apuN < 0.95 ? 300 + 500 * Math.sin(Math.PI * this.apuN) : 380) : ambient;
+      this.apuN > 0.1
+        ? this.apuN < 0.95
+          ? 300 + 500 * Math.sin(Math.PI * this.apuN)
+          : 380
+        : ambient;
     this.apuEgt += (egtTarget - this.apuEgt) * (1 - Math.exp(-dt / 3));
     out.apu.master = master;
     out.apu.n = this.apuN * 100;
@@ -168,13 +172,16 @@ export class A320Systems {
     } else this.adirsTimer = 0;
     const aligned = this.adirsTimer >= ADIRS_ALIGN_TIME;
     out.adirs.aligned = aligned;
-    out.adirs.remaining = c.get('adirs') === 1 ? Math.max(0, ADIRS_ALIGN_TIME - this.adirsTimer) : 0;
+    out.adirs.remaining =
+      c.get('adirs') === 1 ? Math.max(0, ADIRS_ALIGN_TIME - this.adirsTimer) : 0;
 
     // ---- pneumatics ----
     const apuBleed = apuAvail && c.get('apuBleed') === 1;
     // The engine bleed valves close while the APU bleed feeds the ducts.
-    const bleed1 = c.get('bleed1') === 1 && n2a > 0.5 && !apuBleed ? 45 * clamp((n2a - 0.5) / 0.1, 0, 1) : 0;
-    const bleed2 = c.get('bleed2') === 1 && n2b > 0.5 && !apuBleed ? 45 * clamp((n2b - 0.5) / 0.1, 0, 1) : 0;
+    const bleed1 =
+      c.get('bleed1') === 1 && n2a > 0.5 && !apuBleed ? 45 * clamp((n2a - 0.5) / 0.1, 0, 1) : 0;
+    const bleed2 =
+      c.get('bleed2') === 1 && n2b > 0.5 && !apuBleed ? 45 * clamp((n2b - 0.5) / 0.1, 0, 1) : 0;
     const xbleed = c.get('crossbleed') === 1 || apuBleed;
     let left = Math.max(bleed1, apuBleed ? 38 : 0);
     let right = bleed2;
@@ -194,13 +201,16 @@ export class A320Systems {
       const duct = i === 0 ? left : right;
       const autoStart = mode === 2 && masterOn && !plant.running && n2 < CUTOUT_N2;
       const crank = mode === 0 && !masterOn && n2 < CUTOUT_N2;
-      const valve = (autoStart || crank || (plant.cranking && masterOn && mode === 2)) && duct >= START_PSI;
+      const valve =
+        (autoStart || crank || (plant.cranking && masterOn && mode === 2)) && duct >= START_PSI;
       st.valve[i] = valve && plant.accessorySpeed / 100 < CUTOUT_N2;
       input.starter = st.valve[i]!;
       input.starterPower = st.valve[i] ? clamp(duct / 40, 0, 1) : 0;
       // The igniters fire from 16 % N2 during an automatic start; IGN/START also keeps them
       // on in flight (continuous relight).
-      const ign = (mode === 2 && masterOn && n2 >= IGNITION_N2 && (st.valve[i] || !plant.running)) || (mode === 2 && air && masterOn);
+      const ign =
+        (mode === 2 && masterOn && n2 >= IGNITION_N2 && (st.valve[i] || !plant.running)) ||
+        (mode === 2 && air && masterOn);
       st.ignition[i] = ign && e.dcEss;
       input.ignition = st.ignition[i] ? 1 : 0;
       input.continuousIgnition = mode === 2 && air && e.dcEss;

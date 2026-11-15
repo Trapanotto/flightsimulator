@@ -5,7 +5,14 @@
  * compare them with the published values.
  */
 import { DEG, FPM, FT, KT, Pid, clamp, fly, headingError } from './harness';
-import { a320Airborne, a320OnGround, airbus, press, type A320Flight, type A320Options } from './a320Harness';
+import {
+  a320Airborne,
+  a320OnGround,
+  airbus,
+  press,
+  type A320Flight,
+  type A320Options,
+} from './a320Harness';
 import { horizontalDistance } from './pc12Procedures';
 
 export const totalFuelFlow = (f: A320Flight) =>
@@ -182,7 +189,11 @@ export function a320Stall(flapLever: number, mass: number, onePlusF = false) {
   fly(f, 160, (dt) => {
     target -= dt;
     const theta = base + speed.update(t.ias / KT - target, dt);
-    ac.controls.pitch = clamp(pitch.update(theta - t.pitch, dt) - 0.5 * ac.state.angularVelocity.y, -1, 1);
+    ac.controls.pitch = clamp(
+      pitch.update(theta - t.pitch, dt) - 0.5 * ac.state.angularVelocity.y,
+      -1,
+      1,
+    );
     // In direct law the pilot trims with the wheel.
     ac.controls.pitchTrim = clamp(ac.controls.pitchTrim + 0.4 * t.elevator * dt, -1, 1);
     ac.controls.roll = clamp(2 * (0 - t.bank) - 0.3 * ac.state.angularVelocity.x, -1, 1);
@@ -199,7 +210,8 @@ export function a320Stall(flapLever: number, mass: number, onePlusF = false) {
   });
   const vs = Math.sqrt((2 * mass * 9.80665) / (1.225 * 122.6 * clMax)) / KT;
   /** Angle of attack where the lift first reaches a share of its maximum, degrees. */
-  const alphaAtShare = (share: number) => (samples.find((p) => p[1] >= share * clMax)?.[0] ?? NaN) / DEG;
+  const alphaAtShare = (share: number) =>
+    (samples.find((p) => p[1] >= share * clMax)?.[0] ?? NaN) / DEG;
   return {
     vs1g: vs,
     clMax,
@@ -234,7 +246,10 @@ export interface TakeoffResult {
  * 10 (V2 with an engine out). With `failAtV1` the left engine fails at V1 and the pilot keeps
  * the runway heading with the rudder and trims it out after lift-off.
  */
-export function a320Takeoff(mass: number, o: { failAtV1?: boolean; elevation?: number } = {}): TakeoffResult {
+export function a320Takeoff(
+  mass: number,
+  o: { failAtV1?: boolean; elevation?: number } = {},
+): TakeoffResult {
   const f = a320OnGround({ mass, flapLever: 1, elevation: o.elevation });
   const { ac } = f;
   const t = ac.telemetry;
@@ -362,20 +377,24 @@ export function a320Landing(mass: number, autobrake = 2, useReverse = false) {
   let stopped: { x: number; y: number; z: number } | undefined;
   let tdSink = 0;
   let tdKias = 0;
+  const roll: [number, number][] = [];
+  let flareTime = 0;
   let phase: 'approach' | 'flare' | 'rollout' = 'approach';
-  fly(f, 200, () => {
+  fly(f, 200, (dt) => {
     const agl = (t.agl ?? 100) / FT;
     ac.cockpit.set('fcuSpeed', Math.round(vapp));
     c.roll = clamp(1.5 * (0.02 * headingError(0, t.headingDeg) - t.bank), -1, 1);
     if (!fifty && agl < 50) fifty = { ...ac.state.position };
     if (phase === 'approach') {
       c.pitch = pathStick(f, -3 * DEG);
-      if (agl < 30) phase = 'flare';
+      if (agl < 40) phase = 'flare';
     } else if (phase === 'flare') {
       if (agl < 20) levers(f, 0);
       // The flare against the flare mode's nose-down bias: sink to about 2 ft/s.
       const vsTarget = -(2 + agl / 4) * FT;
-      c.pitch = clamp(0.3 + 0.15 * (vsTarget - t.verticalSpeed), -0.2, 0.9);
+      // A pilot's hand: the stick comes back steadily, a little more while the sink is high.
+      flareTime += dt;
+      c.pitch = clamp(0.12 * flareTime + (0.03 * (vsTarget - t.verticalSpeed)) / FT, -0.2, 0.9);
       if (t.onGround) {
         phase = 'rollout';
         touchdown = { ...ac.state.position };
@@ -385,6 +404,7 @@ export function a320Landing(mass: number, autobrake = 2, useReverse = false) {
       }
     } else {
       c.pitch = 0;
+      roll.push([t.time, t.groundSpeed]);
       c.yaw = clamp(0.15 * headingError(0, t.headingDeg) - 0.6 * ac.state.angularVelocity.z, -1, 1);
       if (useReverse) {
         c.reverse = true;
@@ -406,5 +426,49 @@ export function a320Landing(mass: number, autobrake = 2, useReverse = false) {
     touchdownKias: tdKias,
     crashed: t.crashed,
     groundSpoilers: b.controls.groundSpoilers,
+    deceleration: rollDeceleration(roll),
   };
+}
+
+/**
+ * Accelerate-stop: take-off thrust from brake release, the left engine fails at V1, the
+ * crew retards both levers (2 s later, as certification allows for the recognition) and the
+ * armed ground spoilers and autobrake MAX stop the aircraft. Returns the distance, m.
+ */
+export function a320AccelerateStop(mass: number) {
+  const f = a320OnGround({ mass, flapLever: 1 });
+  const { ac } = f;
+  const t = ac.telemetry;
+  const c = ac.controls;
+  const b = airbus(f);
+  ac.cockpit.set('spoilersArmed', 1);
+  ac.cockpit.set('autobrake', 3);
+  c.parkingBrake = false;
+  c.pitchTrim = 0.1;
+  fly(f, 2);
+  const v1 = b.speeds.v1;
+  c.brakeLeft = c.brakeRight = 1;
+  levers(f, 1);
+  fly(f, 3);
+  c.brakeLeft = c.brakeRight = 0;
+  const start = { ...ac.state.position };
+  let failedAt = NaN;
+  fly(f, 150, () => {
+    const heading = headingError(0, t.headingDeg);
+    c.yaw = clamp(0.4 * heading - 2 * ac.state.angularVelocity.z, -1, 1);
+    if (Number.isNaN(failedAt) && t.ias / KT >= v1) {
+      ac.failures.set('engine', true);
+      failedAt = t.time;
+    }
+    if (!Number.isNaN(failedAt) && t.time > failedAt + 2) levers(f, 0);
+    return !Number.isNaN(failedAt) && t.groundSpeed < 0.5;
+  });
+  return { distance: horizontalDistance(f, start, ac.state.position), v1, crashed: t.crashed };
+}
+
+/** Average deceleration (m/s²) of a landing roll between two ground speeds, knots. */
+export function rollDeceleration(samples: readonly [number, number][], from = 110, to = 60) {
+  const a = samples.find((s) => s[1] <= from * KT);
+  const b = samples.find((s) => s[1] <= to * KT);
+  return a && b && b[0] > a[0] ? (a[1] - b[1]) / (b[0] - a[0]) : NaN;
 }

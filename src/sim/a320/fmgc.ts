@@ -96,14 +96,7 @@ type Vertical =
   | 'ROLL OUT';
 type Athr = 'off' | 'armed' | 'active';
 export type FmgcPhase =
-  | 'preflight'
-  | 'takeoff'
-  | 'climb'
-  | 'cruise'
-  | 'descent'
-  | 'approach'
-  | 'goAround'
-  | 'done';
+  'preflight' | 'takeoff' | 'climb' | 'cruise' | 'descent' | 'approach' | 'goAround' | 'done';
 
 const APPROACH_VERTICAL: readonly Vertical[] = ['G/S*', 'G/S', 'LAND', 'FLARE', 'ROLL OUT'];
 const LANDING: readonly Vertical[] = ['LAND', 'FLARE', 'ROLL OUT'];
@@ -313,12 +306,19 @@ export class A320Fmgc implements AutopilotComputer {
       } else this.athr = toga || flx ? 'armed' : 'active';
       this.athrIntegral = Math.min(leverMax, CLB);
     }
-    if (this.athr === 'armed' && !input.onGround && leverMax <= CLB + IN_DETENT && leverMax > IDLE) {
+    if (
+      this.athr === 'armed' &&
+      !input.onGround &&
+      leverMax <= CLB + IN_DETENT &&
+      leverMax > IDLE
+    ) {
       this.athr = 'active';
       this.athrIntegral = Math.min(leverMax, CLB);
     }
-    if (this.athr === 'active' && (toga || flx) && !this.floor && !this.togaLock) this.athr = 'armed';
-    if (this.athr === 'active' && leverMax <= IDLE && !this.floor && !this.togaLock) this.athr = 'off';
+    if (this.athr === 'active' && (toga || flx) && !this.floor && !this.togaLock)
+      this.athr = 'armed';
+    if (this.athr === 'active' && leverMax <= IDLE && !this.floor && !this.togaLock)
+      this.athr = 'off';
     // Alpha floor: take-off thrust whatever the levers say, then locked until disconnected.
     if (b.controls.alphaFloor && !input.onGround && aglFt > 100 && normalLaw) {
       this.floor = true;
@@ -377,7 +377,10 @@ export class A320Fmgc implements AutopilotComputer {
       if (this.speedManaged) {
         const t = this.telemetry.airbus.speeds;
         const v = Number.isFinite(t.target) ? t.target : ias;
-        c.set('fcuSpeed', this.machMode && m > 0.1 ? Math.round(((v * m) / ias) * 100) : Math.round(v));
+        c.set(
+          'fcuSpeed',
+          this.machMode && m > 0.1 ? Math.round(((v * m) / ias) * 100) : Math.round(v),
+        );
         this.selected = c.get('fcuSpeed');
       }
       this.speedManaged = false;
@@ -387,7 +390,9 @@ export class A320Fmgc implements AutopilotComputer {
       if (!this.speedManaged)
         c.set(
           'fcuSpeed',
-          this.machMode ? Math.round(((this.selected / 100) * ias) / m) : Math.round(((this.selected * m) / ias) * 100),
+          this.machMode
+            ? Math.round(((this.selected / 100) * ias) / m)
+            : Math.round(((this.selected * m) / ias) * 100),
         );
       this.selected = c.get('fcuSpeed');
       this.machMode = !this.machMode;
@@ -558,7 +563,13 @@ export class A320Fmgc implements AutopilotComputer {
       this.lateral = 'RWY TRK';
       this.holdTrack = track;
     }
-    if (this.navArmed && gps.valid && !input.onGround && aglFt > 30 && !this.lateral.startsWith('LOC')) {
+    if (
+      this.navArmed &&
+      gps.valid &&
+      !input.onGround &&
+      aglFt > 30 &&
+      !this.lateral.startsWith('LOC')
+    ) {
       // NAV captures near the course, or at once from the take-off and go-around modes.
       if (Math.abs(gps.offset) < 3 * NM || ['', 'RWY TRK', 'GA TRK'].includes(this.lateral)) {
         this.lateral = 'NAV';
@@ -575,7 +586,11 @@ export class A320Fmgc implements AutopilotComputer {
         if (this.phase !== 'takeoff') this.phase = 'approach';
       }
     }
-    if (this.lateral === 'LOC*' && Math.abs(loc.needle) < 0.1 && Math.abs(wrap180(loc.course - track)) < 6)
+    if (
+      this.lateral === 'LOC*' &&
+      Math.abs(loc.needle) < 0.1 &&
+      Math.abs(wrap180(loc.course - track)) < 6
+    )
       this.lateral = 'LOC';
     if ((this.lateral === 'LOC*' || this.lateral === 'LOC') && !loc.valid) this.lateral = 'HDG';
   }
@@ -586,7 +601,8 @@ export class A320Fmgc implements AutopilotComputer {
     const vs = input.verticalSpeed / FPM;
     if (this.vertical === 'SRS' && !input.onGround && altFt > this.runwayElevation + REDUCTION_FT) {
       // Acceleration altitude.
-      this.vertical = Math.abs(sel - altFt) < 100 ? 'ALT' : this.openMode(sel > altFt, this.altitudeManaged);
+      this.vertical =
+        Math.abs(sel - altFt) < 100 ? 'ALT' : this.openMode(sel > altFt, this.altitudeManaged);
       this.altitudeTarget = sel;
       this.phase = 'climb';
       this.telemetry.goAround = false;
@@ -643,7 +659,8 @@ export class A320Fmgc implements AutopilotComputer {
         this.captureRate = vs;
       } else if (this.vertical !== 'V/S') {
         // A climb mode never descends and a descent mode never climbs.
-        if (this.vertical.includes('CLB') && toGo < -50) this.vertical = this.openMode(false, false);
+        if (this.vertical.includes('CLB') && toGo < -50)
+          this.vertical = this.openMode(false, false);
         if (this.vertical.includes('DES') && toGo > 50) this.vertical = this.openMode(true, false);
       }
     }
@@ -753,7 +770,7 @@ export class A320Fmgc implements AutopilotComputer {
     const gamma = Math.asin(clamp(input.verticalSpeed / tas, -1, 1));
     const pitch = input.pitch;
     const path = (fpm: number) => Math.asin(clamp((fpm * FPM) / tas, -0.3, 0.3));
-    let gammaCmd = gamma;
+    let gammaCmd: number;
     let tau = 3;
     let limitN = 0.15;
     let feedForward = 0;
@@ -965,7 +982,10 @@ export class A320Fmgc implements AutopilotComputer {
     f.thrustCaution =
       on && this.athr === 'armed' && !input.onGround && aboveReduction ? 'LVR CLB' : '';
     f.combined = LANDING.includes(this.vertical);
-    f.vertical = this.vertical === 'V/S' ? `V/S ${this.targetVs >= 0 ? '+' : ''}${this.targetVs}` : this.vertical;
+    f.vertical =
+      this.vertical === 'V/S'
+        ? `V/S ${this.targetVs >= 0 ? '+' : ''}${this.targetVs}`
+        : this.vertical;
     f.lateral = f.combined ? this.vertical : this.lateral;
     f.verticalArmed = this.gsArmed
       ? OPEN.includes(this.vertical) || this.vertical.startsWith('ALT')
@@ -984,7 +1004,8 @@ export class A320Fmgc implements AutopilotComputer {
             ? 'CAT 1'
             : ''
       : '';
-    f.minimum = f.capability === 'CAT 3 DUAL' ? 'NO DH' : f.capability === 'CAT 3 SINGLE' ? 'DH 50' : '';
+    f.minimum =
+      f.capability === 'CAT 3 DUAL' ? 'NO DH' : f.capability === 'CAT 3 SINGLE' ? 'DH 50' : '';
     f.autopilot = this.ap1 && this.ap2 ? 'AP1+2' : this.ap1 ? 'AP1' : this.ap2 ? 'AP2' : '';
     f.flightDirectors = fd ? '1 FD 2' : '';
     f.autothrust = this.athr;

@@ -59,8 +59,7 @@ export class A320Computers implements ControlLaw {
     const slatsOut = SLATS_FLAPS[this.fbw.config][0] > 0;
     this.systemsComputer.step(ctx, b.systems, slatsOut);
     b.systems.grossMass = this.def.mass + ctx.systems.fuel.total;
-    if (this.first)
-      for (let i = 0; i < 2; i++) this.engineWasRunning[i] = ctx.engines[i]!.running;
+    if (this.first) for (let i = 0; i < 2; i++) this.engineWasRunning[i] = ctx.engines[i]!.running;
     this.ecam(ctx, b);
   }
 
@@ -98,7 +97,8 @@ export class A320Computers implements ControlLaw {
     else if (air && t.gear > 0.01 && ias > VLE + 4) red.push('OVER SPEED VLE');
     if (!air && levers.some((x) => x >= 0.8) && ias < 80) {
       if (config === '0' || config === 'FULL') red.push('CONFIG FLAPS NOT IN T.O CONFIG');
-      if ((t.speedbrake ?? 0) > 0.05 && !fc.groundSpoilers) red.push('CONFIG SPD BRK NOT RETRACTED');
+      if ((t.speedbrake ?? 0) > 0.05 && !fc.groundSpoilers)
+        red.push('CONFIG SPD BRK NOT RETRACTED');
       if (ctx.controls.parkingBrake) red.push('CONFIG PARK BRK ON');
       if (fc.stabiliser > 7 || fc.stabiliser < -2.5) red.push('CONFIG PITCH TRIM NOT IN T.O RANGE');
     }
@@ -128,8 +128,10 @@ export class A320Computers implements ControlLaw {
       if (ctx.engines[1]!.running && s.electrical.source[1] !== 'gen2' && c.get('generator2') === 1)
         amber.push('ELEC GEN 2 FAULT');
     }
-    if (s.electrical.dcBat && !s.electrical.ac1 && (air || anyRunning)) amber.push('ELEC AC BUS 1 FAULT');
-    if (s.electrical.dcBat && !s.electrical.ac2 && (air || anyRunning)) amber.push('ELEC AC BUS 2 FAULT');
+    if (s.electrical.dcBat && !s.electrical.ac1 && (air || anyRunning))
+      amber.push('ELEC AC BUS 1 FAULT');
+    if (s.electrical.dcBat && !s.electrical.ac2 && (air || anyRunning))
+      amber.push('ELEC AC BUS 2 FAULT');
     if (air && !s.adirs.aligned) amber.push('NAV ADR/IR FAULT');
     if (s.electrical.dcBat && s.fuel.tanks[0] < 750) amber.push('FUEL L WING TK LO LVL');
     if (s.electrical.dcBat && s.fuel.tanks[2] < 750) amber.push('FUEL R WING TK LO LVL');
@@ -137,7 +139,8 @@ export class A320Computers implements ControlLaw {
     for (let i = 0; i < 2; i++)
       if (ctx.engines[i]!.running && (ctx.engines[i]!.telemetry.oilPressure ?? 100) < 13)
         amber.push(`ENG ${i + 1} OIL LO PR`);
-    if (air && (t.speedbrake ?? 0) > 0.05 && levers.some((x) => x > 0.7)) amber.push('SPD BRK STILL OUT');
+    if (air && (t.speedbrake ?? 0) > 0.05 && levers.some((x) => x > 0.7))
+      amber.push('SPD BRK STILL OUT');
     const w = ecam.warnings;
     w.length = 0;
     for (const r of red) w.push(r);
@@ -159,7 +162,8 @@ export class A320Computers implements ControlLaw {
     for (const r of this.warned) if (!red.includes(r)) this.warned.delete(r);
     for (const a of this.cautioned) if (!amber.includes(a)) this.cautioned.delete(a);
     if ((wb >= 0.5 && this.lastWarningButton < 0.5) || red.length === 0) ecam.masterWarning = false;
-    if ((cb >= 0.5 && this.lastCautionButton < 0.5) || amber.length === 0) ecam.masterCaution = false;
+    if ((cb >= 0.5 && this.lastCautionButton < 0.5) || amber.length === 0)
+      ecam.masterCaution = false;
     this.lastWarningButton = wb;
     this.lastCautionButton = cb;
 
@@ -191,7 +195,9 @@ export class A320Computers implements ControlLaw {
     if (s.antiIce.wing) memo.push('WING A.ICE');
     if (fc.spoilersArmed && t.onGround && !both) memo.push('GND SPLRS ARMED');
     if (fc.autobrake !== 'off')
-      memo.push(`AUTO BRK ${fc.autobrake === 'low' ? 'LO' : fc.autobrake === 'medium' ? 'MED' : 'MAX'}`);
+      memo.push(
+        `AUTO BRK ${fc.autobrake === 'low' ? 'LO' : fc.autobrake === 'medium' ? 'MED' : 'MAX'}`,
+      );
     if (s.hydraulics.ptu) memo.push('HYD PTU');
     if (s.hydraulics.rat) memo.push('RAT OUT');
     if (!air && !s.adirs.aligned && c.get('adirs') === 1)

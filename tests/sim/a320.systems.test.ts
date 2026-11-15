@@ -8,7 +8,14 @@ import { describe, expect, it } from 'vitest';
 import { A320_TANKS } from '../../src/sim/a320';
 import { ADIRS_ALIGN_TIME, APU_START_TIME } from '../../src/sim/a320/systems';
 import { FT, KT, fly } from './harness';
-import { a320Airborne, a320OnGround, airbus, press, tankLoad, type A320Flight } from './a320Harness';
+import {
+  a320Airborne,
+  a320OnGround,
+  airbus,
+  press,
+  tankLoad,
+  type A320Flight,
+} from './a320Harness';
 import { cruising, levers } from './a320Procedures';
 
 /** Runs until the condition holds, returns the seconds it took (Infinity if it never did). */
@@ -32,7 +39,7 @@ function startEngine(f: A320Flight, engine: 1 | 2) {
     if (Number.isNaN(marks.ignitionN2) && s.ignition[i]) marks.ignitionN2 = e.n2!;
     if (Number.isNaN(marks.lightOffN2) && e.running) marks.lightOffN2 = e.n2!;
     if (wasValve && !s.valve[i] && Number.isNaN(marks.cutoutN2)) marks.cutoutN2 = e.n2!;
-    wasValve = s.valve[i];
+    wasValve = s.valve[i] === true;
     if (e.running && e.n2! > 58) {
       marks.idle = f.ac.telemetry.time - t0;
       return true;
@@ -206,7 +213,7 @@ describe('A320 systems', () => {
     const b = airbus(f);
     f.ac.controls.parkingBrake = false;
     levers(f, 0.25);
-    fly(f, 12, () => void (levers(f, t.groundSpeed > 6 ? 0.1 : 0.25)));
+    fly(f, 12, () => void levers(f, t.groundSpeed > 6 ? 0.1 : 0.25));
     f.ac.controls.yaw = 1;
     fly(f, 1);
     expect(b.controls.steering).toBeGreaterThan(50);

@@ -141,12 +141,14 @@ class AvionicsStack implements AvionicsUnit {
     angleDeg: 3,
   };
   /** The guidance of every source, whichever one the indicator shows. */
-  private readonly all: Record<NavSource, { lateral: LateralGuidance; vertical: VerticalGuidance }> =
-    {
-      nav1: newGuidance(),
-      gps: newGuidance(),
-      nav2: newGuidance(),
-    };
+  private readonly all: Record<
+    NavSource,
+    { lateral: LateralGuidance; vertical: VerticalGuidance }
+  > = {
+    nav1: newGuidance(),
+    gps: newGuidance(),
+    nav2: newGuidance(),
+  };
   private ndb: NavStation | undefined;
   private adfFrequency = -1;
   private adfTimer = 0;

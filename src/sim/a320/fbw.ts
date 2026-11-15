@@ -120,7 +120,8 @@ export class FlyByWire {
     out.flap = flaps * DEG;
 
     // Which law: the computers need the inertial reference, power and two hydraulic systems.
-    const hyd = (sys.green > 1500 ? 1 : 0) + (sys.blue > 1500 ? 1 : 0) + (sys.yellow > 1500 ? 1 : 0);
+    const hyd =
+      (sys.green > 1500 ? 1 : 0) + (sys.blue > 1500 ? 1 : 0) + (sys.yellow > 1500 ? 1 : 0);
     const normal = sys.adirsAligned && sys.dcEssPowered && hyd >= 2;
     const law = normal ? 'normal' : 'direct';
     if (Number.isNaN(this.ths)) {
@@ -140,7 +141,8 @@ export class FlyByWire {
 
     // ---- ground mode and its blend into the flight law ----
     const inFlight = !onGround || (this.groundBlend > 0 && this.groundTime < 0.5);
-    if (onGround && this.groundTime > 0.5) this.groundBlend = Math.max(0, this.groundBlend - dt / 2);
+    if (onGround && this.groundTime > 0.5)
+      this.groundBlend = Math.max(0, this.groundBlend - dt / 2);
     else if (!onGround) this.groundBlend = Math.min(1, this.groundBlend + dt / 5);
     const blend = law === 'normal' ? this.groundBlend : 0;
 
@@ -184,7 +186,8 @@ export class FlyByWire {
     ctx.controls.pitchTrim = this.ths >= 0 ? this.ths / c.trimUp : this.ths / c.trimDown;
 
     // ---- roll ----
-    if (law === 'normal' && !onGround) out.aileron = this.rollLaw(ctx, roll, protectedBank, gain, report);
+    if (law === 'normal' && !onGround)
+      out.aileron = this.rollLaw(ctx, roll, protectedBank, gain, report);
     else {
       out.aileron = roll;
       this.bankHold = t.bank;
@@ -291,7 +294,10 @@ export class FlyByWire {
     let s = stick;
 
     // ---- high speed protection ----
-    const overspeed = Math.max(ias - (VMO + 6), ((mach - (MMO + 0.01)) / Math.max(mach, 0.1)) * ias);
+    const overspeed = Math.max(
+      ias - (VMO + 6),
+      ((mach - (MMO + 0.01)) / Math.max(mach, 0.1)) * ias,
+    );
     let dnProtect = 0;
     // The stick's nose-down authority fades from VMO (MMO) and is gone by VMO + 16.
     const fast = overspeed + 6;
@@ -312,7 +318,8 @@ export class FlyByWire {
     } else if (this.flare && (agl > 80 || apEngaged)) this.flare = false;
     if (this.flare) {
       this.flareTime += dt;
-      const lowered = this.flarePitch - (this.flarePitch + 2 * DEG) * Math.min(1, this.flareTime / 8);
+      const lowered =
+        this.flarePitch - (this.flarePitch + 2 * DEG) * Math.min(1, this.flareTime / 8);
       const target = lowered + stick * 12 * DEG;
       dn = ((V / G) * (target - theta)) / 1.2;
     }
@@ -342,11 +349,17 @@ export class FlyByWire {
     const down = -15 * DEG;
     if (theta > up - 5 * DEG && nTarget > Math.cos(gamma)) {
       report.pitchLimit = theta > up - 1 * DEG;
-      nTarget = Math.min(nTarget, Math.cos(gamma) + ((up - theta) / (5 * DEG)) * (nTarget - Math.cos(gamma)));
+      nTarget = Math.min(
+        nTarget,
+        Math.cos(gamma) + ((up - theta) / (5 * DEG)) * (nTarget - Math.cos(gamma)),
+      );
     }
     if (theta < down + 5 * DEG && nTarget < Math.cos(gamma)) {
       report.pitchLimit = theta < down + 1 * DEG;
-      nTarget = Math.max(nTarget, Math.cos(gamma) - ((theta - down) / (5 * DEG)) * (Math.cos(gamma) - nTarget));
+      nTarget = Math.max(
+        nTarget,
+        Math.cos(gamma) - ((theta - down) / (5 * DEG)) * (Math.cos(gamma) - nTarget),
+      );
     }
     nTarget = clamp(nTarget, nMin, nMax);
     // The demand is shaped (as the sidestick's own filtering does) so a sudden full pull does
@@ -386,7 +399,8 @@ export class FlyByWire {
     } else {
       // Hands off: the bank is held; beyond 33° it goes back to 33°.
       if (Math.abs(this.bankHold) > BANK_NEUTRAL)
-        this.bankHold -= Math.sign(this.bankHold) * Math.min(5 * DEG * dt, Math.abs(this.bankHold) - BANK_NEUTRAL);
+        this.bankHold -=
+          Math.sign(this.bankHold) * Math.min(5 * DEG * dt, Math.abs(this.bankHold) - BANK_NEUTRAL);
       pCmd = clamp(1.2 * (this.bankHold - phi), -ROLL_RATE, ROLL_RATE);
     }
     // The bank limit: the roll rate falls to nothing at the limit.
@@ -421,10 +435,15 @@ export class FlyByWire {
     const idle = throttles.every((x) => x <= LEVER_IDLE);
     const reverse = ctx.controls.reverse === true;
     if (t.onGround) {
-      if (!this.groundSpoilers && (idle || reverse) && ((armed && this.groundTime > 0.1) || (ias > 72 && (reverse || armed))))
+      if (
+        !this.groundSpoilers &&
+        (idle || reverse) &&
+        ((armed && this.groundTime > 0.1) || (ias > 72 && (reverse || armed)))
+      )
         this.groundSpoilers = true;
       if (this.groundSpoilers && !idle && !reverse) this.groundSpoilers = false;
-      if (this.groundSpoilers && !armed && !reverse && ias < 72 && lever < 0.1) this.groundSpoilers = false;
+      if (this.groundSpoilers && !armed && !reverse && ias < 72 && lever < 0.1)
+        this.groundSpoilers = false;
     } else this.groundSpoilers = false;
     if (this.groundSpoilers) return 1;
     if (t.onGround) return lever;

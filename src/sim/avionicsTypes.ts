@@ -270,7 +270,12 @@ export interface AirbusSystems {
     used: number;
   };
   /** Packs on and flowing, cabin altitude ft, rate ft/min, differential psi. */
-  air: { packs: [boolean, boolean]; cabinAltitude: number; cabinRate: number; differential: number };
+  air: {
+    packs: [boolean, boolean];
+    cabinAltitude: number;
+    cabinRate: number;
+    differential: number;
+  };
   antiIce: { wing: boolean; engine: [boolean, boolean] };
   brakes: { pressure: number; antiSkid: boolean; parking: boolean };
   /** Gross mass, kg (the weight and balance the computers use). */

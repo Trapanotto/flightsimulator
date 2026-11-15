@@ -159,11 +159,7 @@ function wingStrips(): StripDef[] {
       strips.push({
         name: `wing-${side > 0 ? 'right' : 'left'}-${i}`,
         group: side > 0 ? 1 : 2,
-        position: v(
-          WING_X - yc * Math.tan(SWEEP),
-          side * yc,
-          WING_Z - yc * Math.tan(DIHEDRAL),
-        ),
+        position: v(WING_X - yc * Math.tan(SWEEP), side * yc, WING_Z - yc * Math.tan(DIHEDRAL)),
         chordAxis: ax.chord,
         liftAxis: ax.lift,
         area: panelArea(y0, y1),
@@ -580,12 +576,45 @@ export const A320: AircraftDefinition = {
     },
   ],
   contacts: [
-    { name: 'belly-front', position: v(8, 0, 2.0), crashSpeed: 3, maxDepth: 0.8, reason: 'ground', skid: true },
-    { name: 'belly-rear', position: v(-6, 0, 2.0), crashSpeed: 3, maxDepth: 0.8, reason: 'ground', skid: true },
+    {
+      name: 'belly-front',
+      position: v(8, 0, 2.0),
+      crashSpeed: 3,
+      maxDepth: 0.8,
+      reason: 'ground',
+      skid: true,
+    },
+    {
+      name: 'belly-rear',
+      position: v(-6, 0, 2.0),
+      crashSpeed: 3,
+      maxDepth: 0.8,
+      reason: 'ground',
+      skid: true,
+    },
     // Tail strike at about 11.7° with the struts compressed (AC: clearance angles).
-    { name: 'tail', position: v(-16, 0, 0.45), crashSpeed: 4, maxDepth: 0.6, reason: 'tail', skid: true },
-    { name: 'engine-left', position: v(3, -5.75, 2.85), crashSpeed: 2, maxDepth: 0.4, reason: 'engine' },
-    { name: 'engine-right', position: v(3, 5.75, 2.85), crashSpeed: 2, maxDepth: 0.4, reason: 'engine' },
+    {
+      name: 'tail',
+      position: v(-16, 0, 0.45),
+      crashSpeed: 4,
+      maxDepth: 0.6,
+      reason: 'tail',
+      skid: true,
+    },
+    {
+      name: 'engine-left',
+      position: v(3, -5.75, 2.85),
+      crashSpeed: 2,
+      maxDepth: 0.4,
+      reason: 'engine',
+    },
+    {
+      name: 'engine-right',
+      position: v(3, 5.75, 2.85),
+      crashSpeed: 2,
+      maxDepth: 0.4,
+      reason: 'engine',
+    },
     {
       name: 'left-wingtip',
       position: v(-5.2, -A320_HALF_SPAN, WING_Z - A320_HALF_SPAN * Math.tan(DIHEDRAL)),

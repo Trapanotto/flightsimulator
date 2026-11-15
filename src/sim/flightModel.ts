@@ -984,7 +984,12 @@ export class FlightModel implements SimAircraft {
         else if (control.kind === 'spoiler')
           spoiled = Math.max(spoiled, this.spoilerShare(control.side, control.roll));
         else {
-          ctrl += this.controlAlpha(control.kind, control.effectiveness, control.side, control.roll);
+          ctrl += this.controlAlpha(
+            control.kind,
+            control.effectiveness,
+            control.side,
+            control.roll,
+          );
           if (control.effectiveness < 0.95) hinged = true;
           if (control.kind === 'flap') flap = control;
         }
