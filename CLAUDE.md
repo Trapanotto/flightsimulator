@@ -29,5 +29,7 @@ and `docs/ARCHITEKTUR.md` for the rules below in full.
   aircraft body = x forward, y right, z down; a 3D model = x left, y up, z forward.
 - Every user-visible text goes through `t()` in `src/ui/i18n.ts`, in German and English.
 - Code, comments and commit messages in English. Comments explain why, not what.
-- New behaviour comes with a test in `tests/`. Numbers from a manual or a standard are tested
-  against the published value.
+- Few tests, only the necessary ones: numbers from a manual or a standard against the
+  published value, one crude-pilot flight per aircraft (take-off, landing), the control laws and
+  autopilot, package boundaries. No tests for UI, models, sound or rendering helpers; those are
+  checked in the running game. Do not add a test file unless it guards one of these.
