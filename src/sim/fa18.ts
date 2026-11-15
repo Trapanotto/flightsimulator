@@ -405,10 +405,11 @@ export const FA18: AircraftDefinition = {
     id: 'fa18',
     name: 'McDonnell Douglas F/A-18C Hornet',
     engines: 2,
-    // Measured in tests/sim/fa18.performance.test.ts: lowest steady speed clean and with full
-    // flaps at the take-off mass (the FCS limits the angle of attack, there is no stall break).
-    vs: 125 * KT,
-    vs0: 112 * KT,
+    // Measured in tests/sim/fa18.performance.test.ts at the take-off mass: the lowest level
+    // speed with the altitude held, clean (the FCS's 22° before the stick asks for more) and
+    // with full flaps (the powered approach's 15° limit). There is no stall break.
+    vs: 107 * KT,
+    vs0: 120 * KT,
     vne: 750 * KT,
     maxTakeoffMass: 23_400,
     retractableGear: true,
