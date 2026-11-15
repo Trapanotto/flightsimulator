@@ -72,7 +72,13 @@ import { dateAtSwissHour, swissOffsetMinutes } from './time';
 import { FreeCamera } from './freeCamera';
 import { FlightLogger, GeoRunwayFinder, Logbook, worthKeeping } from './logbook';
 import { type RenderPose, stateToRenderPose } from './pose';
-import { FlightRecording, ReplayPlayer, pictureName, savePicture } from './replay';
+import {
+  FlightRecording,
+  type ReplayFrame,
+  ReplayPlayer,
+  pictureName,
+  savePicture,
+} from './replay';
 import { LessonRunner, SchoolProgress, findLesson, lessonInfos, lessonPlan } from './school';
 
 /** Where the menu scene is set and where the first flight starts. */
@@ -315,6 +321,12 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       const next = await loadAircraftVisual(id, {
         quality: profile.device === 'mobile' ? 'low' : 'high',
       });
+      // Another model was asked for while this one loaded (a flight started before the menu's
+      // scene was there): the later request wins, whichever download finishes last.
+      if (visualId !== id) {
+        next.dispose();
+        return;
+      }
       // The altimeter shows height above sea level; the simulation works above the ellipsoid.
       next.setAltimeterOffset(-geoidUndulation(frame.origin.lon, frame.origin.lat));
       next.object.visible = visual.object.visible;
@@ -481,6 +493,10 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   let photoDate: Date | undefined;
   let saveNext = false;
   let replayTime = 0;
+  /** The recorded frame shown this frame (replay), for the sound. */
+  let heard: ReplayFrame | undefined;
+  /** The Airbus call-out last seen: 'RETARD' is passed on to the pilot once. */
+  let lastCallout = '';
   /** Closes the logbook entry of the flight in progress. */
   const closeLog = () => {
     if (!logger || !flight) return;
@@ -666,7 +682,9 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     tilesLoaded = 0;
     reveal = undefined;
     modelReady = false;
-    void useVisual(type.id).then(() => (modelReady = true));
+    void useVisual(type.id).then(() => {
+      if (visualId === type.id) modelReady = true;
+    });
     if (!timeIsFixed) {
       const time = p?.time;
       sky.setTime(typeof time === 'number' ? dateAtSwissHour(new Date(), time) : new Date());
@@ -1185,6 +1203,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       const shown = still && player ? player : undefined;
       const replayDt = shown ? shown.advance(dt) : 0;
       const tape = shown?.frame();
+      // A replay is heard at its real speed only: sped up or frozen it would just be noise.
+      heard = tape && shown?.playing && shown.speed === 1 ? tape : undefined;
       const placeAircraft = () => {
         if (!tape) return flight!.place(visual.object, frame, alpha);
         stateToRenderPose(tape.state, frame, replayPose);
@@ -1195,6 +1215,14 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       };
       if (flying) {
         if (!aircraft.telemetry.onGround) flew = true;
+        // The A320 calls RETARD at 10 ft in the flare: with the thrust levers still forward,
+        // neither ground spoilers nor autobrake would come, so the pilot is told in words too.
+        const callout = aircraft.telemetry.avionics?.autopilot.airbus?.guidance.callout ?? '';
+        if (callout !== lastCallout) {
+          lastCallout = callout;
+          if (callout === 'RETARD' && aircraft.controls.throttle.some((x) => x > 0.04))
+            say('msg.retard');
+        }
         ecefToGeodetic(aircraft.state.position, geo);
         logger?.sample(dt, aircraft.telemetry, geo);
         recording.record(flight.time, aircraft);
@@ -1362,9 +1390,10 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     audio.setVolume(settings.volume.value);
     audio.setMuted(settings.muted.value);
     {
-      const flown = plan && flight ? flight.aircraft : undefined;
-      const inside = game.view.value === 'cockpit';
-      const active = game.screen.value === 'flight';
+      // In a replay the recorded flight is heard, from outside.
+      const flown = heard ?? (plan && flight ? flight.aircraft : undefined);
+      const inside = !heard && game.view.value === 'cockpit';
+      const active = game.screen.value === 'flight' || !!heard;
       const c = flown?.controls;
       sound.update(
         flown?.telemetry,
@@ -1380,11 +1409,14 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       );
       cockpitSound.update(flown?.telemetry, {
         inside,
-        active: active && !!flown,
+        active: active && !!flown && !heard,
         precipitation: currentWeather.precipitation,
         cockpit: flown?.cockpit,
       });
-      navAudio.update(flown?.telemetry.avionics, { markers: true, active: active && !!flown });
+      navAudio.update(flown?.telemetry.avionics, {
+        markers: true,
+        active: active && !!flown && !heard,
+      });
     }
 
     appTime += dt;

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.1 (2026-11-15)
+
+- **Behoben:** Wer einen Flug startete, bevor der Rundflug im Menü fertig geladen war, sah das
+  falsche Flugzeugmodell (eine Cessna statt des gewählten Typs).
+- Nach einem Absturz blenden die Fluganzeigen aus; die Auswertung einer Lektion bleibt ein
+  Dialog in der Bildmitte.
+- A320: Beim «RETARD» erscheint ein Hinweis, die Schubhebel auf Leerlauf zu ziehen.
+- Auf Touch-Geräten zeigt eine kleine Karte Drehmoment, N1 und Turbinentemperatur.
+- Die Wiederholung hat Ton (bei normalem Tempo).
+
 ## 1.0.0 – Version 1 (2026-11-15)
 
 - Der Stand von 1.0.0-rc.1, unverändert als Version 1.0.0 freigegeben.

@@ -871,3 +871,25 @@
   color: var(--c-accent, #7fd1ff);
   font-variant-numeric: tabular-nums;
 }
+
+/* After a crash the instruments have nothing left to say: they step back for the view. */
+.hud.is-crashed > :not(.crash-layer) {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 600ms var(--ease-out);
+}
+
+/* Torque, N1 and turbine temperature under the speed card on touch. */
+.hud-engine-touch {
+  margin-top: var(--s-2);
+  padding: 6px 8px;
+  font-size: var(--fs-1);
+}
+
+/* The debrief of a lesson shares the crash layer but is a real dialog: centred, over a veil. */
+.debrief-layer {
+  place-items: center;
+  padding: var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l);
+  background: radial-gradient(70% 70% at 50% 50%, rgb(0 0 0 / 0.25), rgb(0 0 0 / 0.55));
+  pointer-events: auto;
+}

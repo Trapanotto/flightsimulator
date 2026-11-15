@@ -142,6 +142,7 @@ const de = {
   'crash.menu': 'Hauptmenü',
 
   'msg.gearDown': 'Fahrwerk ausgefahren',
+  'msg.retard': 'RETARD: Schubhebel auf Leerlauf',
   'msg.gearUp': 'Fahrwerk eingefahren',
   'msg.gearFixed': 'Das Fahrwerk ist fest',
   'msg.flapsUp': 'Klappen eingefahren',
@@ -1018,6 +1019,7 @@ const en: Record<MessageKey, string> = {
   'crash.menu': 'Main menu',
 
   'msg.gearDown': 'Gear down',
+  'msg.retard': 'RETARD: thrust levers to idle',
   'msg.gearUp': 'Gear up',
   'msg.gearFixed': 'The gear is fixed',
   'msg.flapsUp': 'Flaps up',

@@ -448,6 +448,17 @@ const CRASH_TEXT: Record<string, MessageKey> = {
   water: 'crash.water',
 };
 
+/** The engine's figures on touch, where the systems card has no room: torque, N1, ITT. */
+function TouchEngine() {
+  const info = flownAircraft.value;
+  if (!info || !info.category || info.category === 'piston') return null;
+  return (
+    <div class="hud-card hud-engine-touch">
+      <EngineBlock info={info} />
+    </div>
+  );
+}
+
 /** Seconds before the strip appears: the impact itself is seen with nothing over it. */
 const CRASH_DIALOG_DELAY = 1.5;
 
@@ -513,7 +524,7 @@ export function Hud() {
 
   return (
     <div
-      class={`hud${cockpit ? ' is-cockpit' : ''}${touch ? ' is-touch' : ''}${paused ? ' is-paused' : ''}${nav ? ' has-nav' : ''}${lesson ? ' has-lesson' : ''}${sheet ? ' has-sheet' : ''}`}
+      class={`hud${cockpit ? ' is-cockpit' : ''}${touch ? ' is-touch' : ''}${paused ? ' is-paused' : ''}${nav ? ' has-nav' : ''}${lesson ? ' has-lesson' : ''}${sheet ? ' has-sheet' : ''}${crashed.value ? ' is-crashed' : ''}`}
       inert={paused}
     >
       <div class="hud-top">
@@ -545,6 +556,7 @@ export function Hud() {
 
       <div class="hud-data hud-side hud-side--left">
         <SpeedCard />
+        {touch && <TouchEngine />}
       </div>
       <div class="hud-data hud-side hud-side--right">
         <AltitudeCard />
