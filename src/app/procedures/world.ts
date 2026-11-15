@@ -6,7 +6,20 @@
  */
 import { bearingDeg, distanceM, findAirport, findRunwayEnd, thresholdOf } from '@geo';
 
-export type StationRole = 'atis' | 'ground' | 'tower' | 'arrival' | 'information' | 'aerodrome';
+/**
+ * 'delivery' gives IFR clearances (ground does where there is none), 'departure' takes IFR
+ * departures (arrival does where there is none), 'radar' is area control.
+ */
+export type StationRole =
+  | 'atis'
+  | 'delivery'
+  | 'ground'
+  | 'tower'
+  | 'departure'
+  | 'arrival'
+  | 'information'
+  | 'aerodrome'
+  | 'radar';
 
 export interface AtcStation {
   /** Unique, e.g. 'LSZB.tower' or 'FIS.zurich'. */
@@ -78,7 +91,24 @@ export interface AtcWorld {
   information(lon: number, lat: number): AtcStation | undefined;
   /** ICAO code of the control zone around a point (altitude in feet above sea level). */
   controlZone(lon: number, lat: number, altitudeFt: number): string | undefined;
+  /**
+   * The area control station for IFR traffic at a place. Optional: without it the controller
+   * uses `SWISS_RADAR`.
+   */
+  area?(lon: number, lat: number, altitudeFt: number): AtcStation | undefined;
 }
+
+/**
+ * Area control when the world names none. The name is the real one; the frequency is a
+ * stand-in on the 25 kHz grid, not a verified sector frequency.
+ */
+export const SWISS_RADAR: AtcStation = {
+  id: 'ACC.swiss',
+  role: 'radar',
+  name: 'Swiss Radar',
+  spoken: 'Swiss Radar',
+  frequency: 128_050,
+};
 
 const FT = 3.28084;
 
@@ -134,12 +164,18 @@ export class TableAtcWorld implements AtcWorld {
       station: AtcStation;
       covers(lon: number, lat: number): boolean;
     }[],
+    private readonly areaStation?: AtcStation,
   ) {
     for (const a of airports) {
       this.airports.set(a.icao, a);
       this.stations.push(...a.stations);
     }
     this.stations.push(...fis.map((f) => f.station));
+    if (areaStation) this.stations.push(areaStation);
+  }
+
+  area() {
+    return this.areaStation;
   }
 
   airport(icao: string) {
@@ -216,6 +252,8 @@ export const BUILTIN_ATC_WORLD: AtcWorld = new TableAtcWorld(
         station('LSZH', 'ground', 'Zürich Ground', 121_900, 'Zurich Ground'),
         station('LSZH', 'tower', 'Zürich Tower', 118_100, 'Zurich Tower'),
         station('LSZH', 'arrival', 'Zürich Arrival', 118_000, 'Zurich Arrival'),
+        station('LSZH', 'delivery', 'Zürich Delivery', 121_925, 'Zurich Delivery'),
+        station('LSZH', 'departure', 'Zürich Departure', 125_950, 'Zurich Departure'),
       ],
       runways: runwaysFromGeo('LSZH', ['14', '32', '28', '10', '16', '34']),
       reportingPoints: [
@@ -266,4 +304,5 @@ export const BUILTIN_ATC_WORLD: AtcWorld = new TableAtcWorld(
       covers: () => true,
     },
   ],
+  SWISS_RADAR,
 );

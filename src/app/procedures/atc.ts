@@ -1,6 +1,9 @@
 /**
- * Simulated air traffic control for a VFR flight (and a vectored ILS) in Swiss practice,
- * as a state machine. The app passes the flight's situation a few times a second; the
+ * Simulated air traffic control in Swiss practice, as a state machine: VFR flights with the
+ * circuit, reporting points and FIS; IFR flights (the airliner by default, any type on
+ * request) with clearance delivery, departure, area control ('Swiss Radar'), descent and a
+ * vectored ILS; and for the fighter at its home base the overhead break and the low
+ * approach. The aircraft's type, callsign and flight rules come from the config. The app passes the flight's situation a few times a second; the
  * controller answers with what the radio shows (`AtcView`) and with events (a message was
  * spoken, a squawk or QNH was given, an instruction the app can check, a deviation).
  *
@@ -8,12 +11,15 @@
  * saved and restored, and the same situations always give the same dialogue. Time is the
  * simulated time passed in; there are no timers.
  */
+import type { AircraftId } from '@sim';
+import { ATC_AIRCRAFT, type AtcAircraft } from './fleet';
 import {
   type AtcAirport,
   type AtcRunway,
   type AtcStation,
   type AtcWorld,
   BUILTIN_ATC_WORLD,
+  SWISS_RADAR,
 } from './world';
 import { type AtcWeather, atisLetter, atisMessage, runwayInUse, towerWind } from './weather';
 import {
@@ -26,6 +32,8 @@ import {
   frequencyText,
   heading as headingLine,
   join,
+  knots,
+  level as levelLine,
   line,
   miles,
   phonetic,
@@ -33,6 +41,7 @@ import {
   qnh as qnhLine,
   runway as runwayLine,
   squawk as squawkLine,
+  transitionLevel,
 } from './phraseology';
 import {
   angleDiff,
@@ -45,9 +54,13 @@ import {
 } from './geometry';
 import {
   type VectorPlan,
+  INTERCEPT_NM,
   fromTouchdown,
+  interceptAltitude,
+  interceptDistance,
   nearlyEstablished,
   nextVector,
+  planScale,
   planVectors,
 } from './vectors';
 
@@ -98,9 +111,17 @@ export type AtcInstruction =
   | { kind: 'altitude'; feet: number; mode: 'climb' | 'descend' | 'maintain' }
   /** Degrees magnetic. */
   | { kind: 'heading'; degrees: number; turn: 'left' | 'right' | 'fly' }
-  | { kind: 'runway'; runway: string; clearance: 'lineUp' | 'takeoff' | 'land' }
+  | { kind: 'runway'; runway: string; clearance: 'lineUp' | 'takeoff' | 'land' | 'lowApproach' }
   | { kind: 'holdShort'; runway: string }
-  | { kind: 'approach'; runway: string; approach: 'ils' | 'straightIn' | 'circuit' };
+  | {
+      kind: 'approach';
+      runway: string;
+      approach: 'ils' | 'straightIn' | 'circuit' | 'overhead';
+    }
+  /** At most this indicated airspeed. */
+  | { kind: 'speed'; knots: number }
+  /** Own navigation direct to an airport (ICAO code). */
+  | { kind: 'direct'; to: string };
 
 export type DeviationKind =
   'altitude' | 'takeoffWithoutClearance' | 'landingWithoutClearance' | 'controlZone' | 'holdShort';
@@ -119,10 +140,21 @@ export type AtcEvent =
 export interface AtcConfig {
   /** Defaults to the built-in table (Bern, Zürich, Langenthal). */
   world?: AtcWorld;
-  /** Registration, e.g. 'HB-TFS'. */
+  /**
+   * A registration ('HB-TFS', abbreviated to 'HFS' once the station does), or an airline's
+   * or military callsign with a number ('Alpine 482', 'Hornet 11'), never abbreviated.
+   */
   callsign: string;
-  /** Type as said on the radio. */
+  /** The type flown: its name on the radio, category and wake. Default 'c172'. */
+  aircraft?: AircraftId;
+  /** Type as said on the radio (default: the aircraft's). */
   aircraftType?: Line;
+  /** Default: IFR for the airliner, VFR for the others. */
+  flightRules?: 'VFR' | 'IFR';
+  /** IFR: the requested cruise level (flight level); default by distance and type. */
+  cruiseLevel?: number;
+  /** The fighter's base, where it may ask for an overhead break (default: the departure). */
+  homeBase?: string;
   departure: { airport: string; runway?: string };
   /** Defaults to the departure airport (a local flight). */
   destination?: { airport: string; runway?: string };
@@ -146,6 +178,12 @@ type Stage =
   | 'arrDownwind'
   | 'arrFinal'
   | 'arrLanding'
+  | 'arrBreak'
+  | 'arrLowApproach'
+  | 'ifrDeparture'
+  | 'ifrClimb'
+  | 'ifrCruise'
+  | 'ifrArrival'
   | 'ilsSquawk'
   | 'ilsVectors'
   | 'ilsCleared'
@@ -229,6 +267,24 @@ export interface AtcState {
   /** Every station the flight has talked to, by id (also ones the world names elsewhere). */
   stations: Record<string, AtcStation>;
   weatherKey: string;
+  /** The assigned altitude is a flight level (compared with the pressure altitude). */
+  assignedStd?: boolean;
+  /** IFR flights only; missing in states saved before there was IFR. */
+  ifr?: IfrState;
+}
+
+interface IfrState {
+  /** The IFR clearance has been given. */
+  cleared: boolean;
+  /** Feet: the altitude of the standard departure, and the cruise level's. */
+  initialFt: number;
+  cruiseFt: number;
+  /** Who works the flight in the climb and the cruise. */
+  departureId: string | null;
+  handedToDeparture: boolean;
+  handedToRadar: boolean;
+  descentGiven: boolean;
+  handedToArrival: boolean;
 }
 
 interface Call {
@@ -399,7 +455,11 @@ export class AtcController {
     return this.s.stations[id];
   }
   private tuned(sit: AtcSituation) {
-    return this.world.stationOn(sit.com1, sit.lon, sit.lat);
+    const st = this.world.stationOn(sit.com1, sit.lon, sit.lat);
+    if (st) return st;
+    // Area control the world does not list (the stand-in) is still heard on its frequency.
+    const radar = this.radar(sit);
+    return this.isIfr && Math.round(sit.com1) === radar.frequency ? radar : undefined;
   }
   private hears(sit: AtcSituation, st: AtcStation | undefined) {
     return !!st && sit.com1Works && Math.round(sit.com1) === st.frequency;
@@ -424,7 +484,92 @@ export class AtcController {
     return callsignLine(this.config.callsign, !!st && this.s.known.includes(st.id));
   }
   private type(): Line {
-    return this.config.aircraftType ?? line('Cessna 172', 'Cessna one seven two');
+    return this.config.aircraftType ?? this.info.type;
+  }
+  private get info(): AtcAircraft {
+    return ATC_AIRCRAFT[this.config.aircraft ?? 'c172'] ?? ATC_AIRCRAFT.c172;
+  }
+  private get isIfr() {
+    return (this.config.flightRules ?? this.info.flightRules) === 'IFR';
+  }
+  private get isJet() {
+    return this.info.category === 'airliner' || this.info.category === 'fighter';
+  }
+  /** The fighter arriving at its own base: the overhead break and the low approach. */
+  private get atHome() {
+    return (
+      this.info.category === 'fighter' &&
+      this.arr.icao === (this.config.homeBase ?? this.dep.icao).toUpperCase()
+    );
+  }
+  private ifr(): IfrState {
+    if (!this.s.ifr) this.s.ifr = this.freshIfr();
+    return this.s.ifr;
+  }
+  private freshIfr(): IfrState {
+    const elev = this.dep.elevationFt;
+    return {
+      cleared: false,
+      // 'Climb 5000 ft' out of the Swiss Plateau; 3000 ft above higher fields.
+      initialFt: Math.max(5000, Math.ceil((elev + 3000) / 1000) * 1000),
+      cruiseFt: this.cruiseFt(),
+      departureId: null,
+      handedToDeparture: false,
+      handedToRadar: false,
+      descentGiven: false,
+      handedToArrival: false,
+    };
+  }
+  /**
+   * The cruise level: the requested one, or as high as climb (about 2 NM per 1000 ft) and
+   * descent (3 NM per 1000 ft) allow over the distance, within the type's ceiling, on the
+   * semicircular rule (odd thousands eastbound, even westbound, by magnetic track).
+   */
+  private cruiseFt(): number {
+    const tl = transitionLevel(this.weather.qnh);
+    const want =
+      this.config.cruiseLevel ??
+      Math.min(this.info.ceilingFl, Math.floor((distanceNm(this.dep, this.arr) / 5) * 10));
+    const east = this.local || norm360(bearingTo(this.dep, this.arr) - this.decl) < 180;
+    let fl = Math.max(tl + 10, Math.floor(want / 10) * 10);
+    if (this.config.cruiseLevel === undefined && (fl / 10) % 2 !== (east ? 1 : 0)) fl -= 10;
+    return Math.max(fl, tl) * 100;
+  }
+  /** Altitude by the standard setting, as a flight level counts it. */
+  private pressureFt(sit: AtcSituation) {
+    return sit.altitudeFt + (1013.25 - this.weather.qnh) * 27.3;
+  }
+  private lvl(ft: number) {
+    return levelLine(ft, this.weather.qnh);
+  }
+  private isLevel(ft: number) {
+    return Math.round(ft / 100) >= transitionLevel(this.weather.qnh);
+  }
+  /** The present level, rounded to hundreds, as reported. */
+  private levelNow(sit: AtcSituation) {
+    const std = this.pressureFt(sit);
+    return this.isLevel(std)
+      ? this.lvl(Math.round(std / 100) * 100)
+      : this.lvl(Math.round(sit.altitudeFt / 100) * 100);
+  }
+  private delivery(ap: AtcAirport) {
+    return this.station(ap, 'delivery') ?? this.ground(ap);
+  }
+  private departureStation(ap: AtcAirport) {
+    return this.station(ap, 'departure') ?? this.station(ap, 'arrival');
+  }
+  private radar(sit: AtcSituation | null): AtcStation {
+    return (sit && this.world.area?.(sit.lon, sit.lat, sit.altitudeFt)) || SWISS_RADAR;
+  }
+  /** The destination has radar vectors to an ILS on the runway in use. */
+  private ilsAvailable() {
+    return !!this.station(this.arr, 'arrival') && this.inUse(this.arr).ils;
+  }
+  private assign(ft: number) {
+    this.s.assignedAltitude = ft;
+    this.s.assignedStd = this.isLevel(ft);
+    this.s.altitudeReached = false;
+    this.s.altitudeWarned = false;
   }
   private height(sit: AtcSituation, ap: AtcAirport) {
     return sit.heightFt ?? sit.altitudeFt - ap.elevationFt;
@@ -769,6 +914,10 @@ export class AtcController {
     switch (s.stage) {
       case 'parked':
       case 'startedUp': {
+        if (this.isIfr && dep.controlled) {
+          this.ifrGroundCalls(sit, c);
+          break;
+        }
         const g = this.ground(dep);
         const info = this.atisInfo(dep);
         const dest = this.local ? line('local flight') : line(`VFR to ${arr.name}`);
@@ -823,7 +972,10 @@ export class AtcController {
       case 'onRunway': {
         const t = this.tower(dep);
         const rwy = this.depRwy();
-        const dest = this.local ? line('local flight') : line(`VFR to ${arr.name}`);
+        const rules = this.isIfr ? 'IFR' : 'VFR';
+        const dest = this.local
+          ? line(this.isIfr ? 'local IFR flight' : 'local flight')
+          : line(`${rules} to ${arr.name}`);
         const b = join(
           phrase(line('lined up'), runwayLine(rwy.ident)),
           line('ready for departure'),
@@ -943,6 +1095,15 @@ export class AtcController {
             body: b,
             run: () => this.landingClearance(t, this.request(t, b)),
           });
+          if (this.atHome) {
+            const bl = join(b, line('request low approach'));
+            c.push({
+              id: 'lowApproach',
+              station: t,
+              body: bl,
+              run: () => this.lowApproach(t, this.request(t, bl)),
+            });
+          }
         }
         break;
       }
@@ -987,6 +1148,84 @@ export class AtcController {
       case 'uncArrival':
         this.blindArrivalCalls(sit, c);
         break;
+      case 'ifrDeparture': {
+        const ifr = this.ifr();
+        const d = ifr.departureId ? this.byId(ifr.departureId) : undefined;
+        if (d && ifr.handedToDeparture && !sit.onGround) {
+          const b = this.climbReport(sit);
+          c.push({
+            id: 'departure',
+            station: d,
+            body: b,
+            run: () => this.departureContact(d, sit, this.request(d, b)),
+          });
+        }
+        break;
+      }
+      case 'ifrClimb': {
+        const ifr = this.ifr();
+        if (!ifr.handedToRadar) break;
+        const r = this.radar(sit);
+        const b = this.climbReport(sit);
+        c.push({
+          id: 'radar',
+          station: r,
+          body: b,
+          run: () => this.radarContact(r, this.request(r, b)),
+        });
+        break;
+      }
+      case 'ifrArrival': {
+        const a = this.station(arr, 'arrival');
+        if (!a) break;
+        const info = this.atisInfo(arr);
+        const b = join(this.climbReport(sit), info);
+        c.push({
+          id: 'arrivalIfr',
+          station: a,
+          body: b,
+          run: () => {
+            const wait = this.request(a, b);
+            this.startVectors(sit, wait + this.pause(), info !== null);
+          },
+        });
+        break;
+      }
+      case 'arrBreak': {
+        const t = this.tower(arr);
+        const rwy = this.arrRwy();
+        const { x, y } = approachFrame(rwy, sit);
+        const onInitial =
+          !sit.onGround &&
+          x > 1 &&
+          x < 7 &&
+          Math.abs(y) < 1 &&
+          Math.abs(angleDiff(sit.headingDeg, rwy.course)) < 30;
+        if (onInitial) {
+          const b = phrase(line('initial'), runwayLine(rwy.ident));
+          c.push({
+            id: 'initial',
+            station: t,
+            body: b,
+            run: () => {
+              const wait = this.request(t, b);
+              s.stage = 'arrFinal';
+              const say = join(line('number one'), line('break approved'), line('report final'));
+              this.atc(t, say, {
+                after: wait + this.pause(),
+                readback: {
+                  correct: join(line('break approved'), line('wilco')),
+                  wrong: null,
+                  correction: say,
+                  repeat: say,
+                  soft: false,
+                },
+              });
+            },
+          });
+        }
+        break;
+      }
       case 'vacating': {
         const st = this.byId(s.inCharge ?? '') ?? this.ground(arr);
         const off = sit.onGround && !arr.runways.some((r) => onRunway(r, sit, 10));
@@ -1057,6 +1296,41 @@ export class AtcController {
     const s = this.s;
     const arr = this.arr;
     const dist = distanceNm(arr, sit);
+    // An IFR flight that starts in the air calls area control first.
+    if (this.isIfr && !sit.onGround && !this.ifr().handedToArrival && dist > 30) {
+      const r = this.radar(sit);
+      const b = join(this.type(), this.levelNow(sit), line(`IFR to ${arr.name}`));
+      c.push({
+        id: 'radar',
+        station: r,
+        body: b,
+        run: () => {
+          const ifr = this.ifr();
+          ifr.cleared = true;
+          ifr.handedToRadar = true;
+          ifr.cruiseFt = Math.max(Math.round(this.pressureFt(sit) / 1000) * 1000, 3000);
+          this.radarContact(r, this.request(r, b));
+        },
+      });
+    }
+    if (arr.controlled && dist < 25 && this.atHome) {
+      const t = this.tower(arr);
+      const info = this.atisInfo(arr);
+      const rwy = this.inUse(arr);
+      const b = join(
+        this.type(),
+        this.position(sit),
+        this.altitudeNow(sit),
+        info,
+        phrase(line('request overhead break'), runwayLine(rwy.ident)),
+      );
+      c.push({
+        id: 'arrivalBreak',
+        station: t,
+        body: b,
+        run: () => this.overhead(t, this.request(t, b), info !== null),
+      });
+    }
     if (arr.controlled && dist < 25) {
       const t = this.tower(arr);
       const info = this.atisInfo(arr);
@@ -1215,6 +1489,388 @@ export class AtcController {
     );
   }
 
+  // ---------------------------------------------------------------- IFR
+
+  /** At the stand: the IFR clearance from delivery, then start-up and taxi from ground. */
+  private ifrGroundCalls(sit: AtcSituation, c: Call[]) {
+    const s = this.s;
+    const dep = this.dep;
+    const ifr = this.ifr();
+    const info = this.atisInfo(dep);
+    if (!ifr.cleared) {
+      const d = this.delivery(dep);
+      const b = join(
+        this.type(),
+        info,
+        line(
+          this.local ? 'request local IFR clearance' : `request IFR clearance to ${this.arr.name}`,
+        ),
+      );
+      c.push({
+        id: 'clearance',
+        station: d,
+        body: b,
+        run: () => this.ifrClearance(d, this.request(d, b), info !== null),
+      });
+      return;
+    }
+    const g = this.ground(dep);
+    if (s.stage === 'parked' && !sit.engineRunning) {
+      // Only the airliner is pushed back from its stand; the others taxi out.
+      const pushback = this.info.category === 'airliner';
+      const b = join(info, line(pushback ? 'request start-up and push-back' : 'request start-up'));
+      c.push({
+        id: 'startup',
+        station: g,
+        body: b,
+        run: () => {
+          const wait = this.request(g, b);
+          s.stage = 'startedUp';
+          s.inCharge = g.id;
+          const ok = line(pushback ? 'start-up and push-back approved' : 'start-up approved');
+          const q = this.weather.qnh;
+          this.atc(g, join(ok, qnhLine(q)), {
+            after: wait + this.pause(),
+            events: [this.qnhEvent(dep)],
+            readback: {
+              correct: join(ok, qnhLine(q)),
+              wrong: join(ok, qnhLine(wrongQnh(q))),
+              correction: qnhLine(q),
+              repeat: join(ok, qnhLine(q)),
+              soft: false,
+            },
+          });
+        },
+      });
+    } else if (sit.engineRunning) {
+      const b = line('request taxi');
+      c.push({
+        id: 'taxi',
+        station: g,
+        body: b,
+        run: () => this.taxi(g, true, this.request(g, b)),
+      });
+    }
+  }
+
+  /** 'Cleared to Bern, runway 14, after departure runway heading, climb ..., squawk ...'. */
+  private ifrClearanceLines(rwy: AtcRunway) {
+    const s = this.s;
+    const ifr = this.ifr();
+    const code =
+      1000 + ((s.seq * 3 + 2) % 7) * 100 + ((s.seq * 5 + 1) % 8) * 10 + ((s.seq * 7 + 3) % 8);
+    s.squawk = code;
+    const wrongCode =
+      1000 +
+      (code % 10) * 100 +
+      Math.floor((code % 100) / 10) * 10 +
+      Math.floor((code % 1000) / 100);
+    const to = line(this.local ? 'cleared local IFR flight' : `cleared to ${this.arr.name}`);
+    const climb = phrase(line('climb to'), this.lvl(ifr.initialFt));
+    const rw = runwayLine(rwy.ident);
+    const sid = line('after departure runway heading');
+    return {
+      code,
+      atc: join(to, rw, sid, climb, squawkLine(code)),
+      correct: join(to, rw, line('runway heading'), climb, squawkLine(code)),
+      wrong: join(
+        to,
+        rw,
+        line('runway heading'),
+        climb,
+        squawkLine(wrongCode === code ? code + 1 : wrongCode),
+      ),
+      correction: squawkLine(code),
+      events: [
+        { type: 'squawk', code } as AtcEvent,
+        {
+          type: 'instruction',
+          instruction: { kind: 'altitude', feet: ifr.initialFt, mode: 'climb' },
+        } as AtcEvent,
+        {
+          type: 'instruction',
+          instruction: { kind: 'heading', degrees: this.magnetic(rwy.course, 1), turn: 'fly' },
+        } as AtcEvent,
+      ],
+    };
+  }
+
+  private magnetic(trueDeg: number, step = 10) {
+    return norm360(Math.round((trueDeg - this.decl) / step) * step) || 360;
+  }
+
+  private ifrClearance(d: AtcStation, wait: number, reported: boolean) {
+    const s = this.s;
+    const rwy = this.inUse(this.dep);
+    s.depRunway = rwy.ident;
+    s.inCharge = d.id;
+    this.ifr().cleared = true;
+    const cl = this.ifrClearanceLines(rwy);
+    this.atc(d, join(cl.atc, this.atisReminder(this.dep, reported)), {
+      after: wait + this.pause(),
+      events: cl.events,
+      readback: {
+        correct: cl.correct,
+        wrong: cl.wrong,
+        correction: cl.correction,
+        repeat: cl.atc,
+        soft: false,
+      },
+    });
+  }
+
+  /** 'passing altitude 2600 ft, climbing to altitude 5000 ft', or the level when there. */
+  private climbReport(sit: AtcSituation): Line {
+    const a = this.s.assignedAltitude;
+    const here = this.levelNow(sit);
+    if (a === null) return here;
+    const now = this.s.assignedStd ? this.pressureFt(sit) : sit.altitudeFt;
+    if (Math.abs(now - a) < 200) return this.lvl(a);
+    const verb = now < a ? 'climbing to' : 'descending to';
+    return join(phrase(line('passing'), here), phrase(line(verb), this.lvl(a)));
+  }
+
+  /** The departure controller: on course for the destination, or round to the ILS. */
+  private departureContact(d: AtcStation, sit: AtcSituation, wait: number) {
+    const s = this.s;
+    const ifr = this.ifr();
+    s.inCharge = d.id;
+    if (this.local) {
+      const a = this.station(this.arr, 'arrival');
+      if (a && this.ilsAvailable()) {
+        if (a.id === d.id) this.startVectors(sit, wait + this.pause(), true);
+        else {
+          s.stage = 'ifrArrival';
+          ifr.handedToArrival = true;
+          this.redirect(d, a, wait, line('identified'));
+        }
+        return;
+      }
+      s.stage = 'enroute';
+      ifr.handedToArrival = true;
+      this.redirect(d, this.tower(this.arr), wait, line('identified'));
+      return;
+    }
+    s.stage = 'ifrClimb';
+    const mag = this.magnetic(bearingTo(sit, this.arr));
+    s.assignedHeading = mag;
+    const diff = angleDiff(mag + this.decl, sit.headingDeg);
+    const turn: 'left' | 'right' | 'fly' = diff > 5 ? 'right' : diff < -5 ? 'left' : 'fly';
+    const hdg = phrase(line(turn === 'fly' ? 'fly' : `turn ${turn}`), headingLine(mag));
+    const wrongHdg = phrase(
+      line(turn === 'fly' ? 'fly' : `turn ${turn}`),
+      headingLine(norm360(mag + 20) || 360),
+    );
+    // Departure climbs the flight to FL 100 at most; area control gives the rest.
+    const to = Math.min(ifr.cruiseFt, 10_000);
+    this.assign(to);
+    const climb = phrase(line('climb to'), this.lvl(to));
+    this.atc(d, join(line('identified'), hdg, climb), {
+      after: wait + this.pause(),
+      events: [
+        { type: 'instruction', instruction: { kind: 'heading', degrees: mag, turn } },
+        { type: 'instruction', instruction: { kind: 'altitude', feet: to, mode: 'climb' } },
+      ],
+      readback: {
+        correct: join(hdg, climb),
+        wrong: join(wrongHdg, climb),
+        correction: hdg,
+        repeat: join(hdg, climb),
+        soft: false,
+      },
+    });
+  }
+
+  private radarContact(r: AtcStation, wait: number) {
+    const s = this.s;
+    const ifr = this.ifr();
+    s.stage = 'ifrCruise';
+    s.inCharge = r.id;
+    s.assignedHeading = null;
+    const higher = s.assignedAltitude === null || ifr.cruiseFt > s.assignedAltitude + 50;
+    if (higher) this.assign(ifr.cruiseFt);
+    const climb = higher
+      ? phrase(line(s.assignedAltitude !== null ? 'climb to' : 'maintain'), this.lvl(ifr.cruiseFt))
+      : null;
+    const direct = line(`proceed direct ${this.arr.name}`);
+    const events: AtcEvent[] = [
+      { type: 'instruction', instruction: { kind: 'direct', to: this.arr.icao } },
+    ];
+    if (climb)
+      events.push({
+        type: 'instruction',
+        instruction: { kind: 'altitude', feet: ifr.cruiseFt, mode: 'climb' },
+      });
+    this.atc(r, join(line('identified'), climb, direct), {
+      after: wait + this.pause(),
+      events,
+      readback: {
+        correct: join(climb, direct),
+        wrong: climb ? join(phrase(line('climb to'), this.lvl(ifr.cruiseFt + 1000)), direct) : null,
+        correction: climb ?? direct,
+        repeat: join(climb, direct),
+        soft: false,
+      },
+    });
+  }
+
+  /** Feet above the destination's runway to start down from, so as to be at 4000 ft 12 NM out. */
+  private descentNm(sit: AtcSituation) {
+    const gate = this.ilsAvailable()
+      ? interceptAltitude(this.inUse(this.arr), interceptDistance(sit.groundSpeedKt))
+      : this.arr.circuitAltitudeFt + 1000;
+    // 3 NM per 1000 ft, to the gate about 12 NM out, and a few miles to slow down.
+    return (Math.max(0, sit.altitudeFt - gate) / 1000) * 3 + 12 + 5;
+  }
+
+  /** The level area control hands the flight down to: well above the intercept altitude. */
+  private entryFt() {
+    const ifr = this.ifr();
+    const gate = this.ilsAvailable()
+      ? interceptAltitude(this.inUse(this.arr), interceptDistance(this.isJet ? 210 : 100))
+      : this.arr.circuitAltitudeFt + 1000;
+    return Math.min(ifr.cruiseFt, Math.ceil((gate + 3000) / 1000) * 1000);
+  }
+
+  private descent(r: AtcStation) {
+    const ifr = this.ifr();
+    ifr.descentGiven = true;
+    const to = this.entryFt();
+    if (this.s.assignedAltitude !== null && to >= this.s.assignedAltitude - 50) return;
+    this.assign(to);
+    const q = this.weather.qnh;
+    const qn = this.isLevel(to) ? null : qnhLine(q);
+    // 250 kt below FL 100 is said to the jets; the others are slower anyway.
+    const sp =
+      this.isJet && to < 10_000 ? phrase(line('speed'), knots(250), line('or less')) : null;
+    const down = phrase(line('descend to'), this.lvl(to));
+    const events: AtcEvent[] = [
+      { type: 'instruction', instruction: { kind: 'altitude', feet: to, mode: 'descend' } },
+    ];
+    if (qn) events.push(this.qnhEvent(this.arr));
+    if (sp) events.push({ type: 'instruction', instruction: { kind: 'speed', knots: 250 } });
+    this.atc(r, join(down, qn, sp), {
+      events,
+      readback: {
+        correct: join(down, qn, sp),
+        wrong: qn
+          ? join(down, qnhLine(wrongQnh(q)), sp)
+          : join(phrase(line('descend to'), this.lvl(to + 1000)), sp),
+        correction: qn ? qnhLine(q) : down,
+        repeat: join(down, qn, sp),
+        soft: false,
+      },
+    });
+  }
+
+  /** Area control lets the flight go: to arrival, to the tower, or out of radar service. */
+  private handOver(r: AtcStation) {
+    const s = this.s;
+    const ifr = this.ifr();
+    ifr.handedToArrival = true;
+    const a = this.station(this.arr, 'arrival');
+    if (a && this.ilsAvailable()) {
+      s.stage = 'ifrArrival';
+      this.redirect(r, a, 0);
+    } else if (this.arr.controlled) {
+      s.stage = 'enroute';
+      this.redirect(r, this.tower(this.arr), 0);
+    } else {
+      s.stage = 'enroute';
+      s.inCharge = null;
+      s.squawk = null;
+      this.atc(
+        r,
+        join(
+          line('radar service terminated'),
+          line('squawk 7000', 'squawk seven thousand'),
+          line('frequency change approved'),
+        ),
+        { events: [{ type: 'squawk', code: 7000 }] },
+      );
+    }
+  }
+
+  /** Radar identification is done: vectors begin with the next transmission. */
+  private startVectors(sit: AtcSituation, after: number, reported: boolean) {
+    const s = this.s;
+    const rwy = this.inUse(this.arr);
+    s.arrRunway = rwy.ident;
+    s.inCharge = this.station(this.arr, 'arrival')?.id ?? s.inCharge;
+    if (!s.zones.includes(this.arr.icao)) s.zones.push(this.arr.icao);
+    s.vectors = planVectors(rwy, sit, sit.time, sit.groundSpeedKt);
+    s.stage = 'ilsVectors';
+    const lead = this.atisReminder(this.arr, reported);
+    if (nearlyEstablished(rwy, sit, sit.headingDeg, s.vectors.interceptNm)) {
+      s.vectors.next = s.vectors.points.length;
+      this.vector(sit, sit.headingDeg, true, true, after, lead);
+    } else {
+      const v = nextVector(s.vectors, rwy, sit, sit.headingDeg, sit.groundSpeedKt, sit.time);
+      if (v) this.vector(sit, v.headingTrue, v.kind === 'intercept', true, after, lead);
+    }
+  }
+
+  // ---------------------------------------------------------------- military
+
+  private overhead(t: AtcStation, wait: number, reported: boolean) {
+    const s = this.s;
+    const ap = this.arr;
+    const rwy = this.inUse(ap);
+    s.arrRunway = rwy.ident;
+    s.inCharge = t.id;
+    s.stage = 'arrBreak';
+    if (!s.zones.includes(ap.icao)) s.zones.push(ap.icao);
+    const q = this.weather.qnh;
+    const ini = phrase(line('join initial'), runwayLine(rwy.ident));
+    const brk = line(`${rwy.circuit}-hand break`);
+    this.atc(
+      t,
+      join(ini, brk, qnhLine(q), this.atisReminder(ap, reported), line('report initial')),
+      {
+        after: wait + this.pause(),
+        events: [
+          this.qnhEvent(ap),
+          {
+            type: 'instruction',
+            instruction: { kind: 'approach', runway: rwy.ident, approach: 'overhead' },
+          },
+        ],
+        readback: {
+          correct: join(ini, brk, qnhLine(q), line('wilco')),
+          wrong: join(ini, brk, qnhLine(wrongQnh(q)), line('wilco')),
+          correction: qnhLine(q),
+          repeat: join(ini, brk, qnhLine(q)),
+          soft: false,
+        },
+      },
+    );
+  }
+
+  private lowApproach(t: AtcStation, wait: number) {
+    const s = this.s;
+    const rwy = this.arrRwy();
+    s.stage = 'arrLowApproach';
+    s.inCharge = t.id;
+    s.clearance.landing = false;
+    const cleared = join(runwayLine(rwy.ident), line('cleared low approach'));
+    this.atc(t, join(towerWind(this.weather, this.decl), cleared), {
+      after: wait + this.pause(),
+      events: [
+        {
+          type: 'instruction',
+          instruction: { kind: 'runway', runway: rwy.ident, clearance: 'lowApproach' },
+        },
+      ],
+      readback: {
+        correct: cleared,
+        wrong: join(runwayLine(oppositeIdent(rwy.ident)), line('cleared low approach')),
+        correction: cleared,
+        repeat: cleared,
+        soft: false,
+      },
+    });
+  }
+
   // ---------------------------------------------------------------- controller replies
 
   private startup(g: AtcStation, reported: boolean, wait: number) {
@@ -1302,6 +1958,8 @@ export class AtcController {
   private departureRoute(): { atc: Line; readback: Line; point: string | null } {
     const dep = this.dep;
     const rwy = this.depRwy();
+    // IFR: the clearance has the departure already.
+    if (this.isIfr && dep.controlled) return { atc: line(''), readback: line(''), point: null };
     if (this.local) {
       const side = `${rwy.circuit}-hand circuit`;
       return { atc: join(line(side), line('report downwind')), readback: line(side), point: null };
@@ -1342,19 +2000,30 @@ export class AtcController {
     if (!s.zones.includes(this.dep.icao)) s.zones.push(this.dep.icao);
     const cleared = join(runwayLine(rwy.ident), line('cleared for take-off'));
     const wrong = join(runwayLine(oppositeIdent(rwy.ident)), line('cleared for take-off'));
-    this.atc(t, join(route.atc, towerWind(this.weather, this.decl), cleared), {
+    const events: AtcEvent[] = [
+      {
+        type: 'instruction',
+        instruction: { kind: 'runway', runway: rwy.ident, clearance: 'takeoff' },
+      },
+    ];
+    // Lined up without an IFR clearance yet: the tower gives it with the take-off.
+    let atc = route.atc;
+    let rb = route.readback;
+    if (this.isIfr && this.dep.controlled && !this.ifr().cleared) {
+      this.ifr().cleared = true;
+      const cl = this.ifrClearanceLines(rwy);
+      atc = cl.atc;
+      rb = cl.correct;
+      events.unshift(...cl.events);
+    }
+    this.atc(t, join(atc, towerWind(this.weather, this.decl), cleared), {
       after: wait + this.pause(),
-      events: [
-        {
-          type: 'instruction',
-          instruction: { kind: 'runway', runway: rwy.ident, clearance: 'takeoff' },
-        },
-      ],
+      events,
       readback: {
-        correct: join(route.readback, cleared),
-        wrong: join(route.readback, wrong),
+        correct: join(rb, cleared),
+        wrong: join(rb, wrong),
         correction: join(cleared),
-        repeat: join(route.atc, cleared),
+        repeat: join(atc, cleared),
         soft: false,
       },
     });
@@ -1529,10 +2198,11 @@ export class AtcController {
 
   private established(sit: AtcSituation, rwy: AtcRunway) {
     const { x, y } = approachFrame(rwy, sit);
+    const out = this.s.vectors?.interceptNm ?? INTERCEPT_NM;
     return (
       !sit.onGround &&
       x > 2 &&
-      x < 15 &&
+      x < out + 7 &&
       Math.abs(y) < 0.25 &&
       Math.abs(angleDiff(sit.trackDeg, rwy.course)) < 15
     );
@@ -1547,7 +2217,14 @@ export class AtcController {
   }
 
   /** A heading (and on the first vector the altitude and QNH) as one instruction. */
-  private vector(sit: AtcSituation, headingTrue: number, intercept: boolean, first: boolean) {
+  private vector(
+    sit: AtcSituation,
+    headingTrue: number,
+    intercept: boolean,
+    first: boolean,
+    after?: number,
+    extra?: Line | null,
+  ) {
     const s = this.s;
     const a = this.station(this.arr, 'arrival')!;
     const rwy = this.arrRwy();
@@ -1580,12 +2257,14 @@ export class AtcController {
       const al = altitudeLine(target);
       alt = mode === 'maintain' ? phrase(line('maintain'), al) : phrase(line(`${mode} to`), al);
       s.assignedAltitude = target;
+      s.assignedStd = false;
       s.altitudeReached = mode === 'maintain';
       s.altitudeWarned = false;
       qn = qnhLine(this.weather.qnh);
       lead = join(
         line('identified'),
         this.position(sit),
+        extra,
         qn,
         phrase(line('vectors for ILS approach'), runwayLine(rwy.ident)),
       );
@@ -1611,6 +2290,7 @@ export class AtcController {
       : null;
     this.atc(a, body, {
       events,
+      ...(after !== undefined ? { after } : {}),
       readback: {
         correct: join(hdg, alt, qn, clr),
         wrong: intercept ? join(hdg, alt, qn, wrongClr) : join(wrongHdg, alt, qn),
@@ -1682,6 +2362,10 @@ export class AtcController {
       'ilsCleared',
       'ilsHandoff',
       'uncArrival',
+      'arrBreak',
+      'arrLowApproach',
+      'ifrCruise',
+      'ifrArrival',
     ];
     if (s.airborne && sit.onGround && distanceNm(arr, sit) < 2 && arrivalStages.includes(s.stage)) {
       s.airborne = false;
@@ -1701,8 +2385,12 @@ export class AtcController {
       s.stage = arr.controlled ? 'landed' : 'uncArrival';
       s.clearance.landing = false;
     }
-    // The control zone.
-    const z = sit.onGround ? undefined : this.world.controlZone(sit.lon, sit.lat, sit.altitudeFt);
+    // The control zone. An IFR flight under control is cleared through any zone it crosses.
+    const underIfr = this.isIfr && s.stage !== 'enroute';
+    const z =
+      sit.onGround || underIfr
+        ? undefined
+        : this.world.controlZone(sit.lon, sit.lat, sit.altitudeFt);
     for (const k of Object.keys(s.zoneSince)) if (k !== z) delete s.zoneSince[k];
     if (z && !s.zones.includes(z) && !s.zoneWarned.includes(z)) {
       s.zoneSince[z] ??= sit.time;
@@ -1743,17 +2431,22 @@ export class AtcController {
     if (s.stage === 'enroute' && !z) s.zones = [];
     // The cleared altitude.
     if (s.assignedAltitude !== null) {
-      const d = Math.abs(sit.altitudeFt - s.assignedAltitude);
+      const now = s.assignedStd ? this.pressureFt(sit) : sit.altitudeFt;
+      const d = Math.abs(now - s.assignedAltitude);
       if (d < 200) {
         s.altitudeReached = true;
         s.altitudeWarned = false;
       } else if (s.altitudeReached && d > 300 && !s.altitudeWarned) {
         s.altitudeWarned = true;
-        const al = altitudeLine(s.assignedAltitude);
+        const al = s.assignedStd ? this.lvl(s.assignedAltitude) : altitudeLine(s.assignedAltitude);
         this.deviation(
           'altitude',
           this.byId(s.inCharge ?? ''),
-          join(line('check altitude'), phrase(line('cleared'), al), qnhLine(this.weather.qnh)),
+          join(
+            line('check altitude'),
+            phrase(line('cleared'), al),
+            s.assignedStd ? null : qnhLine(this.weather.qnh),
+          ),
         );
       }
     }
@@ -1775,7 +2468,13 @@ export class AtcController {
         break;
       }
       case 'takeoff':
-        if (s.airborne) {
+        if (s.airborne && this.isIfr && this.dep.controlled) {
+          s.stage = 'ifrDeparture';
+          s.clearance.takeoff = false;
+          const ifr = this.ifr();
+          if (s.assignedAltitude === null) this.assign(ifr.initialFt);
+          ifr.departureId = (this.departureStation(this.dep) ?? this.radar(sit)).id;
+        } else if (s.airborne) {
           if (this.local) {
             s.stage = 'arrDownwind';
             s.arrRunway = s.depRunway;
@@ -1794,6 +2493,62 @@ export class AtcController {
       case 'uncDeparture':
         if (s.airborne && distanceNm(this.dep, sit) > 2) s.stage = 'enroute';
         break;
+      case 'ifrDeparture': {
+        const ifr = this.ifr();
+        if (busy || ifr.handedToDeparture || this.height(sit, this.dep) < 800) break;
+        ifr.handedToDeparture = true;
+        const d = this.byId(ifr.departureId ?? '') ?? this.departureStation(this.dep);
+        const to = d ?? this.radar(sit);
+        ifr.departureId = to.id;
+        this.redirect(this.tower(this.dep), to, 0);
+        break;
+      }
+      case 'ifrClimb': {
+        const ifr = this.ifr();
+        if (busy || ifr.handedToRadar) break;
+        const d = this.byId(ifr.departureId ?? '');
+        if (!d) break;
+        if (distanceNm(this.dep, sit) > 15 || this.pressureFt(sit) > 9000) {
+          ifr.handedToRadar = true;
+          const r = this.radar(sit);
+          if (r.id === d.id) this.radarContact(r, 0);
+          else this.redirect(d, r, 0);
+        }
+        break;
+      }
+      case 'ifrCruise': {
+        const ifr = this.ifr();
+        if (busy) break;
+        const r = this.radar(sit);
+        const d = distanceNm(this.arr, sit);
+        if (!ifr.descentGiven && d <= this.descentNm(sit)) this.descent(r);
+        else if (ifr.descentGiven && !ifr.handedToArrival && d <= 35) this.handOver(r);
+        break;
+      }
+      case 'arrLowApproach': {
+        const rwy = this.arrRwy();
+        const h = this.height(sit, this.arr);
+        if (busy || sit.onGround || approachFrame(rwy, sit).x > -0.2 || h < 300) break;
+        if (sit.verticalSpeedFpm < 300) break;
+        s.stage = 'arrDownwind';
+        const dw = phrase(line(`join ${rwy.circuit}-hand downwind`), runwayLine(rwy.ident));
+        this.atc(this.tower(this.arr), join(dw, line('report downwind')), {
+          events: [
+            {
+              type: 'instruction',
+              instruction: { kind: 'approach', runway: rwy.ident, approach: 'circuit' },
+            },
+          ],
+          readback: {
+            correct: join(dw, line('wilco')),
+            wrong: null,
+            correction: dw,
+            repeat: dw,
+            soft: false,
+          },
+        });
+        break;
+      }
       case 'enroute':
         if (!this.arr.controlled && distanceNm(this.arr, sit) < 10 && !sit.onGround) {
           s.stage = 'uncArrival';
@@ -1817,10 +2572,10 @@ export class AtcController {
         const a = this.station(this.arr, 'arrival')!;
         if (set) {
           const rwy = this.arrRwy();
-          s.vectors = planVectors(rwy, sit, sit.time);
+          s.vectors = planVectors(rwy, sit, sit.time, sit.groundSpeedKt);
           if (!s.zones.includes(this.arr.icao)) s.zones.push(this.arr.icao);
           s.stage = 'ilsVectors';
-          if (nearlyEstablished(rwy, sit, sit.headingDeg)) {
+          if (nearlyEstablished(rwy, sit, sit.headingDeg, s.vectors.interceptNm)) {
             s.vectors.next = s.vectors.points.length;
             this.vector(sit, sit.headingDeg, true, true);
           } else {
@@ -1850,7 +2605,10 @@ export class AtcController {
         const rwy = this.arrRwy();
         if (!busy && this.established(sit, rwy)) {
           s.assignedAltitude = null;
-          if (approachFrame(rwy, sit).x < 5) this.handoff(this.station(this.arr, 'arrival')!, 0);
+          // The tower gets the flight some miles inside the intercept: further out for a jet.
+          const out = s.vectors ? INTERCEPT_NM * planScale(s.vectors) : INTERCEPT_NM;
+          if (approachFrame(rwy, sit).x < out - 3)
+            this.handoff(this.station(this.arr, 'arrival')!, 0);
         }
         break;
       }

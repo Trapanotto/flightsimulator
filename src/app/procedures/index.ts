@@ -20,6 +20,7 @@ export {
   type AtcStation,
   type AtcWorld,
   BUILTIN_ATC_WORLD,
+  SWISS_RADAR,
   type ReportingPoint,
   type StationRole,
   TableAtcWorld,
