@@ -1325,10 +1325,14 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
           const to = ((worldWind.fromDeg + 180) * Math.PI) / 180;
           wreckWind.x = Math.sin(to) * worldWind.speed;
           wreckWind.z = -Math.cos(to) * worldWind.speed;
+          const waterAt = (x: number, z: number) => {
+            const g = frame.toGeodetic({ x, y: 0, z });
+            return world.ground(g.lon, g.lat)?.surface === 'water';
+          };
           wreck = new Wreck(
             visual,
             lastVelocity,
-            { groundY: (x, z) => rig.groundY?.(x, z), wind: wreckWind },
+            { groundY: (x, z) => rig.groundY?.(x, z), wind: wreckWind, waterAt },
             wreckFx,
             impact,
           );
@@ -1336,7 +1340,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
           crashCam.age = 0;
           crashSound.play(wreck.severity, wreck.extent / 10, {
             distance: camera.position.distanceTo(visual.object.position),
-            water: impact.reason === 'water',
+            water: impact.reason === 'water' || waterAt(at.x, at.z),
           });
         }
       }
