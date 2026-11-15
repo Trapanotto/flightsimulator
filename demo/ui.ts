@@ -19,6 +19,10 @@
  *   fleet                    PC-12, A320 and F/A-18 join the Cessna (and all airports load)
  *   aircraft=pc12|a320|fa18  the type of the flight or briefing     screen=hangar  the hangar
  *   speedbrake=0..1  rev  sb and reverse levers     g=<n> alpha=<deg>  fighter readouts
+ *
+ * Phase 5 (flight school, logbook, replay, photo mode; see uiPhase5.ts):
+ *   screen=school|logbook|replay|photo   lesson=running|hint|hold|passed|failed (in flight)
+ *   emptylog   noreplay
  */
 import { AIRPORTS as GEO_AIRPORTS, isPaved } from '@geo';
 import {
@@ -46,6 +50,7 @@ import {
   touchInput,
 } from '@ui';
 import { CONTROLS, FLYING, engines, installFleet } from './uiFleet';
+import { installPhase5, openPhase5Screen } from './uiPhase5';
 
 const q = new URLSearchParams(location.search);
 const screenParam = q.get('screen') ?? 'loading';
@@ -1056,6 +1061,10 @@ window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 
 // --- Mount and open the requested screen -------------------------------------------------------
 
+installPhase5(actions, q, (plan) => {
+  game.plan.value = plan;
+  actions.startFlight(plan);
+});
 mountUi(document.getElementById('ui')!, actions);
 
 const flying: Partial<typeof sim> = {
@@ -1147,6 +1156,8 @@ switch (screenParam) {
   case 'flight':
   case 'paused':
   case 'crash':
+  case 'replay':
+  case 'photo':
     game.plan.value = defaultPlan;
     if (p3) {
       startP3();
@@ -1162,12 +1173,17 @@ switch (screenParam) {
     startFeed(flying);
     if (screenParam === 'crash') sim.crashed = 'terrain';
     publish();
-    game.screen.value = screenParam === 'paused' ? 'paused' : 'flight';
+    // The replay and the photo mode open from the pause menu.
+    game.screen.value =
+      screenParam === 'paused' || screenParam === 'replay' || screenParam === 'photo'
+        ? 'paused'
+        : 'flight';
     if (q.get('panel')) panels.open.value = q.get('panel')!.split(',') as typeof panels.open.value;
     if (q.has('tools')) panels.toolsOpen.value = true;
     if (q.get('msg')) message(q.get('msg')!);
     break;
 }
+openPhase5Screen(q, actions);
 
 // No global declaration: every demo page has its own shape of __demo.
 (window as unknown as { __demo: unknown }).__demo = {

@@ -22,6 +22,8 @@ import './styles/touch.css';
 import './styles/panels.css';
 import './styles/dialogs.css';
 import './styles/hangar.css';
+import './styles/school.css';
+import './styles/replay.css';
 
 export { status } from './state';
 export {
@@ -39,6 +41,14 @@ export {
   type UiActions,
   type WeatherChoice,
   type WeatherReport,
+  // Phase 5
+  type Bilingual,
+  type LandingRecord,
+  type LessonInfo,
+  type LessonView,
+  type LogEntry,
+  type PhotoSettings,
+  type ReplayView,
   game,
   settings,
   touchInput,
@@ -50,6 +60,8 @@ export { panels } from './panels';
 export { validatePlan } from './plan';
 /** Phase 4: the key codes the interface shows for speed brake, reverse and gear (the app binds them). */
 export { FLEET_KEYS } from './fleet';
+/** Phase 5: the touchdown in words, as the logbook rates it (the app may use it in debriefs). */
+export { touchdownRating, type TouchdownRating } from './logbook';
 
 /** Mounts the interface into `root` and returns a function that removes it. */
 export function mountUi(root: HTMLElement, actions?: UiActions): () => void {

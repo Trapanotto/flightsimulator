@@ -1,0 +1,350 @@
+/*
+ * Phase 5: the replay bar and the photo mode. Both leave the picture to the scene: one slim
+ * bar at the bottom, or one small panel in a corner that can itself be hidden.
+ */
+
+/* Replay -------------------------------------------------------------------------------- */
+
+.replay {
+  position: absolute;
+  left: var(--safe-l);
+  right: var(--safe-r);
+  bottom: var(--safe-b);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.replay-hint {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 3px 12px;
+  border-radius: var(--r-pill);
+  background: rgb(4 7 12 / 0.5);
+  color: var(--c-ink-2);
+  font-size: var(--fs-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.replay-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(940px, 100%);
+  padding: 6px 8px;
+  border-radius: var(--r-3);
+  background: var(--c-glass-strong);
+  pointer-events: auto;
+}
+
+.replay-play {
+  flex: none;
+  border-color: transparent;
+  background: var(--c-fill-hover);
+}
+
+.replay-time {
+  flex: none;
+  min-width: 5.2ch;
+  color: var(--c-ink);
+  font-size: var(--fs-2);
+  font-weight: 600;
+  text-align: center;
+}
+
+.replay-end {
+  color: var(--c-ink-3);
+}
+
+.replay-track {
+  flex: 1;
+  min-width: 0;
+}
+
+.replay-tools {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.replay-tools .btn--icon {
+  border-color: transparent;
+  background: transparent;
+}
+
+.replay-tools .btn--icon:hover {
+  background: var(--c-fill-hover);
+}
+
+.replay-speed {
+  position: relative;
+}
+
+.replay-speed-btn {
+  min-width: 64px;
+  padding: 0 10px;
+  font-weight: 600;
+}
+
+.replay-speeds {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 12px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 96px;
+  padding: 6px;
+  background: var(--c-glass-strong);
+}
+
+.replay-speed-opt {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--c-ink-2);
+  font-size: var(--fs-3);
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+}
+
+.replay-speed-opt:hover {
+  background: var(--c-fill-hover);
+  color: var(--c-ink);
+}
+
+.replay-speed-opt.is-on {
+  background: var(--c-accent-dim);
+  color: var(--c-accent);
+}
+
+/* Narrow: the timeline gets a row of its own, the buttons go below it. */
+@media (max-width: 600px) {
+  .replay-bar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'time track end'
+      'play tools tools';
+    row-gap: 2px;
+    column-gap: 8px;
+    padding: 4px 8px 6px;
+  }
+  .replay-play {
+    grid-area: play;
+  }
+  .replay-time {
+    grid-area: time;
+  }
+  .replay-track {
+    grid-area: track;
+  }
+  .replay-end {
+    grid-area: end;
+  }
+  .replay-tools {
+    grid-area: tools;
+    justify-self: end;
+  }
+}
+
+/* Photo mode ---------------------------------------------------------------------------- */
+
+.photo {
+  position: absolute;
+  inset: 0;
+}
+
+.photo-panel {
+  position: absolute;
+  right: var(--safe-r);
+  bottom: var(--safe-b);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  width: 300px;
+  max-height: calc(100% - var(--safe-t) - var(--safe-b));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 14px 12px;
+  background: var(--c-glass-strong);
+  pointer-events: auto;
+  scrollbar-width: none;
+}
+
+.photo-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  color: var(--c-ink-2);
+}
+
+.photo-title {
+  flex: 1;
+  color: var(--c-ink);
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: var(--fs-4);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.photo-btn {
+  margin-right: -6px;
+  color: var(--c-ink-2);
+}
+
+.photo-btn + .photo-btn {
+  margin-left: -6px;
+}
+
+.photo-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.photo-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.photo-label {
+  color: var(--c-ink-2);
+  font-size: var(--fs-2);
+}
+
+.photo-value {
+  color: var(--c-ink);
+  font-size: var(--fs-2);
+  font-weight: 600;
+}
+
+.photo-field .slider {
+  grid-column: 1 / -1;
+  height: 36px;
+}
+
+.photo-fields .toggle {
+  min-height: var(--tap);
+  margin: 0 -12px;
+  width: calc(100% + 24px);
+}
+
+.photo-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--c-line);
+}
+
+.photo-help {
+  flex: 1;
+  color: var(--c-ink-3);
+  font-size: var(--fs-1);
+  line-height: 1.35;
+}
+
+.photo-shutter {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border: 3px solid var(--c-ink);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.photo-shutter-ring {
+  display: block;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--c-ink);
+  transition: transform var(--t-fast) var(--ease-out);
+}
+
+.photo-shutter:hover .photo-shutter-ring {
+  background: #fff;
+}
+
+.photo-shutter:active .photo-shutter-ring {
+  transform: scale(0.86);
+}
+
+/* A short white flash says the picture was taken. */
+.photo-flash {
+  position: fixed;
+  inset: 0;
+  background: #fff;
+  pointer-events: none;
+  animation: photo-flash 420ms var(--ease-out) forwards;
+}
+
+@keyframes photo-flash {
+  from {
+    opacity: 0.7;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.photo-told {
+  position: absolute;
+  left: 50%;
+  bottom: var(--safe-b);
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  background: rgb(4 7 12 / 0.6);
+  color: var(--c-ink);
+  font-size: var(--fs-2);
+  white-space: nowrap;
+}
+
+/* Phones upright: the panel across the bottom. */
+@media (max-width: 600px) and (orientation: portrait) {
+  .photo-panel {
+    left: var(--safe-l);
+    width: auto;
+  }
+}
+
+/* Short landscape screens: the right edge, top to bottom, tighter. */
+@media (max-height: 560px) {
+  .photo-panel {
+    top: var(--safe-t);
+    width: 280px;
+    gap: 4px;
+    padding-bottom: 8px;
+  }
+  .photo-field .slider {
+    height: 32px;
+  }
+  .photo-shutter {
+    width: 56px;
+    height: 56px;
+  }
+  .photo-shutter-ring {
+    width: 42px;
+    height: 42px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .photo-flash {
+    display: none;
+  }
+}

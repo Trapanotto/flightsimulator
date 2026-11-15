@@ -16,7 +16,9 @@ import {
 import { categoryOf, overspeedLimit, showsMach } from '../fleet';
 import { throttleLabel } from '../fleetText';
 import { type MessageKey, isMessageKey, lang, t } from '../i18n';
-import { actions, flownAircraft, showTouch } from '../nav';
+import { actions, flownAircraft, inLesson, lessonEnded, showTouch } from '../nav';
+import { panels } from '../panels';
+import { LessonDebrief, LessonPanel } from './Lesson';
 import { autopilotModes } from './AvionicsPanels';
 import {
   EngineBlock,
@@ -502,6 +504,9 @@ export function Hud() {
   const hasAvionics = useComputed(() => !!game.telemetry.value?.avionics);
   const nav = hasAvionics.value && settings.navStrip.value;
   const viewLabel = t(cockpit ? 'hud.view.cockpit' : 'hud.view.outside');
+  const lesson = inLesson.value;
+  // A touch panel sheet under the instructor: the card makes itself small (see school.css).
+  const sheet = lesson && touch && panels.open.value.length > 0;
 
   // Keep focus off the flight buttons, also when the pause dialog hands focus back: Space or
   // Enter on a focused button would trigger it while the pilot flies with the keyboard.
@@ -513,7 +518,7 @@ export function Hud() {
 
   return (
     <div
-      class={`hud${cockpit ? ' is-cockpit' : ''}${touch ? ' is-touch' : ''}${paused ? ' is-paused' : ''}${nav ? ' has-nav' : ''}`}
+      class={`hud${cockpit ? ' is-cockpit' : ''}${touch ? ' is-touch' : ''}${paused ? ' is-paused' : ''}${nav ? ' has-nav' : ''}${lesson ? ' has-lesson' : ''}${sheet ? ' has-sheet' : ''}`}
       inert={paused}
     >
       <div class="hud-top">
@@ -557,6 +562,8 @@ export function Hud() {
 
       <ControlHint />
       <div class="hud-alerts">
+        {/* First, so it stays put while warnings and notices come and go below it. */}
+        {lesson && !lessonEnded.value && <LessonPanel />}
         <Warnings />
         <Annunciators />
         <Notice />
@@ -565,7 +572,8 @@ export function Hud() {
       </div>
 
       {!crashed.value && <FlightPanels />}
-      {crashed.value && !paused && <CrashPanel reason={crashed.value} />}
+      {crashed.value && !paused && !lessonEnded.value && <CrashPanel reason={crashed.value} />}
+      {lessonEnded.value && !paused && <LessonDebrief />}
     </div>
   );
 }

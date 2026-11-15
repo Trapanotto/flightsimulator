@@ -3,9 +3,11 @@ import { AIRCRAFT } from '@sim';
 import { useRef } from 'preact/hooks';
 import { game } from '../api';
 import {
+  IconCamera,
   IconChevronDown,
   IconExit,
   IconPlay,
+  IconReplay,
   IconRestart,
   IconSettings,
   IconWarning,
@@ -107,6 +109,18 @@ export function PauseMenu() {
             <IconRestart />
             {t('pause.restart')}
           </button>
+          {game.canReplay.value && actions.openReplay && (
+            <button type="button" class="btn btn--block" onClick={() => actions.openReplay?.()}>
+              <IconReplay />
+              {t('pause.replay')}
+            </button>
+          )}
+          {actions.openPhoto && (
+            <button type="button" class="btn btn--block" onClick={() => actions.openPhoto?.()}>
+              <IconCamera />
+              {t('pause.photo')}
+            </button>
+          )}
           <button
             type="button"
             class="btn btn--block"

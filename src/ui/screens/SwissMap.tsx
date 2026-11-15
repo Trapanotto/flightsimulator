@@ -211,6 +211,54 @@ function pathOf(points: [number, number][]): string {
   );
 }
 
+/** A point of a flown track: [lon, lat], possibly followed by more (the logbook's altitude). */
+export type TrackPoint = readonly [number, number, ...number[]];
+
+function trackPoints(track: readonly TrackPoint[]): string {
+  return track
+    .map(([lon, lat]) => {
+      const [x, y] = project(lon, lat);
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(' ');
+}
+
+/** About 60 km across at the least: a circuit still shows its surroundings and a lake or two. */
+const MIN_VIEW_W = 54;
+
+/**
+ * The part of the map a track needs, with a margin, in the whole map's proportions (so the
+ * figure keeps its size), and no larger than the whole map.
+ */
+export function trackView(track: readonly TrackPoint[]): {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+} {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const [lon, lat] of track) {
+    const [x, y] = project(lon, lat);
+    x0 = Math.min(x0, x);
+    y0 = Math.min(y0, y);
+    x1 = Math.max(x1, x);
+    y1 = Math.max(y1, y);
+  }
+  if (!Number.isFinite(x0)) return { x: 0, y: 0, w: MAP_W, h: MAP_H };
+  const aspect = MAP_H / MAP_W;
+  const w = Math.min(MAP_W, Math.max(MIN_VIEW_W, (x1 - x0) * 1.3, ((y1 - y0) * 1.3) / aspect));
+  const h = w * aspect;
+  const cx = (x0 + x1) / 2;
+  const cy = (y0 + y1) / 2;
+  // Kept inside the map, so the frame never shows empty space beside the country.
+  const x = Math.max(0, Math.min(MAP_W - w, cx - w / 2));
+  const y = Math.max(0, Math.min(MAP_H - h, cy - h / 2));
+  return { x, y, w, h };
+}
+
 const BORDER_PATH = pathOf(BORDER);
 const LAKE_PATHS = LAKES.map(pathOf);
 
@@ -227,18 +275,33 @@ export function SwissMap(props: {
   route?: { from: string; to: string };
   /** Airports the chosen type may not use: dimmed, and a click on them does nothing. */
   isOff?: (a: AirportOption) => boolean;
+  /**
+   * Phase 5 (logbook): a flown ground track as [lon, lat]; drawn instead of the straight route
+   * line, and the map zooms in on it.
+   */
+  track?: readonly TrackPoint[];
 }) {
   const sel = props.airports.find((a) => a.icao === props.selected);
   const from = props.airports.find((a) => a.icao === props.route?.from);
   const to = props.airports.find((a) => a.icao === props.route?.to);
+  const track = props.track && props.track.length > 1 ? props.track : undefined;
+  const view = track ? trackView(track) : { x: 0, y: 0, w: MAP_W, h: MAP_H };
+  // Dots and labels keep their size on screen when the map zooms in on a track.
+  const k = view.w / MAP_W;
+  const first = track?.[0];
+  const last = track?.[track.length - 1];
   return (
     <figure
-      class={`swissmap${props.onSelect ? ' is-interactive' : ''}`}
+      class={`swissmap${props.onSelect ? ' is-interactive' : ''}${track ? ' is-zoomed' : ''}`}
       role="img"
       aria-label={props.label}
     >
       <svg
-        viewBox={`0 0 ${MAP_W.toFixed(0)} ${MAP_H.toFixed(0)}`}
+        viewBox={
+          track
+            ? `${view.x.toFixed(2)} ${view.y.toFixed(2)} ${view.w.toFixed(2)} ${view.h.toFixed(2)}`
+            : `0 0 ${MAP_W.toFixed(0)} ${MAP_H.toFixed(0)}`
+        }
         preserveAspectRatio="xMidYMid meet"
       >
         <defs>
@@ -264,7 +327,38 @@ export function SwissMap(props: {
           <path class="swissmap-lake" d={d} key={d} />
         ))}
         <path class="swissmap-border" d={BORDER_PATH} />
-        {from &&
+        {track && (
+          <>
+            <polyline
+              class="swissmap-track-shadow"
+              points={trackPoints(track)}
+              vector-effect="non-scaling-stroke"
+            />
+            <polyline
+              class="swissmap-track"
+              points={trackPoints(track)}
+              vector-effect="non-scaling-stroke"
+            />
+            {first && (
+              <circle
+                class="swissmap-track-start"
+                cx={project(first[0], first[1])[0]}
+                cy={project(first[0], first[1])[1]}
+                r={3 * k}
+              />
+            )}
+            {last && (
+              <circle
+                class="swissmap-track-end"
+                cx={project(last[0], last[1])[0]}
+                cy={project(last[0], last[1])[1]}
+                r={3.6 * k}
+              />
+            )}
+          </>
+        )}
+        {!track &&
+          from &&
           to &&
           from !== to &&
           (() => {
@@ -283,21 +377,27 @@ export function SwissMap(props: {
         {sel &&
           (() => {
             const [x, y] = project(sel.lon, sel.lat);
-            return <circle cx={x} cy={y} r="26" fill="url(#swissmap-glow)" class="swissmap-glow" />;
+            return (
+              <circle cx={x} cy={y} r={26 * k} fill="url(#swissmap-glow)" class="swissmap-glow" />
+            );
           })()}
         {props.airports.map((a) => {
           const [x, y] = project(a.lon, a.lat);
           const on = a.icao === props.selected;
           // The other end of the route (the selection is one end already).
           const end = !on && !!to && (a === to || a === from);
-          // Labels go left of dots in the east of the map so they stay inside the frame.
-          const left = x > MAP_W * 0.78;
+          // Labels go left of dots in the east of the frame so they stay inside it.
+          const left = x > view.x + view.w * 0.78;
           const off = !on && !!props.isOff?.(a);
           return (
             <g
               key={a.icao}
               class={`swissmap-apt${on ? ' is-on' : ''}${end ? ' is-end' : ''}${off ? ' is-off' : ''}`}
-              transform={`translate(${x.toFixed(1)} ${y.toFixed(1)})`}
+              transform={
+                track
+                  ? `translate(${x.toFixed(2)} ${y.toFixed(2)}) scale(${k.toFixed(4)})`
+                  : `translate(${x.toFixed(1)} ${y.toFixed(1)})`
+              }
               onClick={() => !off && props.onSelect?.(a.icao)}
               aria-hidden="true"
             >
