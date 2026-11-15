@@ -25,4 +25,4 @@ swisstopo.
 
 ## Lizenz
 
-MIT, siehe [LICENSE](LICENSE). Geodaten © swisstopo.
+MIT, siehe [LICENSE](LICENSE). Geodaten: © Daten: swisstopo; Pistenachsen © OpenStreetMap-Mitwirkende.

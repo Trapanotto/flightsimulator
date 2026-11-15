@@ -1,3 +1,4 @@
+import { Credits } from '../components/Credits';
 import { useSignal } from '@preact/signals';
 import { AIRCRAFT } from '@sim';
 import type { VNode } from 'preact';
@@ -212,7 +213,7 @@ export function MenuStage() {
       </div>
       {!loading && (
         <footer class="menu-credits fade-in" inert={away}>
-          <span>{t('menu.attribution')}</span>
+          <Credits />
           {status.version.value && (
             <span class="menu-version num">{t('menu.version', { v: status.version.value })}</span>
           )}

@@ -1,4 +1,5 @@
 import { game } from './api';
+import { FlightCredits } from './components/Credits';
 import { lang } from './i18n';
 import { crashed, debugOn, lessonEnded, nav, showTouch } from './nav';
 import { Briefing } from './screens/Briefing';
@@ -27,6 +28,7 @@ export function App() {
       {(screen === 'loading' || screen === 'menu') && <MenuStage />}
       {screen === 'briefing' && <Briefing />}
       {inFlight && <Hud />}
+      {(inFlight || screen === 'replay') && <FlightCredits />}
       {screen === 'flight' && showTouch.value && !crashed.value && !lessonEnded.value && (
         <TouchControls />
       )}

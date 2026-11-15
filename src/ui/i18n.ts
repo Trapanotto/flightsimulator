@@ -27,7 +27,8 @@ const de = {
   'menu.soon.hint': 'Folgt in einer späteren Version.',
   'menu.language': 'Sprache',
   'menu.version': 'Version {v}',
-  'menu.attribution': 'Geodaten © swisstopo',
+  'credits.swisstopo': '© Daten: swisstopo',
+  'credits.osm': '© OpenStreetMap-Mitwirkende',
 
   'lang.de': 'Deutsch',
   'lang.en': 'English',
@@ -902,7 +903,8 @@ const en: Record<MessageKey, string> = {
   'menu.soon.hint': 'Arrives in a later version.',
   'menu.language': 'Language',
   'menu.version': 'Version {v}',
-  'menu.attribution': 'Geodata © swisstopo',
+  'credits.swisstopo': '© Data: swisstopo',
+  'credits.osm': '© OpenStreetMap contributors',
 
   'lang.de': 'Deutsch',
   'lang.en': 'English',
