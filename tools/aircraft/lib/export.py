@@ -130,15 +130,17 @@ def build_lods(lod0_root, col, cabin_keep=CABIN_KEEP, drop1=DROP1, ratio1=None, 
         src = bpy.data.objects[name]
         copy_tree(src, lod2, "_lod2", col, lambda o: not o.name.startswith(("Lamp_", "Lens_", "Glow_")),
                   lambda o: lod2_ratio)
-    prop = M.empty("Prop_lod2", col, bpy.data.objects["Prop"].matrix_world.translation, parent=lod2,
-                   props={"axis": [0.0, 0.0, 1.0]})
-    disc = bpy.data.objects["PropDisc"].copy()
-    disc.data = bpy.data.objects["PropDisc"].data.copy()
-    col.objects.link(disc)
-    disc.name = "PropDisc_lod2"
-    disc.parent = prop
-    disc.matrix_parent_inverse = Matrix.Identity(4)
-    disc.matrix_basis = bpy.data.objects["PropDisc"].matrix_basis.copy()
+    # Types without a propeller (jets) have no disc to keep turning.
+    if "Prop" in bpy.data.objects:
+        prop = M.empty("Prop_lod2", col, bpy.data.objects["Prop"].matrix_world.translation, parent=lod2,
+                       props={"axis": [0.0, 0.0, 1.0]})
+        disc = bpy.data.objects["PropDisc"].copy()
+        disc.data = bpy.data.objects["PropDisc"].data.copy()
+        col.objects.link(disc)
+        disc.name = "PropDisc_lod2"
+        disc.parent = prop
+        disc.matrix_parent_inverse = Matrix.Identity(4)
+        disc.matrix_basis = bpy.data.objects["PropDisc"].matrix_basis.copy()
     for name, root in (("LOD0", lod0_root), ("LOD1", lod1), ("LOD2", lod2)):
         report[name] = sum(M.tri_count(o) for o in [root] + list(root.children_recursive) if o.type == "MESH")
     return report
