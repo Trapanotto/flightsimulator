@@ -942,9 +942,12 @@ export class FlightModel implements SimAircraft {
       const un = dot(ve, strip.liftAxis);
       const v2 = uc * uc + un * un;
       const alphaGeo = Math.atan2(-un, uc);
-      const alpha = alphaGeo - this.groupInduced[strip.group]!;
       const foil = strip.foil;
       const control = strip.control;
+      let alpha = alphaGeo - this.groupInduced[strip.group]!;
+      // A movable stabiliser turns the whole tailplane: nose-up trim is leading edge down.
+      if (control?.kind === 'elevator' && def.controls.trim === 'stabiliser')
+        alpha -= this.stabiliser;
       let ctrl = 0;
       let sepShift = 0;
       let spoiled = 0;
@@ -954,9 +957,6 @@ export class FlightModel implements SimAircraft {
           spoiled = this.spoilerShare(control.side, control.roll);
         else
           ctrl = this.controlAlpha(control.kind, control.effectiveness, control.side, control.roll);
-        // A movable stabiliser turns the whole tailplane.
-        if (control.kind === 'elevator' && def.controls.trim === 'stabiliser')
-          ctrl += this.stabiliser;
       }
       // Compressibility on the flow normal to the sweep.
       const cosSweep = strip.sweep ? Math.cos(strip.sweep) : 1;
@@ -1967,8 +1967,41 @@ export class FlightModel implements SimAircraft {
       x[0] = clamp(x[0]!, -10 * DEG, 25 * DEG);
       x[1] = clamp(x[1]!, trimLo, trimHi);
     }
-    residual(x, r);
+    // A type with aileron and rudder trim starts with them set for the condition too, as a
+    // pilot of a powerful single would have them: no roll or yaw moment left at zero slip.
     const cc = def.controls;
+    if (cc.rollTrim && cc.yawTrim) {
+      const lateral = (rt: number, yt: number, out: number[]) => {
+        this.aileron = clamp(cc.aileronRigging + cc.rollTrim! * rt, -1, 1);
+        this.rudder = clamp(cc.rudderRigging + cc.yawTrim! * yt, -1, 1);
+        residual(x, r);
+        const m = this.mass * G0;
+        out[0] = this.momentBody.x / (m * def.wingSpan);
+        out[1] = this.momentBody.z / (m * def.wingSpan);
+      };
+      let rt = 0;
+      let yt = 0;
+      const a = [0, 0];
+      const b = [0, 0];
+      for (let iter = 0; iter < 4; iter++) {
+        lateral(rt, yt, a);
+        lateral(rt + 0.01, yt, b);
+        const j00 = (b[0]! - a[0]!) / 0.01;
+        const j10 = (b[1]! - a[1]!) / 0.01;
+        lateral(rt, yt + 0.01, b);
+        const j01 = (b[0]! - a[0]!) / 0.01;
+        const j11 = (b[1]! - a[1]!) / 0.01;
+        const det = j00 * j11 - j01 * j10;
+        if (Math.abs(det) < 1e-12) break;
+        rt = clamp(rt - (j11 * a[0]! - j01 * a[1]!) / det, -1, 1);
+        yt = clamp(yt - (-j10 * a[0]! + j00 * a[1]!) / det, -1, 1);
+      }
+      c.rollTrim = rt;
+      c.yawTrim = yt;
+      this.aileron = clamp(cc.aileronRigging + cc.rollTrim * rt, -1, 1);
+      this.rudder = clamp(cc.rudderRigging + cc.yawTrim * yt, -1, 1);
+    }
+    residual(x, r);
     const trim = x[1]!;
     c.pitchTrim = clamp(trim >= 0 ? trim / cc.trimUp : trim / cc.trimDown, -1, 1);
     const thr = clamp(x[2]!, 0, 1);

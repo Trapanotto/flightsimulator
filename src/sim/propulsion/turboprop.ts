@@ -161,6 +161,7 @@ export class TurbopropPowerplant implements Powerplant {
     this.reactionTorque = 0;
     this.fuelFlow = 0;
     this.cranking = false;
+    this.finish();
   }
 
   /** Corrected-parameter scaling at the compressor face. */

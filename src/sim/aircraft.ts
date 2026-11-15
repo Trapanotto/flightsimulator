@@ -1,11 +1,12 @@
 import { createAvionics } from './avionics/avionics';
 import { C172 } from './c172';
+import { PC12 } from './pc12';
 import { FlightModel } from './flightModel';
 import type { AvionicsUnit } from './avionicsTypes';
 import type { AircraftId, AircraftInfo, ControlInput, SimAircraft } from './types';
 
 /** Every flyable type, for menus. */
-export const AIRCRAFT: AircraftInfo[] = [C172.info];
+export const AIRCRAFT: AircraftInfo[] = [C172.info, PC12.info];
 
 /**
  * A new aircraft of the type, to be placed with reset(). `avionics` is the unit its radios,
@@ -18,6 +19,8 @@ export function createAircraft(
   switch (id) {
     case 'c172':
       return new FlightModel(C172, options.avionics ?? createAvionics(C172.avionics));
+    case 'pc12':
+      return new FlightModel(PC12, options.avionics ?? createAvionics(PC12.avionics));
   }
   throw new Error(`createAircraft('${String(id)}'): unknown type`);
 }

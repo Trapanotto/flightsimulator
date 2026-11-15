@@ -32,6 +32,11 @@ export interface VariablePitchPropellerData {
   foil: AirfoilData;
   /** Share of the three-quarter-radius loading the real blade delivers (tip and root losses). */
   efficiency: number;
+  /**
+   * Induced velocity over the ideal momentum value (tip losses, the uneven loading over the
+   * disk, swirl): what brings the static figure of merit down to a real propeller's.
+   */
+  inducedFactor: number;
   /** Helical Mach number at three-quarter radius where the section's drag starts to rise. */
   criticalMach: number;
   /** Blade angles at three-quarter radius, rad: full reverse, ground fine (beta), flight fine stop, feather. */
@@ -128,7 +133,7 @@ export function bladeForces(
     // forward (then vi is negative and the slipstream points ahead).
     const t2 = Math.abs(thrust) / (2 * density * area);
     const root = Math.sqrt((v * v) / 4 + t2);
-    const target = thrust >= 0 ? root - v / 2 : v / 2 - root;
+    const target = (thrust >= 0 ? root - v / 2 : v / 2 - root) * prop.inducedFactor;
     vi += 0.6 * (target - vi);
   }
   inflow.vi = vi;

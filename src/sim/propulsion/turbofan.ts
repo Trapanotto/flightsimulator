@@ -157,6 +157,7 @@ export class TurbofanPowerplant implements Powerplant {
     this.thrust = 0;
     this.fuelFlow = 0;
     this.cranking = false;
+    this.finish();
   }
 
   private corrections(input: PowerplantInput) {
