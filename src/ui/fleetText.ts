@@ -71,10 +71,10 @@ export const GEAR_ROW: KeyRow = { label: 'keys.gear', keys: [[keyLabel(FLEET_KEY
 export const BRAKE_ROW: KeyRow = { label: 'keys.brake', keys: [['B']] };
 
 /** Speed brake and reverse, for the types that have them. */
-export const SPEEDBRAKE_ROWS: KeyRow[] = [
-  { label: 'keys.speedbrakeExtend', keys: [[keyLabel(FLEET_KEYS.speedbrakeExtend)]] },
-  { label: 'keys.speedbrakeRetract', keys: [[keyLabel(FLEET_KEYS.speedbrakeRetract)]] },
-];
+export const SPEEDBRAKE_ROW: KeyRow = {
+  label: 'keys.speedbrake',
+  keys: [[keyLabel(FLEET_KEYS.speedbrakeExtend), keyLabel(FLEET_KEYS.speedbrakeRetract)]],
+};
 export const REVERSE_ROW: KeyRow = {
   label: 'keys.reverse',
   keys: [[keyLabel(FLEET_KEYS.reverse)]],
@@ -106,7 +106,7 @@ export function flyingKeyRows(info: AircraftInfo | undefined): KeyRow[] {
   return [
     ...FLY_ROWS,
     ...(f.gear ? [GEAR_ROW] : []),
-    ...(f.speedbrake ? SPEEDBRAKE_ROWS : []),
+    ...(f.speedbrake ? [SPEEDBRAKE_ROW] : []),
     ...(f.reverse ? [REVERSE_ROW] : []),
     BRAKE_ROW,
   ];
@@ -118,7 +118,7 @@ export function typeKeyRows(aircraft: readonly AircraftInfo[]): { row: KeyRow; t
   const out: { row: KeyRow; types: string[] }[] = [];
   const speedbrake = names((i) => !!i.speedbrake);
   const reverse = names((i) => !!i.reverse);
-  for (const row of SPEEDBRAKE_ROWS) if (speedbrake.length) out.push({ row, types: speedbrake });
+  if (speedbrake.length) out.push({ row: SPEEDBRAKE_ROW, types: speedbrake });
   if (reverse.length) out.push({ row: REVERSE_ROW, types: reverse });
   return out;
 }

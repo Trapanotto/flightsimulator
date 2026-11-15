@@ -527,6 +527,8 @@ const de = {
   'setup.apt.short': 'Zu kurz: {len}',
   'setup.apt.unpaved': 'Keine Hartbelagpiste',
   'setup.scenario.blocked': '{icao}: nicht mit dem {type}',
+  'setup.scenarios.hint.fleet':
+    'Ein Klick, und es geht los. Wo der Titel kein Flugzeug nennt, fliegst du das gewählte.',
 
   'scenario.a320Zurich': 'A320: Anflug Zürich 14 in der Dämmerung',
   'scenario.a320Zurich.sub': 'Mit dem Abendverkehr, 12 NM vor der Piste',
@@ -551,8 +553,8 @@ const de = {
   'briefing.tip.approach.fighter':
     'Du startest im Endanflug mit {v}, Fahrwerk und Klappen ausgefahren. Fliege den Anstellwinkel, nicht die Geschwindigkeit: rund 8° ergeben den richtigen Anflug.',
 
-  'keys.speedbrakeExtend': 'Bremsklappen ausfahren',
-  'keys.speedbrakeRetract': 'Bremsklappen einfahren',
+  'keys.speedbrake': 'Bremsklappen aus / ein',
+  'briefing.typeKeys': 'Tasten für dieses Flugzeug',
   'keys.reverse': 'Umkehrschub (halten)',
   'settings.keys.types': 'Je nach Flugzeug',
 
@@ -1157,6 +1159,8 @@ const en: Record<MessageKey, string> = {
   'setup.apt.short': 'Too short: {len}',
   'setup.apt.unpaved': 'No paved runway',
   'setup.scenario.blocked': '{icao}: not with the {type}',
+  'setup.scenarios.hint.fleet':
+    'One click and you are off. Where the title names no aircraft, you fly the one you chose.',
 
   'scenario.a320Zurich': 'A320: approach Zürich 14 at dusk',
   'scenario.a320Zurich.sub': 'With the evening arrivals, 12 NM out',
@@ -1181,8 +1185,8 @@ const en: Record<MessageKey, string> = {
   'briefing.tip.approach.fighter':
     'You start on final at {v}, gear and flaps down. Fly the angle of attack, not the speed: about 8° gives the right approach.',
 
-  'keys.speedbrakeExtend': 'Speed brake out',
-  'keys.speedbrakeRetract': 'Speed brake in',
+  'keys.speedbrake': 'Speed brake out / in',
+  'briefing.typeKeys': 'Keys for this aircraft',
   'keys.reverse': 'Reverse thrust (hold)',
   'settings.keys.types': 'Depending on the aircraft',
 

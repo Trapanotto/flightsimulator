@@ -272,7 +272,7 @@ function paint() {
   const hangar = shownType !== null;
   const px = hangar ? w * 0.5 : w * 0.68;
   const py = hangar ? h * (w < h ? 0.34 : 0.46) : h * 0.74;
-  const s = (Math.min(w, h) / 600) * (shownType === 'a320' ? 1.35 : shownType === 'c172' ? 0.8 : 1);
+  const s = (Math.min(w, h) / 600) * (shownType === 'a320' ? 1.05 : shownType === 'c172' ? 0.8 : 1);
   if (shownType && shownType !== 'c172') {
     drawType(g, px, py, s, shownType, bg === 'night');
     return;

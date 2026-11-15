@@ -1061,9 +1061,10 @@
   grid-template-columns: auto minmax(0, 1fr);
   grid-template-areas:
     'icon name'
-    'icon kind';
+    'kind kind';
   align-items: center;
   column-gap: var(--s-2);
+  row-gap: 1px;
   min-height: 52px;
   padding: 6px var(--s-3) 6px var(--s-2);
   border: 1px solid transparent;

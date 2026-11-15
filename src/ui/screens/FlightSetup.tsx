@@ -387,7 +387,9 @@ function ScenarioGrid(props: {
   const today = new Date();
   return (
     <div class="scenarios">
-      <p class="field-hint">{t('setup.scenarios.hint')}</p>
+      <p class="field-hint">
+        {t(list.some((s) => s.aircraft) ? 'setup.scenarios.hint.fleet' : 'setup.scenarios.hint')}
+      </p>
       <div
         ref={ref}
         class="scenario-grid"

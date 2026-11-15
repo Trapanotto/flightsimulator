@@ -239,6 +239,9 @@ export function Briefing() {
   const category = categoryOf(info);
   const features = typeFeatures(info);
   const flaps = flapText();
+  const typeRows = flyingKeyRows(info).filter((r) =>
+    ['keys.gear', 'keys.speedbrake', 'keys.reverse'].includes(r.label),
+  );
   const tip = startTip(start, !!plan?.coldStart, category, vr, vapp);
 
   // The route: through the plan's waypoints if it has any, else straight.
@@ -340,6 +343,20 @@ export function Briefing() {
                   </dt>
                   <dd class="brief-big num">{time}</dd>
                 </div>
+                {/* What this type has beyond the Cessna, with its keys, where keys are used. */}
+                {info && !showTouch.value && typeRows.length > 0 && (
+                  <div class="brief-fact brief-fact--wide">
+                    <dt class="caps">{t('briefing.typeKeys')}</dt>
+                    <dd class="brief-keys">
+                      {typeRows.map((row) => (
+                        <span class="brief-key" key={row.label}>
+                          {t(row.label)}
+                          <KeyCombo keys={row.keys} />
+                        </span>
+                      ))}
+                    </dd>
+                  </div>
+                )}
                 {routeText && dest && (
                   <div class="brief-fact brief-fact--wide">
                     <dt class="caps">

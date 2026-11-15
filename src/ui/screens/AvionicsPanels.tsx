@@ -500,12 +500,16 @@ export function AutopilotPanel(props: { onClose: () => void }) {
               {ap?.disconnectWarning ? t('ap.disconnect') : t('ap.off')}
             </span>
           )}
-          {helpers.map((m) => (
-            <span class="ap-mode is-helper" key={`h-${m}`}>
-              {m}
-            </span>
-          ))}
         </span>
+        {helpers.length > 0 && (
+          <span class="ap-helpers">
+            {helpers.map((m) => (
+              <span class="ap-mode is-helper" key={`h-${m}`}>
+                {m}
+              </span>
+            ))}
+          </span>
+        )}
         {ap && (
           <span class="ap-sel">
             <span>

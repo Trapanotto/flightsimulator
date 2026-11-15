@@ -577,3 +577,11 @@ button.hangar-figures-head {
     padding: 0;
   }
 }
+
+/* Sideways swipes step through the types: the browser keeps only vertical scrolling. */
+.hangar-info,
+.hangar-figures,
+.hangar-sheet,
+.hangar-strip {
+  touch-action: pan-y;
+}

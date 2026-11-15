@@ -396,12 +396,10 @@ describe('keys by type', () => {
   it('shows gear, speed brake and reverse only where the type has them', () => {
     const labels = (info: AircraftInfo) => flyingKeyRows(info).map((r) => r.label);
     expect(labels(C172)).not.toContain('keys.gear');
-    expect(labels(C172)).not.toContain('keys.speedbrakeExtend');
+    expect(labels(C172)).not.toContain('keys.speedbrake');
     expect(labels(PC12)).toEqual(expect.arrayContaining(['keys.gear', 'keys.reverse']));
-    expect(labels(PC12)).not.toContain('keys.speedbrakeExtend');
-    expect(labels(A320)).toEqual(
-      expect.arrayContaining(['keys.speedbrakeExtend', 'keys.speedbrakeRetract', 'keys.reverse']),
-    );
+    expect(labels(PC12)).not.toContain('keys.speedbrake');
+    expect(labels(A320)).toEqual(expect.arrayContaining(['keys.speedbrake', 'keys.reverse']));
     expect(labels(FA18)).not.toContain('keys.reverse');
     expect(typeFeatures(FA18)).toEqual({ gear: true, speedbrake: true, reverse: false });
   });
@@ -410,10 +408,7 @@ describe('keys by type', () => {
     expect(typeKeyRows([C172])).toEqual([]);
     const rows = typeKeyRows(FLEET);
     expect(rows.find((r) => r.row.label === 'keys.reverse')?.types).toEqual(['PC-12', 'A320']);
-    expect(rows.find((r) => r.row.label === 'keys.speedbrakeExtend')?.types).toEqual([
-      'A320',
-      'F/A-18',
-    ]);
+    expect(rows.find((r) => r.row.label === 'keys.speedbrake')?.types).toEqual(['A320', 'F/A-18']);
   });
 
   it('keeps clear of the keys the app and the panels use, and of Y and Z', () => {
