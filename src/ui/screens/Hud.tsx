@@ -2,7 +2,6 @@ import { useComputed, useSignal, useSignalEffect } from '@preact/signals';
 import { useEffect, useRef } from 'preact/hooks';
 import { game, settings } from '../api';
 import { IconExit, IconPause, IconRestart, IconView, IconWarning } from '../components/icons';
-import { useDialog } from '../focus';
 import {
   altitudeUnit,
   formatAltitude,
@@ -449,43 +448,39 @@ const CRASH_TEXT: Record<string, MessageKey> = {
   water: 'crash.water',
 };
 
+/** Seconds before the strip appears: the impact itself is seen with nothing over it. */
+const CRASH_DIALOG_DELAY = 1.5;
+
+/** The crash dialog, once the crash has been seen. */
 function CrashPanel({ reason }: { reason: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useDialog(ref);
+  const shown = useSignal(false);
+  useEffect(() => {
+    const id = setTimeout(() => (shown.value = true), CRASH_DIALOG_DELAY * 1000);
+    return () => clearTimeout(id);
+  }, []);
+  return shown.value ? <CrashDialog reason={reason} /> : null;
+}
+
+function CrashDialog({ reason }: { reason: string }) {
+  // A slim strip at the bottom, not a dialog: the wreck is what one looks at.
   return (
     <div class="crash-layer">
-      <div
-        ref={ref}
-        class="crash glass enter"
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="crash-title"
-        aria-describedby="crash-reason"
-      >
+      <div class="crash enter" role="status" aria-live="polite">
         <span class="crash-icon">
-          <IconWarning size={26} />
+          <IconWarning size={14} />
         </span>
-        <h2 id="crash-title" class="crash-title">
-          {t('crash.title')}
-        </h2>
-        <p id="crash-reason" class="crash-reason">
-          {t(CRASH_TEXT[reason] ?? 'crash.other')}
-        </p>
-        <div class="crash-actions">
-          <button
-            type="button"
-            class="btn btn--primary"
-            data-autofocus
-            onClick={() => actions.restart()}
-          >
-            <IconRestart />
+        <span class="crash-title">{t('crash.title')}</span>
+        <span class="crash-reason">{t(CRASH_TEXT[reason] ?? 'crash.other')}</span>
+        <span class="crash-actions">
+          <button type="button" class="crash-btn" onClick={() => actions.restart()}>
+            <IconRestart size={14} />
             {t('crash.restart')}
           </button>
-          <button type="button" class="btn" onClick={() => actions.exitToMenu()}>
-            <IconExit />
+          <button type="button" class="crash-btn" onClick={() => actions.exitToMenu()}>
+            <IconExit size={14} />
             {t('crash.menu')}
           </button>
-        </div>
+        </span>
       </div>
     </div>
   );

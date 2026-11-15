@@ -12,11 +12,19 @@ import type { Object3D } from 'three/webgpu';
 import { SHOWCASE_SPEED, Showcase } from './Showcase';
 import { headingAt } from './showcasePath';
 import { pass } from 'three/tsl';
-import { type AircraftVisual, createReferenceMarker, loadAircraftVisual } from '@aircraft';
+import {
+  type AircraftVisual,
+  ImpactWatch,
+  Wreck,
+  WreckFx,
+  createReferenceMarker,
+  loadAircraftVisual,
+} from '@aircraft';
 import {
   AircraftSound,
   AudioEngine,
   CockpitSound,
+  CrashSound,
   NavAudio,
   RadioSquelch,
   RadioVoice,
@@ -399,7 +407,14 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   };
 
   /** Moves the render origin to lon/lat; everything is re-placed from world coordinates. */
+  /** The burning wreck of a crash, until the flight is restarted or left. */
+  let wreck: Wreck | undefined;
   const rebase = (lon: number, lat: number) => {
+    if (wreck) {
+      // The wreck lies in render space: it moves with the origin.
+      const d = frame.fromGeodetic(lon, lat, 0, new Vector3());
+      wreck.rebase(d.x, d.y, d.z);
+    }
     frame = new LocalFrame(lon, lat, 0);
     world.setFrame(frame);
     sky.setLocation(lon, lat);
@@ -530,6 +545,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
    */
   const prepare = (p: FlightPlan | null) => {
     closeLog();
+    clearWreck();
     leaveStill();
     recording.clear();
     game.canReplay.value = false;
@@ -785,6 +801,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       if (!flight) return;
       closeLog();
       leaveStill();
+      clearWreck();
       flight.restart();
       recording.clear();
       openLog(flight.aircraft.info.id);
@@ -822,6 +839,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       // The last minute is what one wants to see again; the rest is a drag of the bar away.
       player.seek(Math.max(player.start, player.end - 60));
       player.play(true);
+      // The recording shows the whole aircraft: the wreck gives its parts back.
+      clearWreck();
       // From outside: the cockpit view hides most of the aircraft.
       visual.setCockpitView(false);
       freeCam.groundY = rig.groundY;
@@ -967,6 +986,52 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   const audio = new AudioEngine();
   const sound = new AircraftSound(audio);
   const cockpitSound = new CockpitSound(audio);
+  // Fire, smoke and their light stay in the scene from the start: added at the crash, every
+  // material would be rebuilt in the frame of the impact.
+  const wreckFx = new WreckFx({ quality: profile.device === 'mobile' ? 'low' : 'high' });
+  scene.add(wreckFx.object);
+  const crashSound = new CrashSound(audio);
+  const impactWatch = new ImpactWatch();
+  const lastVelocity = { x: 0, y: 0, z: 0 };
+  const wreckWind = { x: 0, y: 0, z: 0 };
+  /** The camera after a crash: it eases out to a slow circle round the burning wreck. */
+  const crashCam = {
+    age: 0,
+    angle: 0,
+    from: new Vector3(),
+    to: new Vector3(),
+    look: new Vector3(),
+  };
+  const circleWreck = (w: Wreck, dt: number) => {
+    const c = crashCam;
+    if (c.age === 0) {
+      c.from.copy(camera.position);
+      c.angle = Math.atan2(camera.position.x - w.focus.x, camera.position.z - w.focus.z);
+      c.look.copy(w.focus);
+    }
+    c.age += dt;
+    c.angle += dt * 0.1;
+    const dist = 34 * Math.max(1, w.extent / 10);
+    c.to.set(
+      w.focus.x + Math.sin(c.angle) * dist,
+      w.focus.y + 0.42 * dist,
+      w.focus.z + Math.cos(c.angle) * dist,
+    );
+    // On a slope the circle would run through the hill.
+    const ground = rig.groundY?.(c.to.x, c.to.z);
+    if (ground !== undefined) c.to.y = Math.max(c.to.y, ground + 6);
+    const k = Math.min(1, c.age / 1.6);
+    camera.position.lerpVectors(c.from, c.to, k * k * (3 - 2 * k));
+    // A whole airframe slides on for a while: the look follows it softly.
+    c.look.lerp(w.focus, 1 - Math.exp(-dt * 2));
+    camera.up.set(0, 1, 0);
+    camera.lookAt(c.look.x, c.look.y + 1.5, c.look.z);
+  };
+  const clearWreck = () => {
+    wreck?.dispose();
+    wreck = undefined;
+    impactWatch.reset();
+  };
   const navAudio = new NavAudio(audio);
   const squelch = new RadioSquelch(audio);
   const radio = new RadioVoice(browserSpeech(), squelch);
@@ -1205,8 +1270,50 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
           replayTime = 0;
           game.replay.value = shown.view();
         }
-      } else if (!tour)
+      } else if (wreck) circleWreck(wreck, dt);
+      else if (!tour)
         rig.update(dt, camera, visual.object, visual.view, flying && !aircraft.telemetry.onGround);
+      if (!tour && !tape) {
+        const t = aircraft.telemetry;
+        if (!t.crashed) frame.dirToLocal(aircraft.state.velocity, lastVelocity);
+        const impact = impactWatch.observe(t, aircraft.info);
+        if (impact) {
+          wreck?.dispose();
+          // A wreck is looked at from outside.
+          if (game.view.value === 'cockpit') setView('outside');
+          visual.object.updateMatrixWorld(true);
+          // Flown into a slope, the aircraft closes on the ground far faster than it sinks:
+          // judge the impact by the speed across the terrain's surface, not the vertical one.
+          const at = visual.object.position;
+          const h = (dx: number, dz: number) => rig.groundY?.(at.x + dx, at.z + dz);
+          const [e, w, so, no] = [h(8, 0), h(-8, 0), h(0, 8), h(0, -8)];
+          if (e !== undefined && w !== undefined && so !== undefined && no !== undefined) {
+            const nx = (w - e) / 16;
+            const nz = (no - so) / 16;
+            const len = Math.hypot(nx, 1, nz);
+            const closing = -(lastVelocity.x * nx + lastVelocity.y + lastVelocity.z * nz) / len;
+            impact.sink = Math.max(impact.sink, closing);
+          }
+          const to = ((worldWind.fromDeg + 180) * Math.PI) / 180;
+          wreckWind.x = Math.sin(to) * worldWind.speed;
+          wreckWind.z = -Math.cos(to) * worldWind.speed;
+          wreck = new Wreck(
+            visual,
+            lastVelocity,
+            { groundY: (x, z) => rig.groundY?.(x, z), wind: wreckWind },
+            wreckFx,
+            impact,
+          );
+          scene.add(wreck.group);
+          crashCam.age = 0;
+          crashSound.play(wreck.severity, wreck.extent / 10, {
+            distance: camera.position.distanceTo(visual.object.position),
+            water: impact.reason === 'water',
+          });
+        }
+      }
+      wreckFx.setExposure(sky.state.exposure);
+      wreck?.update(game.screen.value === 'flight' ? dt : 0, camera.position);
       // The picture dips to black around the menu's camera cuts.
       const opacity = tour && game.screen.value === 'menu' ? showcase.fade.toFixed(2) : '';
       if (canvas.style.opacity !== opacity) canvas.style.opacity = opacity;

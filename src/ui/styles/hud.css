@@ -528,36 +528,42 @@
   position: absolute;
   inset: 0;
   display: grid;
-  place-items: center;
-  padding: var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l);
-  background: radial-gradient(70% 70% at 50% 50%, rgb(60 0 0 / 0.35), rgb(0 0 0 / 0.55));
-  pointer-events: auto;
+  /* A small strip at the bottom edge and no veil: the burning wreck is what one looks at. */
+  place-items: end center;
+  padding: var(--safe-t) var(--safe-r) calc(var(--safe-b) + 22px) var(--safe-l);
+  pointer-events: none;
 }
 
 .crash {
+  pointer-events: auto;
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--s-2);
-  width: min(400px, 100%);
-  padding: var(--s-6) var(--s-5) var(--s-5);
-  text-align: center;
+  justify-content: center;
+  gap: 4px 10px;
+  max-width: 100%;
+  padding: 5px 6px 5px 12px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: var(--r-pill);
+  background: rgb(8 11 16 / 0.55);
+  font-size: var(--fs-1);
+  line-height: 1.2;
+  opacity: 0.85;
+  transition: opacity var(--t-base) var(--ease-out);
+}
+
+.crash:hover,
+.crash:focus-within {
+  opacity: 1;
 }
 
 .crash-icon {
   display: grid;
-  place-items: center;
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  background: rgb(255 77 79 / 0.16);
   color: var(--c-warning);
 }
 
 .crash-title {
-  font-family: var(--f-display);
   font-weight: 700;
-  font-size: var(--fs-7);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -568,34 +574,32 @@
 
 .crash-actions {
   display: flex;
-  flex-direction: column;
-  gap: var(--s-2);
-  width: 100%;
-  margin-top: var(--s-4);
+  gap: 4px;
+  margin-left: 6px;
 }
 
-@media (max-height: 560px) {
-  .crash {
-    padding: var(--s-4);
-    gap: 4px;
-  }
-  .crash-icon {
-    width: 40px;
-    height: 40px;
-  }
-  .crash-title {
-    font-size: var(--fs-6);
-  }
-  .crash-actions {
-    flex-direction: row;
-    margin-top: var(--s-3);
-  }
-  .crash-actions .btn {
-    flex: 1;
-    min-height: var(--tap);
-    font-size: var(--fs-3);
-    padding: 0 var(--s-3);
-  }
+.crash-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: var(--r-pill);
+  background: rgb(255 255 255 / 0.06);
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.crash-btn:hover,
+.crash-btn:focus-visible {
+  background: rgb(255 255 255 / 0.16);
+}
+
+/* After a crash the instruments have nothing left to say: they step back for the view. */
+.ui:has(.crash-layer) .flight-credits {
+  display: none;
 }
 
 /* Touch layout: cards to the top corners, out of the thumbs' way. */
