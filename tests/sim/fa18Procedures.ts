@@ -118,26 +118,31 @@ export function climbRate(altitudeFt: number, mach: number, throttle = 1) {
 
 /**
  * Specific excess power at a point: level flight at full throttle, (T - D) V / W measured as
- * the energy height's rate (m/s) while the altitude is held.
+ * the energy height's rate (m/s) while the altitude is held, once the engines have spooled
+ * up (5 s). A first run finds how far the Mach number moves meanwhile; the second starts that
+ * much slower, so the measurement is taken at the Mach number asked for.
  */
 export function excessPower(altitudeFt: number, mach: number, throttle = 1) {
-  const f = fa18Airborne(altitudeFt * FT, (mach * soundSpeed(altitudeFt * FT)) / KT);
-  const pilot = new HornetPilot(f);
-  const t = f.ac.telemetry;
-  const h = altitudeFt * FT;
-  f.ac.controls.throttle.fill(throttle);
-  fly(f, 1.5, (dt) => {
-    pilot.holdAltitude(h, dt);
-    pilot.heading(0, dt);
-  });
-  const e0 = t.altitude + (t.tas * t.tas) / (2 * G);
-  const t0 = t.time;
-  fly(f, 1, (dt) => {
-    pilot.holdAltitude(h, dt);
-    pilot.heading(0, dt);
-  });
-  const e1 = t.altitude + (t.tas * t.tas) / (2 * G);
-  return { ps: (e1 - e0) / (t.time - t0), mach: t.mach! };
+  const run = (start: number) => {
+    const f = fa18Airborne(altitudeFt * FT, (start * soundSpeed(altitudeFt * FT)) / KT);
+    const pilot = new HornetPilot(f);
+    const t = f.ac.telemetry;
+    const h = altitudeFt * FT;
+    f.ac.controls.throttle.fill(throttle);
+    const hold = (dt: number) => {
+      pilot.holdAltitude(h, dt);
+      pilot.heading(0, dt);
+    };
+    fly(f, 5, hold);
+    const e0 = t.altitude + (t.tas * t.tas) / (2 * G);
+    const m0 = t.mach!;
+    const t0 = t.time;
+    fly(f, 1, hold);
+    const e1 = t.altitude + (t.tas * t.tas) / (2 * G);
+    return { ps: (e1 - e0) / (t.time - t0), mach: (m0 + t.mach!) / 2 };
+  };
+  const first = run(mach);
+  return run(mach - (first.mach - mach));
 }
 
 export function soundSpeed(altitude: number) {
