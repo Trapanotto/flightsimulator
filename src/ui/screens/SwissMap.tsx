@@ -1,4 +1,7 @@
+import { useSignal } from '@preact/signals';
+import { useEffect, useMemo, useRef } from 'preact/hooks';
 import type { AirportOption } from '../api';
+import { IconExpand, IconMinus, IconPlus } from '../components/icons';
 
 /**
  * Outline of Switzerland (and a few lakes for orientation), simplified by hand to about
@@ -262,9 +265,57 @@ export function trackView(track: readonly TrackPoint[]): {
 const BORDER_PATH = pathOf(BORDER);
 const LAKE_PATHS = LAKES.map(pathOf);
 
+/** The view of the map: a window onto it in map units, always in the whole map's proportions. */
+export interface MapView {
+  x: number;
+  y: number;
+  w: number;
+}
+
+const ASPECT = MAP_H / MAP_W;
+/** About 25 km across at the closest: enough to pick apart the fields around Bern or Zürich. */
+const MIN_ZOOM_W = 22;
+
+/** A view kept inside the map and between the closest zoom and the whole country. */
+export function clampView(v: MapView): MapView {
+  const w = Math.min(MAP_W, Math.max(MIN_ZOOM_W, v.w));
+  const h = w * ASPECT;
+  return {
+    w,
+    x: Math.max(0, Math.min(MAP_W - w, v.x)),
+    y: Math.max(0, Math.min(MAP_H - h, v.y)),
+  };
+}
+
+/** Zooms by `factor` (below 1 is closer) around a point of the map that stays put. */
+export function zoomView(v: MapView, factor: number, px: number, py: number): MapView {
+  const w = Math.min(MAP_W, Math.max(MIN_ZOOM_W, v.w * factor));
+  const f = w / v.w;
+  return clampView({ w, x: px - (px - v.x) * f, y: py - (py - v.y) * f });
+}
+
+/** Inverse of `project`. */
+export function unproject(x: number, y: number): [number, number] {
+  return [x / KX + LON0, LAT0 - y / KY];
+}
+
+/** A press that moves less than this (CSS pixels) is a tap, not a drag. */
+const TAP_PX = 6;
+/** How far from a dot (CSS pixels) a tap still picks it: a dot is far smaller than a finger. */
+const PICK_PX = 22;
+
+/** Rough size of an ICAO label in map units at full view, for keeping labels apart. */
+const LABEL_W = 30;
+const LABEL_H = 11;
+
 /**
  * Locator map of Switzerland. The airport list next to it is the accessible control; the
  * dots are a pointer shortcut and therefore hidden from assistive technology.
+ *
+ * With `zoomable` the wheel, a pinch or the buttons zoom and a drag pans. A tap picks the
+ * nearest airport within a finger's reach (or, with `onPlace`, puts a place there). Labels are
+ * placed largest airport first and only where they do not overlap one already placed, so the
+ * crowded Mittelland reads as dots until one zooms in.
  */
 export function SwissMap(props: {
   airports: AirportOption[];
@@ -273,36 +324,233 @@ export function SwissMap(props: {
   label: string;
   /** A flight from one airport to another: a dashed line and a marker at the far end. */
   route?: { from: string; to: string };
-  /** Airports the chosen type may not use: dimmed, and a click on them does nothing. */
+  /** Airports the chosen type may not use: dimmed, and a tap on them does nothing. */
   isOff?: (a: AirportOption) => boolean;
   /**
    * Phase 5 (logbook): a flown ground track as [lon, lat]; drawn instead of the straight route
-   * line, and the map zooms in on it.
+   * line, and the map opens zoomed in on it.
    */
   track?: readonly TrackPoint[];
+  /** Airports that get a label at any zoom (the others only once there is room). */
+  isMain?: (a: AirportOption) => boolean;
+  /** Which label wins where two would overlap: higher first (e.g. the longest runway). */
+  labelPriority?: (a: AirportOption) => number;
+  /** The airport highlighted from outside (a list row under the pointer), and back out. */
+  hovered?: string | null;
+  onHover?: (icao: string | null) => void;
+  zoomable?: boolean;
+  /** An air start placed on the map, drawn as a marker with its heading. */
+  place?: { lon: number; lat: number; heading: number } | null;
+  /** When set, a tap puts the place there instead of picking an airport. */
+  onPlace?: (lon: number, lat: number) => void;
+  /** Labels of the zoom buttons. */
+  zoomLabels?: { in: string; out: string; reset: string };
 }) {
+  const track = props.track && props.track.length > 1 ? props.track : undefined;
+  const home = useMemo<MapView>(() => {
+    if (!track) return { x: 0, y: 0, w: MAP_W };
+    const v = trackView(track);
+    return { x: v.x, y: v.y, w: v.w };
+  }, [track]);
+  const view = useSignal<MapView>(home);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const hoverOwn = useSignal<string | null>(null);
+
+  const v = view.value;
+  const h = v.w * ASPECT;
+  // Dots, rings and labels keep their size on screen at any zoom.
+  const k = v.w / MAP_W;
+  const zoomed = v.w < MAP_W - 0.01;
+  const hovered = props.hovered ?? hoverOwn.value;
+
   const sel = props.airports.find((a) => a.icao === props.selected);
   const from = props.airports.find((a) => a.icao === props.route?.from);
   const to = props.airports.find((a) => a.icao === props.route?.to);
-  const track = props.track && props.track.length > 1 ? props.track : undefined;
-  const view = track ? trackView(track) : { x: 0, y: 0, w: MAP_W, h: MAP_H };
-  // Dots and labels keep their size on screen when the map zooms in on a track.
-  const k = view.w / MAP_W;
   const first = track?.[0];
   const last = track?.[track.length - 1];
-  return (
+
+  // Map units under a point of the screen (the transform covers letterboxing and CSS zoom).
+  const toMap = (clientX: number, clientY: number): [number, number] | null => {
+    const svg = svgRef.current;
+    const m = svg?.getScreenCTM();
+    if (!svg || !m) return null;
+    const p = new DOMPoint(clientX, clientY).matrixTransform(m.inverse());
+    return [p.x, p.y];
+  };
+  /** Map units per CSS pixel at the present zoom. */
+  const unitsPerPx = () => {
+    const m = svgRef.current?.getScreenCTM();
+    return m ? 1 / m.a : 1;
+  };
+  const pickable = (a: AirportOption) => !props.isOff?.(a);
+  const nearestAt = (x: number, y: number): AirportOption | null => {
+    const reach = PICK_PX * unitsPerPx();
+    let best: AirportOption | null = null;
+    let bestD = reach * reach;
+    for (const a of props.airports) {
+      if (!pickable(a)) continue;
+      const [ax, ay] = project(a.lon, a.lat);
+      // A main airport wins a close call: it is the one a pilot most likely aimed at.
+      const d = ((ax - x) ** 2 + (ay - y) ** 2) * (props.isMain?.(a) ? 0.5 : 1);
+      if (d < bestD) {
+        bestD = d;
+        best = a;
+      }
+    }
+    return best;
+  };
+  const setHover = (icao: string | null) => {
+    if (hoverOwn.value === icao) return;
+    hoverOwn.value = icao;
+    props.onHover?.(icao);
+  };
+
+  // Pointers down on the map: one drags, two pinch.
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const gesture = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const interactive = !!(props.onSelect || props.onPlace || props.zoomable);
+
+  const onDown = (e: PointerEvent) => {
+    if (!interactive || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size === 1) gesture.current = { x: e.clientX, y: e.clientY, moved: false };
+    else if (gesture.current) gesture.current.moved = true;
+  };
+  const onMove = (e: PointerEvent) => {
+    const prev = pointers.current.get(e.pointerId);
+    if (!prev) {
+      // A mouse passing over: highlight the airport it would pick.
+      if (e.pointerType === 'mouse' && props.onSelect && !props.onPlace) {
+        const p = toMap(e.clientX, e.clientY);
+        setHover(p ? (nearestAt(p[0], p[1])?.icao ?? null) : null);
+      }
+      return;
+    }
+    const g = gesture.current;
+    if (g && Math.hypot(e.clientX - g.x, e.clientY - g.y) > TAP_PX) g.moved = true;
+    if (!props.zoomable || !g?.moved) {
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      return;
+    }
+    const all = [...pointers.current.entries()];
+    if (all.length === 1) {
+      const s = unitsPerPx();
+      view.value = clampView({
+        w: view.value.w,
+        x: view.value.x - (e.clientX - prev.x) * s,
+        y: view.value.y - (e.clientY - prev.y) * s,
+      });
+    } else if (all.length === 2) {
+      const other = all.find(([id]) => id !== e.pointerId)![1];
+      const before = Math.hypot(prev.x - other.x, prev.y - other.y);
+      const after = Math.hypot(e.clientX - other.x, e.clientY - other.y);
+      const mid = toMap((e.clientX + other.x) / 2, (e.clientY + other.y) / 2);
+      if (before > 0 && after > 0 && mid) view.value = zoomView(view.value, before / after, ...mid);
+    }
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  };
+  const onUp = (e: PointerEvent) => {
+    const had = pointers.current.delete(e.pointerId);
+    const g = gesture.current;
+    if (!had || pointers.current.size > 0) return;
+    gesture.current = null;
+    if (!g || g.moved || e.type === 'pointercancel') return;
+    const p = toMap(e.clientX, e.clientY);
+    if (!p) return;
+    if (props.onPlace) {
+      const [lon, lat] = unproject(p[0], p[1]);
+      props.onPlace(lon, lat);
+      return;
+    }
+    const a = nearestAt(p[0], p[1]);
+    if (a) props.onSelect?.(a.icao);
+  };
+
+  // The wheel zooms around the pointer. Not passive: the sheet must not scroll meanwhile.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg || !props.zoomable) return;
+    const onWheel = (e: WheelEvent) => {
+      const p = toMap(e.clientX, e.clientY);
+      if (!p) return;
+      e.preventDefault();
+      view.value = zoomView(view.value, Math.exp(Math.sign(e.deltaY) * 0.25), ...p);
+    };
+    svg.addEventListener('wheel', onWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', onWheel);
+  }, [props.zoomable]);
+
+  const zoomBy = (factor: number) =>
+    (view.value = zoomView(
+      view.value,
+      factor,
+      view.value.x + view.value.w / 2,
+      view.value.y + (view.value.w * ASPECT) / 2,
+    ));
+
+  // Labels: the selected and hovered airport always, then the main ones, then (zoomed in) any
+  // that still fit, each only where it does not cover one already placed.
+  const labelled = new Set<string>();
+  {
+    const boxes: [number, number, number, number][] = [];
+    const rank = (a: AirportOption) =>
+      a.icao === props.selected || a.icao === hovered
+        ? 0
+        : a === from || a === to
+          ? 1
+          : props.isMain?.(a)
+            ? 2
+            : 3;
+    const candidates = props.airports
+      .filter((a) => rank(a) < 3 || !props.isMain || k <= 0.55)
+      .filter((a) => !props.isOff?.(a) || rank(a) === 0)
+      .sort(
+        (x, y) =>
+          rank(x) - rank(y) || (props.labelPriority?.(y) ?? 0) - (props.labelPriority?.(x) ?? 0),
+      );
+    for (const a of candidates) {
+      const [x, y] = project(a.lon, a.lat);
+      const left = x > v.x + v.w * 0.78;
+      const bw = LABEL_W * k;
+      const bh = LABEL_H * k;
+      const box: [number, number, number, number] = [
+        left ? x - bw - 3 * k : x - 3 * k,
+        y - bh / 2,
+        left ? x + 3 * k : x + bw,
+        y + bh / 2,
+      ];
+      const free = boxes.every(
+        (b) => box[2] < b[0] || box[0] > b[2] || box[3] < b[1] || box[1] > b[3],
+      );
+      if (free || rank(a) === 0) {
+        boxes.push(box);
+        labelled.add(a.icao);
+      }
+    }
+  }
+
+  const map = (
     <figure
-      class={`swissmap${props.onSelect ? ' is-interactive' : ''}${track ? ' is-zoomed' : ''}`}
+      class={`swissmap${props.onSelect || props.onPlace ? ' is-interactive' : ''}${zoomed ? ' is-zoomed' : ''}${props.onPlace ? ' is-placing' : ''}`}
       role="img"
       aria-label={props.label}
     >
       <svg
-        viewBox={
-          track
-            ? `${view.x.toFixed(2)} ${view.y.toFixed(2)} ${view.w.toFixed(2)} ${view.h.toFixed(2)}`
-            : `0 0 ${MAP_W.toFixed(0)} ${MAP_H.toFixed(0)}`
-        }
+        ref={svgRef}
+        viewBox={`${v.x.toFixed(2)} ${v.y.toFixed(2)} ${v.w.toFixed(2)} ${h.toFixed(2)}`}
         preserveAspectRatio="xMidYMid meet"
+        style={
+          props.zoomable
+            ? // Unzoomed, a vertical swipe still scrolls the sheet; zoomed, every drag pans.
+              { touchAction: zoomed ? 'none' : 'pan-y' }
+            : undefined
+        }
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={onUp}
+        onPointerLeave={(e) => e.pointerType === 'mouse' && setHover(null)}
       >
         <defs>
           <radialGradient id="swissmap-glow" cx="50%" cy="50%" r="50%">
@@ -367,14 +615,16 @@ export function SwissMap(props: {
             return (
               <line
                 class="swissmap-route"
-                x1={x1.toFixed(1)}
-                y1={y1.toFixed(1)}
-                x2={x2.toFixed(1)}
-                y2={y2.toFixed(1)}
+                x1={x1.toFixed(2)}
+                y1={y1.toFixed(2)}
+                x2={x2.toFixed(2)}
+                y2={y2.toFixed(2)}
+                vector-effect="non-scaling-stroke"
               />
             );
           })()}
         {sel &&
+          !props.onPlace &&
           (() => {
             const [x, y] = project(sel.lon, sel.lat);
             return (
@@ -384,38 +634,97 @@ export function SwissMap(props: {
         {props.airports.map((a) => {
           const [x, y] = project(a.lon, a.lat);
           const on = a.icao === props.selected;
+          const hover = a.icao === hovered && !on;
           // The other end of the route (the selection is one end already).
           const end = !on && !!to && (a === to || a === from);
           // Labels go left of dots in the east of the frame so they stay inside it.
-          const left = x > view.x + view.w * 0.78;
+          const left = x > v.x + v.w * 0.78;
           const off = !on && !!props.isOff?.(a);
+          const main = !!props.isMain?.(a);
           return (
             <g
               key={a.icao}
-              class={`swissmap-apt${on ? ' is-on' : ''}${end ? ' is-end' : ''}${off ? ' is-off' : ''}`}
-              transform={
-                track
-                  ? `translate(${x.toFixed(2)} ${y.toFixed(2)}) scale(${k.toFixed(4)})`
-                  : `translate(${x.toFixed(1)} ${y.toFixed(1)})`
-              }
-              onClick={() => !off && props.onSelect?.(a.icao)}
+              class={`swissmap-apt${on ? ' is-on' : ''}${hover ? ' is-hover' : ''}${end ? ' is-end' : ''}${off ? ' is-off' : ''}${main ? ' is-main' : ''}`}
+              transform={`translate(${x.toFixed(2)} ${y.toFixed(2)}) scale(${k.toFixed(4)})`}
               aria-hidden="true"
             >
-              <circle class="swissmap-hit" r="12" />
-              {on && <circle class="swissmap-ring" r="7" />}
-              <circle class="swissmap-dot" r={on ? 3.6 : 2.6} />
-              <text
-                class="swissmap-label"
-                x={left ? -7 : 7}
-                y="3"
-                text-anchor={left ? 'end' : 'start'}
-              >
-                {a.icao}
-              </text>
+              {(on || hover) && <circle class="swissmap-ring" r="7" />}
+              <circle class="swissmap-dot" r={on ? 3.6 : hover ? 3.4 : main ? 2.8 : 2.2} />
+              {labelled.has(a.icao) && (
+                <text
+                  class="swissmap-label"
+                  x={left ? -7 : 7}
+                  y="3"
+                  text-anchor={left ? 'end' : 'start'}
+                >
+                  {a.icao}
+                </text>
+              )}
             </g>
           );
         })}
+        {props.place &&
+          (() => {
+            const [x, y] = project(props.place.lon, props.place.lat);
+            return (
+              <g
+                class="swissmap-place"
+                transform={`translate(${x.toFixed(2)} ${y.toFixed(2)}) scale(${k.toFixed(4)})`}
+                aria-hidden="true"
+              >
+                <circle class="swissmap-place-halo" r="11" />
+                <g transform={`rotate(${props.place.heading})`}>
+                  <path
+                    class="swissmap-place-arrow"
+                    d="M0 -15 5 -5 1.6 -6.5 1.6 4 -1.6 4 -1.6 -6.5 -5 -5Z"
+                  />
+                </g>
+                <circle class="swissmap-place-dot" r="2.6" />
+              </g>
+            );
+          })()}
       </svg>
     </figure>
+  );
+
+  if (!props.zoomable) return map;
+  const labels = props.zoomLabels ?? { in: '+', out: '−', reset: '⟲' };
+  return (
+    <div class="swissmap-frame">
+      {map}
+      <div class="swissmap-zoom">
+        <button
+          type="button"
+          class="swissmap-zoom-btn"
+          aria-label={labels.in}
+          title={labels.in}
+          disabled={v.w <= MIN_ZOOM_W + 0.01}
+          onClick={() => zoomBy(0.6)}
+        >
+          <IconPlus size={18} />
+        </button>
+        <button
+          type="button"
+          class="swissmap-zoom-btn"
+          aria-label={labels.out}
+          title={labels.out}
+          disabled={!zoomed}
+          onClick={() => zoomBy(1 / 0.6)}
+        >
+          <IconMinus size={18} />
+        </button>
+        {(v.w !== home.w || v.x !== home.x || v.y !== home.y) && (
+          <button
+            type="button"
+            class="swissmap-zoom-btn"
+            aria-label={labels.reset}
+            title={labels.reset}
+            onClick={() => (view.value = home)}
+          >
+            <IconExpand size={18} />
+          </button>
+        )}
+      </div>
+    </div>
   );
 }

@@ -1,0 +1,290 @@
+/*
+ * Choosing the starting point: the map with zoom, hover and an air start marker; the search
+ * and the airport list in sections; altitude and heading of an air start put on the map.
+ */
+
+/* Map ------------------------------------------------------------------------------------- */
+
+.swissmap-frame {
+  position: relative;
+}
+
+/* Larger where the column has the room: the map is the quickest way to a place. */
+.setup-map-main .swissmap svg {
+  max-height: min(50vh, 440px);
+}
+
+.swissmap.is-interactive svg {
+  cursor: pointer;
+}
+
+.swissmap.is-zoomed svg {
+  cursor: grab;
+}
+
+.swissmap.is-placing svg {
+  cursor: crosshair;
+}
+
+.swissmap-zoom {
+  position: absolute;
+  right: var(--s-2);
+  top: var(--s-2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.swissmap-zoom-btn {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-1);
+  background: rgb(8 11 18 / 0.72);
+  color: var(--c-ink-2);
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease-out),
+    color var(--t-fast) var(--ease-out);
+}
+
+.swissmap-zoom-btn:hover {
+  background: var(--c-fill-active);
+  color: var(--c-ink);
+}
+
+.swissmap-zoom-btn[disabled] {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.ui[data-touch] .swissmap-zoom-btn {
+  width: 40px;
+  height: 40px;
+}
+
+.swissmap-apt.is-main .swissmap-dot {
+  fill: var(--c-ink);
+}
+
+.swissmap-apt:not(.is-main, .is-on, .is-hover, .is-end, .is-off) .swissmap-dot {
+  fill: rgb(243 246 250 / 0.7);
+}
+
+.swissmap-apt.is-hover .swissmap-dot {
+  fill: #fff;
+  stroke: var(--c-accent);
+}
+
+.swissmap-apt.is-hover .swissmap-label {
+  fill: var(--c-ink);
+}
+
+.swissmap-apt.is-hover .swissmap-ring {
+  animation: none;
+  opacity: 0.8;
+}
+
+/* The selected airport in front of its neighbours. */
+.swissmap-apt.is-on .swissmap-label {
+  font-size: 10.5px;
+}
+
+.swissmap.is-zoomed .swissmap-route {
+  stroke-width: 1.6px;
+}
+
+.swissmap-place-halo {
+  fill: rgb(227 49 58 / 0.18);
+  stroke: var(--c-brand);
+  stroke-width: 1;
+}
+
+.swissmap-place-arrow {
+  fill: #fff;
+  stroke: rgb(0 0 0 / 0.6);
+  stroke-width: 0.8;
+  stroke-linejoin: round;
+}
+
+.swissmap-place-dot {
+  fill: var(--c-brand);
+  stroke: #fff;
+  stroke-width: 1;
+}
+
+/* Search ---------------------------------------------------------------------------------- */
+
+.apt-pick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+}
+
+.apt-search {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: var(--tap);
+  padding: 0 4px 0 12px;
+  border: 1px solid var(--c-line-strong);
+  border-radius: var(--r-2);
+  background: rgb(0 0 0 / 0.25);
+  color: var(--c-ink-3);
+  transition: border-color var(--t-fast) var(--ease-out);
+}
+
+.apt-search:focus-within {
+  border-color: var(--c-accent);
+  color: var(--c-ink-2);
+}
+
+.apt-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 42px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--c-ink);
+  font: inherit;
+  font-size: var(--fs-3);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.ui .apt-search-input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.apt-search-input::placeholder {
+  color: var(--c-ink-3);
+}
+
+.apt-search-input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.apt-search-clear {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--c-ink-2);
+  cursor: pointer;
+}
+
+.apt-search-clear:hover {
+  background: var(--c-fill-hover);
+  color: var(--c-ink);
+}
+
+/* List ------------------------------------------------------------------------------------ */
+
+.apt-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.apt-section-title {
+  margin: 0 0 6px;
+  color: var(--c-ink-3);
+}
+
+.apt-section.is-off .apt-section-title {
+  color: var(--c-caution);
+  opacity: 0.85;
+}
+
+.apt-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 6px;
+}
+
+.apt {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'name icao'
+    'meta meta';
+  row-gap: 1px;
+}
+
+.apt-icao {
+  justify-self: end;
+  min-width: 0;
+  color: var(--c-ink-3);
+  font-size: var(--fs-2);
+}
+
+.apt-name {
+  font-weight: 600;
+}
+
+.apt.is-hover:not(.is-on, .is-off) {
+  background: var(--c-fill-hover);
+  border-color: var(--c-accent);
+}
+
+.apt-none {
+  color: var(--c-ink-2);
+  font-size: var(--fs-2);
+}
+
+/* Air start on the map ------------------------------------------------------------------------- */
+
+.air-controls {
+  display: grid;
+  margin-top: var(--s-3);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--s-2) var(--s-4);
+}
+
+.air-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.air-control .slider {
+  grid-column: 1 / -1;
+}
+
+.air-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--c-ink);
+  font-weight: 600;
+}
+
+.air-arrow {
+  display: inline-block;
+  color: var(--c-brand-hi);
+  font-weight: 700;
+  transition: transform var(--t-fast) var(--ease-out);
+}
+
+/* Phones in landscape: the list in one column, the map a little taller than before. */
+@media (max-height: 560px) {
+  .apt-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .setup-map-main .swissmap svg {
+    max-height: 180px;
+  }
+}
+
+@media (max-width: 700px) {
+  .setup-map-main .swissmap svg {
+    max-height: 240px;
+  }
+}
