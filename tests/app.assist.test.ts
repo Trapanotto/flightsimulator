@@ -43,4 +43,38 @@ describe('RudderAssist', () => {
     assist.apply(SIM_DT, ac.telemetry, ac.controls);
     expect(ac.controls.yaw).toBe(0.5);
   });
+
+  it('holds the wings level in a hands-off climb, and leaves a turn alone', () => {
+    const climb = (level: boolean) => {
+      const env = new TestEnvironment();
+      const ac = createAircraft('c172');
+      ac.reset(
+        { position: geodeticToEcef(46.9, 7.5, 600), headingDeg: 90, speed: 38, onGround: false },
+        env,
+      );
+      const assist = new RudderAssist();
+      assist.level = level;
+      // Full power at the climb speed, the pitch held by a simple hand, the ailerons let go.
+      for (let i = 0; i < 120 * 60; i++) {
+        ac.controls.throttle[0] = 1;
+        ac.controls.roll = 0;
+        ac.controls.yaw = 0;
+        ac.controls.pitch = Math.max(-1, Math.min(1, (38 - ac.telemetry.ias) * -0.05));
+        assist.apply(SIM_DT, ac.telemetry, ac.controls);
+        ac.step(SIM_DT, env);
+      }
+      return Math.abs(ac.telemetry.bank) * (180 / Math.PI);
+    };
+    // The climbing spiral takes the aircraft without the help, not with it.
+    expect(climb(true)).toBeLessThan(2);
+    expect(climb(false)).toBeGreaterThan(climb(true) + 3);
+
+    const assist = new RudderAssist();
+    const controls = createAircraft('c172').controls;
+    const telemetry = { headingDeg: 90, bank: (25 * Math.PI) / 180, beta: 0, onGround: false };
+    controls.roll = 0;
+    assist.apply(SIM_DT, telemetry as never, controls);
+    assist.apply(SIM_DT, telemetry as never, controls);
+    expect(controls.roll).toBe(0);
+  });
 });

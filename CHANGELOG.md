@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.2 (2026-11-15)
+
+- **Steigflug freihändig:** Cessna und PC-12 drehen nach dem Start nicht mehr nach links weg.
+  Die Steuerhilfe hält bei kleiner Querlage die Flügel waagrecht und gibt das nötige
+  Seitenruder dauerhaft; eine selbst eingeleitete Kurve bleibt eine Kurve.
+- **Absturz:** Feuerball ohne harte Kanten und mit gelb-orangem Kern, eine dunkle Rauchsäule
+  über dem Wrack, Fontäne und versinkende Teile bei einem Aufschlag im Wasser, Feuerschein
+  bei Nacht auch am Handy.
+- **PC-12:** für den Steigflug ausgetrimmt; das Fahrwerk federt harte Landungen ab, statt zu
+  springen.
+- **F/A-18:** Fahrwerk für Trägerlandungen ausgelegt (hält 1440 ft/min), Dienstgipfelhöhe
+  jetzt bei den veröffentlichten 50 000 ft.
+- Landungen von Hand mit PC-12 und F/A-18 sind jetzt durch Testflüge abgesichert.
+
 ## 1.0.1 (2026-11-15)
 
 - **Behoben:** Wer einen Flug startete, bevor der Rundflug im Menü fertig geladen war, sah das

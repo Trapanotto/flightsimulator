@@ -753,6 +753,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     // the helper only keeps them on the centre line, gently.
     const jet = aircraft.info.category === 'airliner' || aircraft.info.category === 'fighter';
     assist.coordinate = !jet;
+    // Fly-by-wire holds the bank by itself.
+    assist.level = !jet;
     assist.groundGain = jet ? 0.15 : 1;
     input.detents = THROTTLE_DETENTS[aircraft.info.id] ?? [];
     input.setFlapNotches(
