@@ -1,4 +1,4 @@
-import type { Cockpit, Telemetry } from '@sim';
+import type { AircraftId, AircraftInfo, Cockpit, Telemetry } from '@sim';
 import type { AudioEngine } from './AudioEngine';
 import {
   applyEnvelope,
@@ -11,6 +11,7 @@ import {
 } from './graph';
 import { PatternKeyer, keyedEnvelope, type KeyPattern } from './keying';
 import { COCKPIT_LEVEL, gyroSpin, rainLevel } from './levels';
+import { soundProfileFor } from './profiles';
 
 /** What the cockpit sounds need beyond the telemetry. */
 export interface CockpitSoundInput {
@@ -32,6 +33,25 @@ export const DISCONNECT_TONE: { hz: number } & KeyPattern = {
   hz: 1450,
   period: 0.36,
   tones: [{ start: 0, end: 0.22 }],
+};
+
+/**
+ * The Airbus autopilot disconnect, the "cavalry charge": a bugle-like rising phrase, repeated
+ * while the warning stands. Notes as frequency and length, s; the phrase repeats every period.
+ */
+export const CAVALRY_CHARGE: {
+  notes: readonly { hz: number; length: number }[];
+} & KeyPattern = {
+  notes: [
+    { hz: 392, length: 0.09 },
+    { hz: 523.25, length: 0.09 },
+    { hz: 659.25, length: 0.09 },
+    { hz: 783.99, length: 0.22 },
+    { hz: 659.25, length: 0.09 },
+    { hz: 783.99, length: 0.36 },
+  ],
+  period: 1.5,
+  tones: [{ start: 0, end: 0.94 }],
 };
 
 /** The bus has to carry at least this much to run a motor, V. */
@@ -65,8 +85,27 @@ export class CockpitSound {
   private electricSpin = 0;
   private vacuumSpin = 0;
   private readonly rnd = seededRandom(77);
+  private disconnectStyle: 'tone' | 'cavalry' = 'tone';
+  /** The Cessna's own cabin: an electric flap motor and air-driven gyros behind the panel. */
+  private lightAircraft = true;
+  private cavalry?: AudioBuffer;
 
   constructor(private readonly audio: AudioEngine) {}
+
+  /**
+   * Chooses the cockpit of a type (by id, else category): the disconnect alert, and whether
+   * the flap motor and the vacuum gyros are the Cessna's (the larger types' flaps are heard
+   * from AircraftSound, their gyros are silent).
+   */
+  setAircraft(
+    info: Pick<AircraftInfo, 'id' | 'category'> | { id: AircraftId | string; category?: string },
+  ) {
+    const profile = soundProfileFor(info);
+    const style = profile.warnings?.disconnect ?? 'tone';
+    if (style !== this.disconnectStyle) this.disconnect.stop();
+    this.disconnectStyle = style;
+    this.lightAircraft = profile.engine === 'piston';
+  }
 
   /** Builds the graph. Call after the first user gesture, with the other sounds. */
   start() {
@@ -167,6 +206,7 @@ export class CockpitSound {
     this.disconnectGain = silentGain(ctx, this.audio.output);
     alert.connect(filter('lowpass', 3500)).connect(this.disconnectGain);
     alert.start();
+    this.cavalry = cavalryBuffer(ctx);
 
     // Rain: a hiss of fine drops plus single heavy drops ticking on the skin.
     this.rainGain = silentGain(ctx, this.audio.output);
@@ -234,7 +274,7 @@ export class CockpitSound {
     this.lastFlaps = telemetry.flaps;
     glide(
       this.flapGain!.gain,
-      powered && flapRate > 0.005 ? COCKPIT_LEVEL.flapMotor : 0,
+      powered && flapRate > 0.005 && this.lightAircraft ? COCKPIT_LEVEL.flapMotor : 0,
       now,
       0.06,
     );
@@ -244,7 +284,7 @@ export class CockpitSound {
 
     // The turn coordinator spins with the master switch; the vacuum gyros with the engine.
     this.electricSpin = gyroSpin(this.electricSpin, powered, dt);
-    const vacuum = sys ? sys.vacuum > 3 : engineRunning;
+    const vacuum = this.lightAircraft && (sys ? sys.vacuum > 3 : engineRunning);
     this.vacuumSpin = gyroSpin(this.vacuumSpin, vacuum, dt, 10, 60);
     if (fresh) {
       this.electricSpin = powered ? 1 : 0;
@@ -256,11 +296,19 @@ export class CockpitSound {
     // The disconnect tone is an alert: it sounds outside the cabin bus, but only inside.
     const warn =
       this.active && this.inside && telemetry.avionics?.autopilot.disconnectWarning === true;
+    const cavalry = this.disconnectStyle === 'cavalry';
     if (warn && !this.disconnect.running)
-      this.disconnect.start(DISCONNECT_TONE, Math.max(now + 0.02, this.disconnect.lastEnd + 0.05));
+      this.disconnect.start(
+        cavalry ? CAVALRY_CHARGE : DISCONNECT_TONE,
+        Math.max(now + 0.02, this.disconnect.lastEnd + 0.05),
+      );
     else if (!warn && this.disconnect.running) this.disconnect.stop();
     const tones = this.disconnect.take(now, now + 0.3);
-    if (tones.length)
+    if (tones.length && cavalry) {
+      // Each phrase is a prerendered buffer: one source per phrase, not per frame.
+      for (const t of tones)
+        playOnce(ctx, this.cavalry!, this.audio.output, COCKPIT_LEVEL.disconnect, t.start);
+    } else if (tones.length)
       applyEnvelope(this.disconnectGain!.gain, keyedEnvelope(tones, COCKPIT_LEVEL.disconnect));
 
     const rain = this.active ? rainLevel(input.precipitation ?? 0, telemetry.tas, this.inside) : 0;
@@ -311,6 +359,33 @@ function dropsBuffer(ctx: BaseAudioContext): AudioBuffer {
       d[i]! += a * (rnd() * 2 - 1);
       a *= decay;
     }
+  }
+  return buffer;
+}
+
+/** The cavalry charge as a brassy synthesised phrase: harmonics falling off, soft attacks. */
+function cavalryBuffer(ctx: BaseAudioContext): AudioBuffer {
+  const fs = ctx.sampleRate;
+  const total = CAVALRY_CHARGE.notes.reduce((t, n) => t + n.length, 0);
+  const n = Math.round(total * fs);
+  const buffer = ctx.createBuffer(1, n, fs);
+  const d = buffer.getChannelData(0);
+  let start = 0;
+  let phase = 0;
+  for (const note of CAVALRY_CHARGE.notes) {
+    const i0 = Math.round(start * fs);
+    const i1 = Math.min(n, Math.round((start + note.length) * fs));
+    for (let i = i0; i < i1; i++) {
+      const t = (i - i0) / fs;
+      const left = (i1 - i) / fs;
+      // Phase carries over between notes, and every note fades in and out: no step.
+      phase += note.hz / fs;
+      const env = Math.min(1, t / 0.01, left / 0.012);
+      let s = 0;
+      for (let k = 1; k <= 6; k++) s += Math.sin(2 * Math.PI * k * phase) / k ** 1.3;
+      d[i] = 0.45 * s * env;
+    }
+    start += note.length;
   }
   return buffer;
 }
