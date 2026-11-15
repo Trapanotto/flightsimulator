@@ -303,6 +303,14 @@ const engine = (side: number): TurbofanDef => ({
   engine: CFM56_5B4,
 });
 
+/**
+ * Tyre bristles: a cornering stiffness (stiffness times the 0.35 m relaxation length) of
+ * about 10 kN per degree for a main gear's two 46 in tyres and 3 kN per degree for the nose
+ * pair, typical of transport tyres (ESDU 82012 order of magnitude, not a manufacturer figure).
+ */
+const MAIN_TYRES = { stiffness: 1_600_000, damping: 40_000 };
+const NOSE_TYRES = { stiffness: 500_000, damping: 15_000 };
+
 /** Usable fuel, kg: two wing tanks and the centre tank (23 860 l at 0.785 kg/l). */
 export const A320_TANKS = { wing: 6127, centre: 6476 } as const;
 export const A320_FUEL = 2 * A320_TANKS.wing + A320_TANKS.centre;
@@ -546,6 +554,7 @@ export const A320: AircraftDefinition = {
       // The tiller turns it 75°; the pedals 6° (the computers schedule it).
       steering: 75 * DEG,
       breakingForce: 700_000,
+      tyre: NOSE_TYRES,
     },
     {
       name: 'left',
@@ -556,6 +565,7 @@ export const A320: AircraftDefinition = {
       brake: 'left',
       brakeForce: 240_000,
       breakingForce: 2_200_000,
+      tyre: MAIN_TYRES,
     },
     {
       name: 'right',
@@ -566,6 +576,7 @@ export const A320: AircraftDefinition = {
       brake: 'right',
       brakeForce: 240_000,
       breakingForce: 2_200_000,
+      tyre: MAIN_TYRES,
     },
   ],
   contacts: [

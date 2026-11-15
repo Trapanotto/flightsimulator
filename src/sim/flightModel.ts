@@ -1297,21 +1297,23 @@ export class FlightModel implements SimAircraft {
 
     // Tyre as a bristle: a spring that holds the aircraft still on a slope or against idle
     // thrust, and that relaxes over a rolling length so a rolling tyre grips by slip angle.
+    const stiffness = wheel.tyre?.stiffness ?? TYRE_STIFFNESS;
+    const damping = wheel.tyre?.damping ?? TYRE_DAMPING;
     let lat =
       this.bristleLat[i]! + (vLat - (Math.abs(vLong) * this.bristleLat[i]!) / TYRE_RELAXATION) * dt;
-    const latDamping = TYRE_DAMPING / (1 + Math.abs(vLong) / 0.5);
-    let fLat = -(TYRE_STIFFNESS * lat + latDamping * vLat);
+    const latDamping = damping / (1 + Math.abs(vLong) / 0.5);
+    let fLat = -(stiffness * lat + latDamping * vLat);
     const capLat = mu * normal;
     if (Math.abs(fLat) > capLat) {
       fLat = Math.sign(fLat) * capLat;
-      lat = clamp(lat, -capLat / TYRE_STIFFNESS, capLat / TYRE_STIFFNESS);
+      lat = clamp(lat, -capLat / stiffness, capLat / stiffness);
     }
     let lon = this.bristleLong[i]! + vLong * dt;
-    let fLon = -(TYRE_STIFFNESS * lon + TYRE_DAMPING * vLong);
+    let fLon = -(stiffness * lon + damping * vLong);
     const capLon = Math.min(mu * normal, rolling * normal + brake);
     if (Math.abs(fLon) > capLon) {
       fLon = Math.sign(fLon) * capLon;
-      lon = clamp(lon, -capLon / TYRE_STIFFNESS, capLon / TYRE_STIFFNESS);
+      lon = clamp(lon, -capLon / stiffness, capLon / stiffness);
     }
     // Friction circle: braking and cornering share the grip.
     const total = Math.hypot(fLon, fLat);

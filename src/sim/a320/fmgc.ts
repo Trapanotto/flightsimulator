@@ -58,6 +58,8 @@ const CLIMB_MACH = 0.78;
 const LIMIT_KT = 250;
 const LIMIT_ALT_FT = 10_000;
 const DT = 1 / 120;
+/** Time constant of the automatic flare, s: it starts at about 40 ft on a 3° path. */
+const FLARE_TAU = 3.4;
 const CALLOUTS = [1000, 500, 400, 300, 200, 100, 50, 40, 30, 20, 10];
 const CALLOUT_TEXT = CALLOUTS.map(String);
 
@@ -618,7 +620,7 @@ export class A320Fmgc implements AutopilotComputer {
       this.vertical = 'LAND';
       this.lateral = 'LAND';
     }
-    if (this.vertical === 'LAND' && aglFt < Math.max(30, (-vs / 60) * 3.2)) {
+    if (this.vertical === 'LAND' && aglFt < Math.max(30, (-vs / 60) * FLARE_TAU)) {
       // Flare height from the sink rate.
       this.vertical = 'FLARE';
       this.lateral = 'FLARE';
@@ -706,7 +708,7 @@ export class A320Fmgc implements AutopilotComputer {
       case 'ROLL OUT':
         bank = 0;
         yaw = clamp(
-          0.004 * loc.offset +
+          0.02 * loc.offset +
             0.12 * wrap180(loc.course - input.indicatedHeading) -
             1.5 * input.turnRate * DEG,
           -1,
@@ -754,6 +756,7 @@ export class A320Fmgc implements AutopilotComputer {
     let gammaCmd = gamma;
     let tau = 3;
     let limitN = 0.15;
+    let feedForward = 0;
     switch (this.vertical) {
       case 'SRS':
       case 'CLB':
@@ -801,16 +804,18 @@ export class A320Fmgc implements AutopilotComputer {
         break;
       }
       case 'FLARE':
-        // ḣ = -h/τ - 2 ft/s: an exponential flare onto the runway.
-        gammaCmd = path((-aglFt / 3.4 - 2) * 60);
-        tau = 1.2;
-        limitN = 0.25;
+        // ḣ = -h/τ - 2 ft/s: an exponential flare onto the runway, with the load factor the
+        // law needs for it fed forward (d²h/dt² = -ḣ/τ).
+        gammaCmd = path((-aglFt / FLARE_TAU - 2) * 60);
+        feedForward = -input.verticalSpeed / FLARE_TAU / G;
+        tau = 1;
+        limitN = 0.3;
         break;
       default:
         gammaCmd = gamma;
     }
     this.shownVs = (Math.sin(gammaCmd) * tas) / FPM;
-    const dn = clamp(((tas / G) * (gammaCmd - gamma)) / tau, -limitN, limitN);
+    const dn = clamp(((tas / G) * (gammaCmd - gamma)) / tau + feedForward, -limitN, limitN);
     this.bars.pitch = pitch + (gammaCmd - gamma);
     if (this.ap1 || this.ap2) {
       if (this.vertical === 'ROLL OUT') o.pitch = pitch > 0.5 * DEG ? -0.12 : 0;

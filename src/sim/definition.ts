@@ -118,6 +118,11 @@ export interface WheelDef {
   brakeForce?: number;
   /** Strut force (N) that breaks the gear. */
   breakingForce: number;
+  /**
+   * Phase 4: the tyres' bristle stiffness (N/m) and damping (N s/m) where they differ from a
+   * light aircraft's: an airliner's twin wheels corner and brake far stiffer.
+   */
+  tyre?: { stiffness: number; damping: number };
 }
 
 /** A retractable gear (Phase 4). Without one the gear is fixed and always down. */
