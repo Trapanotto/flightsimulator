@@ -1,6 +1,7 @@
 import {
   type Geodetic,
   type LocalFrame,
+  airportsNear,
   ecefToGeodetic,
   ellipsoidToSeaLevel,
   geoidUndulation,
@@ -18,6 +19,11 @@ import {
 } from '@sim';
 
 const RAD = Math.PI / 180;
+const EARTH_R = 6_371_000;
+/** Metres along the runway over which its surface is averaged (two each way, and the place). */
+const RUNWAY_SMOOTHING = [-16, -8, 8, 16];
+/** The runway under a place is looked up again after this many metres. */
+const STRIP_RECHECK = 25;
 
 /** What the environment needs from the world: the ground at a place, in render space. */
 export interface GroundSource {
@@ -176,10 +182,61 @@ export class WorldEnvironment implements Environment {
     return out;
   }
 
+  /** Where the runway was last looked up, and its direction there (degrees per metre). */
+  private readonly strip = { lon: 999, lat: 999, on: false, dLon: 0, dLat: 0 };
+
+  /** The direction of the runway the place lies on, or undefined off a runway. */
+  private runwayAt(lon: number, lat: number) {
+    const c = this.strip;
+    const k = Math.cos(lat * RAD) * EARTH_R * RAD;
+    const moved = Math.hypot((lon - c.lon) * k, (lat - c.lat) * EARTH_R * RAD);
+    if (moved < STRIP_RECHECK) return c.on ? c : undefined;
+    c.lon = lon;
+    c.lat = lat;
+    c.on = false;
+    for (const { airport } of airportsNear(lon, lat, 6000)) {
+      for (const runway of airport.runways) {
+        const [a, b] = runway.ends;
+        const bx = (b.lon - a.lon) * k;
+        const by = (b.lat - a.lat) * EARTH_R * RAD;
+        const len = Math.hypot(bx, by);
+        if (len < 1) continue;
+        const ux = bx / len;
+        const uy = by / len;
+        const px = (lon - a.lon) * k;
+        const py = (lat - a.lat) * EARTH_R * RAD;
+        const along = px * ux + py * uy;
+        const cross = px * uy - py * ux;
+        // A little more than the strip: the recheck distance and the shoulders.
+        if (along < -60 || along > len + 60 || Math.abs(cross) > runway.width / 2 + 30) continue;
+        c.on = true;
+        c.dLon = ux / k;
+        c.dLat = uy / (EARTH_R * RAD);
+        return c;
+      }
+    }
+    return undefined;
+  }
+
   ground(position: Vec3): GroundSample | undefined {
     const g = ecefToGeodetic(position, this.g);
     const s = this.world.ground(g.lon, g.lat);
     if (!s) return undefined;
+    // A runway is graded: the terrain model under it is not (a road crossing it stands 20 cm
+    // proud at Buochs, enough to break a nose gear at take-off speed). The wheels roll on the
+    // terrain averaged along the runway.
+    let height = s.height;
+    const strip = this.runwayAt(g.lon, g.lat);
+    if (strip) {
+      let n = 1;
+      for (const d of RUNWAY_SMOOTHING) {
+        const q = this.world.ground(g.lon + d * strip.dLon, g.lat + d * strip.dLat);
+        if (!q) continue;
+        height += q.height;
+        n++;
+      }
+      height /= n;
+    }
     // The normal comes in render space (x east, y up, z south of the frame's origin).
     const o = this.frame().origin;
     const sl = Math.sin(o.lon * RAD);
@@ -188,7 +245,7 @@ export class WorldEnvironment implements Environment {
     const cp = Math.cos(o.lat * RAD);
     const { x, y, z } = s.normal;
     return {
-      height: s.height + this.heightOffset,
+      height: height + this.heightOffset,
       normal: {
         x: x * -sl + y * cp * cl + z * sp * cl,
         y: x * cl + y * cp * sl + z * sp * sl,

@@ -512,3 +512,23 @@
     justify-content: space-between;
   }
 }
+
+/* Phones: the credits are one small centred line under the language switch, not a pill that
+   wraps over it. */
+@media (max-width: 600px) {
+  .menu-credits {
+    left: 0;
+    right: 0;
+    bottom: calc(var(--safe-b) + 2px);
+    justify-content: center;
+    gap: var(--s-2);
+    padding: 0;
+    background: none;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .menu-foot {
+    margin-bottom: 20px;
+  }
+}

@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.0.0-rc.1 – Phase 5: Flugschule, Flugbuch, Wiederholung, Fotomodus (2026-11-15)
+
+- **Flugschule:** zwölf geführte Lektionen vom ersten Start über Kurven, Landung, Platzrunde,
+  Funknavigation und ILS-Anflug bis zur Umschulung auf PC-12, A320 und F/A-18. Der Fluglehrer
+  führt Schritt für Schritt, gibt Hinweise und wertet am Ende aus.
+- **Flugbuch:** jeder Flug mit Strecke auf der Karte, Dauer, Distanz und jeder Landung
+  (Sinkrate, Aufsetzgeschwindigkeit, Abstand zur Mittellinie, Bewertung in Worten).
+- **Wiederholung:** die letzten Minuten des Flugs nochmals ansehen, mit freier Kamera,
+  Zeitleiste und Tempo.
+- **Fotomodus:** freie Kamera, Bildwinkel, Neigung und Tageszeit wählen, Bild als PNG speichern.
+- **Absturz:** Das Flugzeug bricht je nach Aufprall auseinander, mit Staub, Funken, Feuerball,
+  brennenden Trümmern, Rauch und Explosionsklang; die Kamera kreist um das Wrack. Der Hinweis
+  dazu ist nur noch eine schmale Leiste am unteren Rand.
+- **Startmenü** ist sofort bedienbar; der Rundflug blendet dahinter ein, sobald er geladen ist.
+- **Flug planen:** Flugplatzsuche, sinnvolle Reihenfolge (zuletzt geflogen, grosse Flughäfen
+  zuerst), grössere Karte mit Zoom, Luftstart per Klick auf die Karte.
+- **Steuerung:** A320 und F/A-18 reagieren mit den Tasten deutlich direkter auf Höhenruder.
+- **Bäume** sind vorerst abgeschaltet.
+- **Pisten** sind für die Räder geglättet (in Buochs brach am Geländemodell das Fahrwerk).
+- **Quellenangabe** nach den Vorgaben von geo.admin.ch: «© Daten: swisstopo», dazu
+  «© OpenStreetMap-Mitwirkende» für die Pistenachsen, im Menü und im Flug.
+- **Leistung:** Messstrecke `npm run bench`; 146–217 Bilder pro Sekunde in 2560×1440 auf einer
+  RTX 3080.
+
 ## 1.0.0-alpha.9 – Cockpit lesbarer, Hochnebel aus dem Live-Wetter (2026-11-15)
 
 - **Schalternamen im Cockpit:** Zeigt die Maus auf einen Schalter, Knopf oder Hebel, erscheint
