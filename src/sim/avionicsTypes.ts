@@ -66,7 +66,8 @@ export interface NavReceiverTelemetry {
 }
 
 export type AutopilotLateral = 'roll' | 'hdg' | 'nav' | 'apr';
-export type AutopilotVertical = 'pitch' | 'vs' | 'alt' | 'gs';
+/** 'flc' (phase 4): flight level change, a climb or descent at a held airspeed. */
+export type AutopilotVertical = 'pitch' | 'vs' | 'alt' | 'gs' | 'flc';
 
 export interface AutopilotTelemetry {
   engaged: boolean;
@@ -81,6 +82,15 @@ export interface AutopilotTelemetry {
   selectedVerticalSpeed: number;
   /** It has just disconnected: the warning tone sounds while true (a few seconds). */
   disconnectWarning: boolean;
+  /** Phase 4, on types that have them. */
+  yawDamper?: boolean;
+  /** Flight director bars: commanded pitch and bank, radians; undefined when off. */
+  flightDirector?: { pitch: number; bank: number };
+  /** Selected airspeed (knots) for FLC and the autothrottle; Mach when `selectedMach` is set. */
+  selectedSpeed?: number;
+  selectedMach?: number;
+  /** Autothrottle or autothrust. */
+  autothrottle?: { engaged: boolean; mode: 'speed' | 'thrust' | 'idle' | 'off' };
 }
 
 export interface GpsTelemetry {

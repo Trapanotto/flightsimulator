@@ -81,6 +81,11 @@ export interface UiActions {
    * the menu scene (time of day, weather, place). Never starts a flight.
    */
   preview?(plan: FlightPlan): void;
+  /**
+   * Phase 4: the hangar shows a type: the app puts it into the menu's flight (null goes back
+   * to the default). The interface only calls this for types in `AIRCRAFT`.
+   */
+  showAircraft?(id: AircraftId | null): void;
   /** Phase 3: operates a cockpit control by name (see `game.controls`). */
   setControl?(id: string, value: number): void;
   /** Phase 3: the pilot picks one of the radio replies on offer (`game.atc.options`). */
@@ -148,6 +153,9 @@ export interface Levers {
   /** Wheel brakes applied (any amount). */
   brake: boolean;
   parkingBrake: boolean;
+  /** Phase 4, on types that have them: speed brake 0..1, reverse selected. */
+  speedbrake?: number;
+  reverse?: boolean;
 }
 
 /** The weather of a flight as the briefing shows it (the sky package's own type). */
@@ -229,6 +237,9 @@ export const touchInput = {
   flapsUp: signal(0),
   flapsDown: signal(0),
   gearToggle: signal(0),
+  /** Phase 4: speed brake lever 0..1 (null = not touched), and reverse held. */
+  speedbrake: signal<number | null>(null),
+  reverse: signal(false),
   /** True while the on-screen flight controls are shown (touch device or a touch seen). */
   active: signal(false),
 };

@@ -5,6 +5,7 @@
 export type {
   AircraftId,
   AircraftInfo,
+  AircraftSpecs,
   AircraftState,
   AirSample,
   ControlInput,
@@ -38,11 +39,13 @@ export {
 export {
   C172_CONTROLS,
   CockpitPanel,
+  controlSpec,
   limit as limitControl,
   type Cockpit,
   type ControlKind,
   type ControlSpec,
 } from './cockpit';
+export { PC12_CONTROLS } from './cockpitPc12';
 export type { FailureId, Failures, InstrumentTelemetry, SystemsTelemetry } from './systemsTypes';
 export type {
   AutopilotCommand,

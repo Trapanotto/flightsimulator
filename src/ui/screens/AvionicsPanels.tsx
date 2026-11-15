@@ -364,6 +364,7 @@ const VERTICAL: Record<AutopilotTelemetry['vertical'], string> = {
   vs: 'VS',
   alt: 'ALT',
   gs: 'GS',
+  flc: 'FLC',
 };
 
 /** The modes as the autopilot's display shows them: active ones, then armed ones. */

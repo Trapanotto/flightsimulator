@@ -62,7 +62,7 @@ export function autopilotModes(ap: AvionicsTelemetry['autopilot']): {
 } {
   if (!ap.engaged) return { lateral: '', lateralArmed: '', vertical: '', verticalArmed: '' };
   const lat = { roll: 'ROL', hdg: 'HDG', nav: 'NAV', apr: 'APR' } as const;
-  const ver = { pitch: '', vs: 'VS', alt: 'ALT', gs: 'GS' } as const;
+  const ver = { pitch: '', vs: 'VS', alt: 'ALT', gs: 'GS', flc: 'FLC' } as const;
   return {
     lateral: lat[ap.lateral],
     lateralArmed: ap.lateralArmed ? `${lat[ap.lateralArmed]} ARM` : '',

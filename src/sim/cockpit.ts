@@ -72,6 +72,13 @@ const course = (id: string): ControlSpec => ({
   initial: 0,
 });
 const button = (id: string): ControlSpec => ({ id, kind: 'button', initial: 0 });
+const toggle = (id: string, initial = 0, running?: number): ControlSpec =>
+  running === undefined
+    ? { id, kind: 'toggle', initial }
+    : { id, kind: 'toggle', initial, running };
+
+/** Builders for the controls every type has in the same form (radios, courses, switches). */
+export const controlSpec = { toggle, button, com, nav, course };
 
 /**
  * The Cessna 172S with a classic panel: six round gauges, two NAV/COM radios with a VOR/ILS

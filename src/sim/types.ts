@@ -61,6 +61,21 @@ export interface ControlInput {
    * so existing callers stay valid; without it a stopped engine only restarts by windmilling.
    */
   starter?: boolean[];
+  /**
+   * Phase 4. Reverse is selected (thrust reversers, or a turboprop's power lever lifted over
+   * the gate): `throttle` then commands reverse thrust, 0 idle .. 1 full reverse.
+   */
+  reverse?: boolean;
+  /** Phase 4. Speed brake or spoilers, 0 retracted .. 1 fully out. */
+  speedbrake?: number;
+  /**
+   * Phase 4. One entry per engine: a turboprop's condition lever or a jet's engine master,
+   * 0 cut-off .. 1 run (0.5 is a turboprop's ground idle).
+   */
+  condition?: number[];
+  /** Phase 4. Aileron and rudder trim, -1..1. */
+  rollTrim?: number;
+  yawTrim?: number;
 }
 
 /** The air at one point. */
@@ -125,6 +140,24 @@ export interface EngineTelemetry {
   power: number;
   /** kg/s */
   fuelFlow: number;
+  /** Phase 4, turbine engines; each only where the engine has it. */
+  /** Gas generator speed (a jet's N2, a turboprop's Ng), per cent. */
+  n2?: number;
+  /** Fan speed of a turbofan, per cent. */
+  n1?: number;
+  /** Propeller speed of a turboprop, rpm (`rpm` then holds the same value). */
+  propRpm?: number;
+  /** Torque of a turboprop as a fraction of its limit, 0..1 (above 1 is an exceedance). */
+  torque?: number;
+  /** Turbine temperature: a turboprop's ITT, a jet's EGT, degrees Celsius. */
+  turbineTemperature?: number;
+  /** Afterburner 0 off .. 1 full, and the nozzle opening 0..1. */
+  afterburner?: number;
+  nozzle?: number;
+  /** Reverse thrust or beta is active. */
+  reversing?: boolean;
+  /** The starter is turning the engine. */
+  starting?: boolean;
 }
 
 /**
@@ -171,6 +204,9 @@ export interface Telemetry {
   fuel: number;
   /** Set once the aircraft is destroyed; the reason is a short code like 'ground' or 'overstress'. */
   crashed: string | undefined;
+  /** Phase 4: Mach number, and the speed brake or spoiler position actually reached, 0..1. */
+  mach?: number;
+  speedbrake?: number;
   /** Phase 3: the systems, what the instruments show, and the avionics. */
   systems?: SystemsTelemetry;
   instruments?: InstrumentTelemetry;
@@ -191,7 +227,37 @@ export interface InitialCondition {
 }
 
 /** The aircraft types the simulation knows. */
-export type AircraftId = 'c172';
+export type AircraftId = 'c172' | 'pc12' | 'a320' | 'fa18';
+
+/** Published figures of a type, for the hangar and the briefing. SI units. */
+export interface AircraftSpecs {
+  /** e.g. 'Pilatus Aircraft, Stans'. */
+  maker: string;
+  /** e.g. 'Pratt & Whitney Canada PT6A-67P, 1200 shp'. */
+  powerplant: string;
+  /** m */
+  span: number;
+  length: number;
+  height: number;
+  /** kg */
+  emptyMass: number;
+  /** m/s: typical cruise, and the maximum (VMO or VNE). */
+  cruiseSpeed: number;
+  maxSpeed: number;
+  /** Maximum operating Mach number, for types that have one. */
+  maxMach?: number;
+  /** m */
+  ceiling: number;
+  range: number;
+  /** m/s at sea level. */
+  climbRate: number;
+  /** m at maximum mass, sea level: take-off and landing ground roll. */
+  takeoffRoll: number;
+  landingRoll: number;
+  seats: number;
+  /** Year of the first flight. */
+  firstFlight: number;
+}
 
 /** Figures of a type that menus and the camera need without flying it. */
 export interface AircraftInfo {
@@ -205,6 +271,16 @@ export interface AircraftInfo {
   /** kg */
   maxTakeoffMass: number;
   retractableGear: boolean;
+  /** Phase 4: what kind of aircraft it is (sound, interface and camera choose by it). */
+  category?: 'piston' | 'turboprop' | 'airliner' | 'fighter';
+  /** Phase 4: it has a speed brake or spoilers, and reverse thrust. */
+  speedbrake?: boolean;
+  reverse?: boolean;
+  /** Phase 4: m/s, approach speed in landing configuration and rotation speed at take-off. */
+  vApproach?: number;
+  vRotate?: number;
+  /** Phase 4: published figures for the hangar. */
+  specs?: AircraftSpecs;
 }
 
 /** A simulated aircraft: advanced in fixed steps, read by renderer, audio and instruments. */
