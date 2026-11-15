@@ -460,6 +460,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   };
   /** The photo mode was opened from the replay (else from the pause menu). */
   let photoFromReplay = false;
+  /** The replay was opened from a running flight (the debrief of a lesson), not the pause menu. */
+  let replayFromFlight = false;
   /** The sky's time before the photo mode changed it. */
   let photoDate: Date | undefined;
   let saveNext = false;
@@ -814,6 +816,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     openReplay() {
       if (!flight || !plan || recording.duration < 2) return;
       if (game.screen.value !== 'paused' && game.screen.value !== 'flight') return;
+      replayFromFlight = game.screen.value === 'flight';
       flight.paused = true;
       player = new ReplayPlayer(recording);
       // The last minute is what one wants to see again; the rest is a drag of the bar away.
@@ -832,7 +835,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       if (game.screen.value !== 'replay') return;
       leaveStill();
       visual.setCockpitView(game.view.value === 'cockpit');
-      game.screen.value = 'paused';
+      if (replayFromFlight && flight) flight.paused = false;
+      game.screen.value = replayFromFlight ? 'flight' : 'paused';
     },
     replaySeek: (time) => player?.seek(time),
     replayPlay: (playing) => player?.play(playing),
