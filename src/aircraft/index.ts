@@ -22,3 +22,28 @@ export {
   turnKnob,
   wheelControl,
 } from './controlClicks';
+export {
+  EXPLOSION_DELAY,
+  ImpactWatch,
+  LAYOUTS,
+  type BreakPlan,
+  type Impact,
+  type ImpactTelemetry,
+  type Layout,
+  type PieceKind,
+  type Region,
+  type Role,
+  type Severity,
+  fireGain,
+  impactOf,
+  pieceKey,
+  planBreak,
+  regionOf,
+  roleOf,
+  severityOf,
+  sizeFactor,
+  splitTriangles,
+} from './wreck/breakup';
+export { ParticleSystem, type ParticleSpec } from './wreck/particles';
+export { WreckFx, type WreckFxOptions } from './wreck/WreckFx';
+export { Wreck, type WreckEnv, type WreckOptions } from './wreck/Wreck';
