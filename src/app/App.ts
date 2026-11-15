@@ -601,18 +601,13 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     const airport = (icao && findAirport(icao)) || homeAirport;
     const since = performance.now();
     if (!p) {
-      // The menu: a flight on rails through the Bernese Oberland.
-      showcase.reset();
-      pending = {
-        plan: null,
-        lon: showcase.geo.lon,
-        lat: showcase.geo.lat,
-        altitude: showcase.geo.h,
-        guess: 0,
-        start: { headingDeg: headingAt(0), speed: SHOWCASE_SPEED, onGround: false },
-        since,
-      };
-    } else if (p.start.kind === 'air') {
+      // The flight planning is the home screen and shows no scene: nothing to load or draw
+      // until a flight is started.
+      pending = undefined;
+      reveal = undefined;
+      return;
+    }
+    if (p.start.kind === 'air') {
       const s = p.start;
       pending = {
         plan: p,
@@ -696,14 +691,9 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       sky.setTime(typeof time === 'number' ? dateAtSwissHour(new Date(), time) : new Date());
     }
     // Screenshot tests need a sky that looks the same every time: no drifting clouds.
-    const choice = shot ? 'clear' : (p?.weather ?? 'menu');
+    const choice = shot ? 'clear' : p.weather;
     // Live weather arrives a moment later; until then (or without a connection) a fair day.
-    // The menu flies among the peaks: a fair day whose clouds stay above the route.
-    applyWeather(
-      choice === 'menu'
-        ? { ...WEATHER_PRESETS.fair, cloudCover: 0.25, cloudBase: 3700, cloudTop: 4700 }
-        : WEATHER_PRESETS[choice === 'live' ? 'fair' : choice],
-    );
+    applyWeather(WEATHER_PRESETS[choice === 'live' ? 'fair' : choice]);
     weatherRequest?.abort();
     if (choice === 'live') {
       weatherRequest = new AbortController();
@@ -1457,7 +1447,9 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       time: appTime,
       wind: worldWind,
     });
-    updateWorld();
+    // In the flight planning nothing is on screen but the interface.
+    const idle = !plan && !pending && !flight;
+    if (!idle) updateWorld();
     const camGeo = frame.toGeodetic(camera.position, geo);
     anchor.fromGeodetic(frame.origin.lon, frame.origin.lat, 0, local);
     sky.update(camera, {
@@ -1483,7 +1475,9 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       }
     }
 
-    if (pending && drawnOnce) precompile();
+    if (idle) {
+      // Nothing to draw.
+    } else if (pending && drawnOnce) precompile();
     else {
       pipeline.render();
       drawnOnce = true;
@@ -1498,7 +1492,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     }
 
     debug.frames++;
-    if (!debug.ready && flight && game.screen.value === 'menu') debug.ready = true;
+    if (!debug.ready && game.screen.value === 'menu') debug.ready = true;
     fpsFrames++;
     fpsTime += dt;
     worst = Math.max(worst, frameMs);
