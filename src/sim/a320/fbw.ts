@@ -76,6 +76,7 @@ export class FlyByWire {
   private decel = 0;
   private alphaFloor = false;
   private slatPosition = 0;
+  private nCommand = 1;
   /** The sidestick asks for alpha above alpha prot (the flight guidance's alpha floor needs it). */
   alphaFloorActive = false;
 
@@ -122,7 +123,12 @@ export class FlyByWire {
     const hyd = (sys.green > 1500 ? 1 : 0) + (sys.blue > 1500 ? 1 : 0) + (sys.yellow > 1500 ? 1 : 0);
     const normal = sys.adirsAligned && sys.dcEssPowered && hyd >= 2;
     const law = normal ? 'normal' : 'direct';
-    if (Number.isNaN(this.ths)) this.ths = this.trimWheel(ctx);
+    if (Number.isNaN(this.ths)) {
+      // The first step after a reset: in the air the flight law is already flying.
+      this.ths = this.trimWheel(ctx);
+      if (!onGround) this.groundBlend = 1;
+      this.nCommand = 1;
+    }
 
     const pitch = clamp(ctx.pitch, -1, 1);
     const roll = clamp(ctx.roll, -1, 1);
@@ -147,6 +153,7 @@ export class FlyByWire {
     if (blend <= 0 || !inFlight) {
       elevator = direct;
       this.integral = direct;
+      this.nCommand = t.loadFactor;
       this.alphaMode = false;
       this.flare = false;
       // On the ground and in direct law the trim wheel sets the stabiliser.
@@ -286,10 +293,13 @@ export class FlyByWire {
     // ---- high speed protection ----
     const overspeed = Math.max(ias - (VMO + 6), ((mach - (MMO + 0.01)) / Math.max(mach, 0.1)) * ias);
     let dnProtect = 0;
+    // The stick's nose-down authority fades from VMO (MMO) and is gone by VMO + 16.
+    const fast = overspeed + 6;
+    if (fast > 0 && s < 0) s *= Math.max(0, 1 - fast / 16);
     if (overspeed > 0) {
       report.highSpeedProtection = true;
-      dnProtect = clamp(0.06 * overspeed, 0, 0.6);
-      if (s < 0) s *= Math.max(0.1, 1 - overspeed / 10);
+      // A nose-up order in proportion to the overspeed.
+      dnProtect = clamp(0.15 * overspeed, 0, 1.5);
     }
     let dn = stickToDeltaN(s, config) + dnProtect;
 
@@ -339,12 +349,16 @@ export class FlyByWire {
       nTarget = Math.max(nTarget, Math.cos(gamma) - ((theta - down) / (5 * DEG)) * (Math.cos(gamma) - nTarget));
     }
     nTarget = clamp(nTarget, nMin, nMax);
+    // The demand is shaped (as the sidestick's own filtering does) so a sudden full pull does
+    // not overshoot the load factor limit.
+    this.nCommand += (nTarget - this.nCommand) * (1 - Math.exp(-dt / 0.35));
+    nTarget = this.nCommand;
 
     // ---- C*: load factor error plus pitch rate error weighed by the crossover speed ----
     const qRef = (G / V) * (nTarget - Math.cos(theta) * Math.cos(phi));
     const e = t.loadFactor - nTarget + (V_CROSSOVER / G) * (ctx.state.angularVelocity.y - qRef);
-    const kp = 0.035 * gain;
-    const ki = 0.06 * gain;
+    const kp = 0.05 * gain;
+    const ki = 0.15 * gain;
     const raw = this.integral - kp * e;
     // Anti-windup: the integrator stops where the elevator does.
     if (!((raw >= c.elevatorUp && e < 0) || (raw <= -c.elevatorDown && e > 0)))
@@ -376,13 +390,16 @@ export class FlyByWire {
       pCmd = clamp(1.2 * (this.bankHold - phi), -ROLL_RATE, ROLL_RATE);
     }
     // The bank limit: the roll rate falls to nothing at the limit.
-    if (phi > limit - 5 * DEG && pCmd > 0) pCmd = Math.min(pCmd, 1.5 * (limit - phi));
-    if (phi < -limit + 5 * DEG && pCmd < 0) pCmd = Math.max(pCmd, 1.5 * (-limit - phi));
+    if (pCmd > 0) pCmd = Math.min(pCmd, Math.max(0, 0.9 * (limit - phi)));
+    if (pCmd < 0) pCmd = Math.max(pCmd, Math.min(0, 0.9 * (-limit - phi)));
     report.bankLimit = Math.abs(phi) > limit - 1 * DEG;
     this.bankHold = clamp(this.bankHold, -limit, limit);
     const e = pCmd - p;
-    this.rollIntegral = clamp(this.rollIntegral + 0.8 * gain * e * dt, -0.4, 0.4);
-    return clamp(1.1 * gain * e + this.rollIntegral, -1, 1);
+    const raw = 3.5 * gain * e + this.rollIntegral;
+    // Anti-windup: no integrating further into a saturated aileron.
+    if (!((raw >= 1 && e > 0) || (raw <= -1 && e < 0)))
+      this.rollIntegral = clamp(this.rollIntegral + 2.5 * gain * e * dt, -0.4, 0.4);
+    return clamp(raw, -1, 1);
   }
 
   /**
