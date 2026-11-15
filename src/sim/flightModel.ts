@@ -35,7 +35,7 @@ import {
   type MachEffects,
   type SectionCoefficients,
 } from './airfoil';
-import type { AircraftDefinition, ContactPoint, WheelDef } from './definition';
+import type { AircraftDefinition, ContactPoint, TypeSystems, WheelDef } from './definition';
 import {
   bladeForces,
   createPowerplant,
@@ -193,6 +193,13 @@ export class FlightModel implements SimAircraft {
   /** The engines, in the order of the definition. */
   readonly engines: Powerplant[];
   readonly controlLaw: ControlLaw;
+  /** The type's own systems, if its definition has any. */
+  readonly typeSystems: TypeSystems | undefined;
+  /**
+   * Share of the nose wheel's full steering angle the pedals command (a type's own systems
+   * set it: the F/A-18's low and high gain steering, 0 with steering disengaged).
+   */
+  steeringScale = 1;
 
   private time = 0;
   private crashed: string | undefined;
@@ -354,6 +361,7 @@ export class FlightModel implements SimAircraft {
       retractableGear: def.gear !== undefined,
     });
     this.controlLaw = createControlLaw(def);
+    this.typeSystems = def.typeSystems?.();
     this.compressible = def.strips.some((s) => s.foil.mach !== undefined);
     const ns = def.strips.length;
     this.separation = new Float64Array(ns).fill(1);
@@ -509,19 +517,22 @@ export class FlightModel implements SimAircraft {
       arr: () => number[] | undefined,
       spec = p.specs.find((s) => s.id === id),
     ) => {
-      if (!spec) return;
-      // A selector's positions spread over 0..1 (cut-off, ground idle, flight idle).
-      const last = spec.kind === 'selector' ? (spec.positions?.length ?? 1) - 1 : 0;
+      // A selector's positions spread over 0..1 (cut-off, ground idle, flight idle). The
+      // per-engine levers are bound even where the type has no common one (the F/A-18).
+      const first = spec ?? p.specs.find((s) => s.id === `${id}1`);
+      if (!first) return;
+      const last = first.kind === 'selector' ? (first.positions?.length ?? 1) - 1 : 0;
       const toLever = (v: number) => (last > 0 ? v / last : v);
       const fromLever = (v: number) => (last > 0 ? Math.round(clamp(v, 0, 1) * last) : v);
-      p.bind(
-        id,
-        () => fromLever(arr()?.[0] ?? 0),
-        (v) => {
-          const a = arr();
-          if (a) for (let i = 0; i < n; i++) a[i] = toLever(v);
-        },
-      );
+      if (spec)
+        p.bind(
+          id,
+          () => fromLever(arr()?.[0] ?? 0),
+          (v) => {
+            const a = arr();
+            if (a) for (let i = 0; i < n; i++) a[i] = toLever(v);
+          },
+        );
       for (let i = 0; i < n; i++) {
         const one = p.specs.find((s) => s.id === `${id}${i + 1}`);
         if (one)
@@ -682,6 +693,7 @@ export class FlightModel implements SimAircraft {
     effectiveness: number,
     side: number | undefined,
     roll = 0,
+    droop = 0,
   ): number {
     const c = this.def.controls;
     switch (kind) {
@@ -694,7 +706,7 @@ export class FlightModel implements SimAircraft {
         // Right roll: right aileron up, left aileron down (differential travel).
         const a = this.aileron * (side ?? 1);
         const d = a >= 0 ? -a * c.aileronUp : -a * c.aileronDown;
-        return effectiveness * d;
+        return effectiveness * (d + droop * this.flap);
       }
       case 'elevator': {
         // Trailing edge up (nose up) is negative lift on the tailplane; a differential tail
@@ -956,8 +968,15 @@ export class FlightModel implements SimAircraft {
         else if (control.kind === 'spoiler')
           spoiled = this.spoilerShare(control.side, control.roll);
         else
-          ctrl = this.controlAlpha(control.kind, control.effectiveness, control.side, control.roll);
+          ctrl = this.controlAlpha(
+            control.kind,
+            control.effectiveness,
+            control.side,
+            control.roll,
+            control.droop,
+          );
       }
+      if (strip.leadingEdge) sepShift += strip.leadingEdge * this.slat;
       // Compressibility on the flow normal to the sweep.
       const cosSweep = strip.sweep ? Math.cos(strip.sweep) : 1;
       let liftScale = cosSweep;
@@ -1246,7 +1265,7 @@ export class FlightModel implements SimAircraft {
     if (normal > 0) this.wheelsLoaded++;
 
     // Rolling direction: body x turned by the steering angle, laid into the ground plane.
-    const steer = (wheel.steering ?? 0) * clamp(this.controls.yaw, -1, 1);
+    const steer = (wheel.steering ?? 0) * this.steeringScale * clamp(this.controls.yaw, -1, 1);
     const fwd = this.t2;
     set(fwd, Math.cos(steer), Math.sin(steer), 0);
     rotate(fwd, this.state.orientation, fwd);
@@ -1378,6 +1397,7 @@ export class FlightModel implements SimAircraft {
     const q = 0.5 * air.density * dot(vc, vc);
     const tas = length(vc);
     this.stepAvionics(dt, env);
+    this.typeSystems?.beforeEngines(dt, this);
     this.systems.beforeEngines(dt, this.engineInputs, this.controls.starter, this.time);
     this.moveSurfaces(dt, q);
     this.moveGear(dt);
@@ -1423,6 +1443,7 @@ export class FlightModel implements SimAircraft {
     }
     this.fillTelemetry(env);
     this.updateInstruments(env, dt);
+    this.typeSystems?.afterStep(dt, this);
   }
 
   /**
@@ -1464,6 +1485,11 @@ export class FlightModel implements SimAircraft {
     i.indicatedAltitude = shown.altitude;
     i.pilotPitch = c.pitch;
     i.pilotRoll = c.roll;
+    i.alpha = t.alpha;
+    i.mach = t.mach ?? 0;
+    i.loadFactor = t.loadFactor;
+    i.radarAltitude = t.agl;
+    i.tas = t.tas;
     unit.step(dt, i, this.cockpit);
     t.avionics = unit.telemetry;
     const cmd = unit.command;
@@ -1739,6 +1765,7 @@ export class FlightModel implements SimAircraft {
     this.cockpit.reset(running);
     this.controls.flaps = flapLever;
     if (running) this.setRunningLights(start.onGround);
+    this.typeSystems?.reset(this);
     this.sampleAirAt(env, start.position);
     this.systems.reset(running, !start.onGround, this.air[0]!);
     this.avionicsUnit?.reset();
@@ -1814,6 +1841,7 @@ export class FlightModel implements SimAircraft {
     this.fillTelemetry(env);
     this.systems.fillTelemetry();
     this.updateInstruments(env, 0, running);
+    this.typeSystems?.afterStep(0, this);
   }
 
   /** On the ground the engines idle: a piston at its idle stop's rpm, a turbine settled at idle. */

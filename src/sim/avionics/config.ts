@@ -47,6 +47,11 @@ export interface AvionicsConfig {
   flightDirector?: Partial<FlightDirectorConfig>;
   /** The positions of the `navSource` selector, in order. */
   navSources: readonly NavSource[];
+  /**
+   * NAV 2 tuned by something other than its own knobs (the F/A-18's TACAN channel and the
+   * HSI course); the DME then follows NAV 2 whenever it is the selected source.
+   */
+  nav2Tuning?: (cockpit: Cockpit) => { frequency: number; course: number };
 }
 
 export const C172_AVIONICS: AvionicsConfig = { autopilot: 'kap140', navSources: ['nav1', 'gps'] };

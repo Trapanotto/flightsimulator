@@ -9,6 +9,7 @@ import type { AirfoilData } from './airfoil';
 import type { AvionicsConfig } from './avionics/config';
 import type { ControlSpec } from './cockpit';
 import type { ControlLaw } from './controlLaw';
+import type { FlightModel } from './flightModel';
 import type { EngineDef } from './propulsion';
 import type { SystemsData } from './systems/data';
 import type { AircraftInfo, Vec3 } from './types';
@@ -46,6 +47,8 @@ export interface StripControl {
   extension?: number;
   /** Spoiler: it also rolls (rises on the side the aileron command rolls down). Elevator: share of differential travel. */
   roll?: number;
+  /** Aileron: it droops with the flaps, trailing edge down by this share of the flap angle. */
+  droop?: number;
 }
 
 export interface StripDef {
@@ -78,6 +81,24 @@ export interface StripDef {
   sweep?: number;
   /** Leading-edge vortex lift (a fighter's strake), Polhamus' constant Kv. */
   vortexLift?: number;
+  /**
+   * A leading-edge device on a strip whose `control` is a trailing-edge surface (a fighter's
+   * leading-edge flap ahead of its flap or aileron): separation delay per angle, as a `slat`.
+   */
+  leadingEdge?: number;
+}
+
+/**
+ * A type's own systems beyond the generic ones (switches the generic systems do not read, what
+ * only this type shows). The flight model calls it with itself: `reset` right after the
+ * cockpit is reset (before anything is trimmed), `beforeEngines` after the avionics and before
+ * the generic systems each step, `afterStep` once the telemetry is filled (also at the end of
+ * a reset, with dt 0).
+ */
+export interface TypeSystems {
+  reset(aircraft: FlightModel): void;
+  beforeEngines(dt: number, aircraft: FlightModel): void;
+  afterStep(dt: number, aircraft: FlightModel): void;
 }
 
 export interface ContactPoint {
@@ -260,4 +281,6 @@ export interface AircraftDefinition {
   cockpit?: readonly ControlSpec[];
   /** Which radios and autopilot the avionics unit has (default: the Cessna's stack). */
   avionics?: AvionicsConfig;
+  /** The type's own systems, if it has any the generic ones do not cover. */
+  typeSystems?: () => TypeSystems;
 }

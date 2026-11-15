@@ -93,6 +93,8 @@ export interface AutopilotTelemetry {
   autothrottle?: { engaged: boolean; mode: 'speed' | 'thrust' | 'idle' | 'off' };
   /** Phase 4: go-around mode: wings level and the go-around pitch on the flight director. */
   goAround?: boolean;
+  /** F/A-18 block: the modes as the HUD annunciates them ('ATT', 'HSEL', 'BALT', 'RALT', 'CPL WYPT', 'CPL TCN', 'CPL ILS', 'ATC'). */
+  annunciations?: string[];
 }
 
 export interface GpsTelemetry {
@@ -111,6 +113,81 @@ export interface GpsTelemetry {
   /** Position, for a moving map. */
   lon: number;
   lat: number;
+}
+
+// ---- F/A-18 block (Phase 4): what the Hornet's head-up display and displays read ----
+
+/** The AoA indexer and the HUD's AoA bracket, with the gear down. */
+export type Fa18OnSpeed = 'fast' | 'slightlyFast' | 'onSpeed' | 'slightlySlow' | 'slow';
+
+/**
+ * The F/A-18's head-up display and display data, computed by its mission computer
+ * (src/sim/fa18/systems.ts) every step. SI units and radians unless a name says otherwise.
+ */
+export interface Fa18HudTelemetry {
+  /** Velocity vector: flight path angle above the horizon and drift (track minus heading), rad. */
+  flightPath: number;
+  drift: number;
+  /** Angle of attack, rad; the on-speed state with the gear down, undefined with it up. */
+  alpha: number;
+  onSpeed: Fa18OnSpeed | undefined;
+  /** Load factor now and the largest since the reset (or since MASTER CAUTION was pressed). */
+  g: number;
+  peakG: number;
+  mach: number;
+  /** Indicated (calibrated) airspeed, m/s, and barometric altitude, m, as the HUD shows them. */
+  airspeed: number;
+  altitude: number;
+  /** Radar altitude, m; undefined above 5000 ft or beyond 60° of bank or pitch. */
+  radarAltitude: number | undefined;
+  /** The HUD shows the radar altitude (the HUD altitude switch in RDR and a valid return). */
+  radarAltitudeShown: boolean;
+  /** Vertical velocity, m/s, positive up. */
+  verticalVelocity: number;
+  /** Bank (rad, positive right) and pitch (rad) for the bank scale and the pitch ladder. */
+  bank: number;
+  pitch: number;
+  /** Magnetic heading, degrees. */
+  heading: number;
+  /** Steering to the selected navigation source: bearing (degrees magnetic), range (NM), time (min). */
+  steering: {
+    source: 'wypt' | 'tacan' | 'ils';
+    valid: boolean;
+    bearing: number | undefined;
+    rangeNm: number | undefined;
+    minutes: number | undefined;
+  };
+  /** ILS needles, -1..1, fly towards them; undefined without a localizer or glide slope. */
+  ils: { localizer: number | undefined; glideSlope: number | undefined };
+  /** Flap selector and the flaps (trailing edge, leading edge, rad); gear 0 up .. 1 down. */
+  flapMode: 'auto' | 'half' | 'full';
+  trailingEdgeFlap: number;
+  leadingEdgeFlap: number;
+  gear: 'up' | 'transit' | 'down';
+  /** The flight control system's mode as the FCS page shows it. */
+  fcsMode: 'ua' | 'pa' | 'spin' | 'mech';
+  /** The g limit the FCS allows now (the paddle raises it by a third). */
+  gLimit: number;
+  /** Caution and advisory lines, plain text as the left DDI and the HUD show them. */
+  cautions: string[];
+  advisories: string[];
+  /** Autopilot and ATC modes as the HUD shows them ('ATT', 'HSEL', 'BALT', 'RALT', 'CPL WYPT', 'ATC'). */
+  modes: string[];
+  /** Total internal fuel and the bingo setting, kg; `bingo` lit when the fuel is below it. */
+  fuel: number;
+  bingoSetting: number;
+  bingo: boolean;
+  /** Systems for the displays. */
+  apu: 'off' | 'starting' | 'ready';
+  canopy: number;
+  hook: number;
+  /** Cabin altitude (m) and the OBOGS oxygen supply. */
+  cabinAltitude: number;
+  oxygen: boolean;
+  /** Nosewheel steering: 'off', 'low' or 'high' gain. */
+  nosewheelSteering: 'off' | 'low' | 'high';
+  antiSkid: boolean;
+  fuelDumping: boolean;
 }
 
 /** Everything the avionics show, refreshed every step. All dark when `powered` is false. */
@@ -147,6 +224,8 @@ export interface AvionicsTelemetry {
   markers: { outer: boolean; middle: boolean; inner: boolean };
   autopilot: AutopilotTelemetry;
   gps: GpsTelemetry;
+  /** F/A-18 block: the Hornet's head-up display and display data (its own systems fill it). */
+  fa18?: Fa18HudTelemetry;
 }
 
 /** What the app sets up for a flight. */
@@ -190,6 +269,12 @@ export interface AvionicsInput {
   /** The pilot's own stick input, -1..1: a firm push disconnects the autopilot. */
   pilotPitch: number;
   pilotRoll: number;
+  /** Phase 4, for flight guidance that needs them: angle of attack (rad), Mach, load factor, radar altitude (m, undefined out of range), true airspeed (m/s). */
+  alpha?: number;
+  mach?: number;
+  loadFactor?: number;
+  radarAltitude?: number;
+  tas?: number;
 }
 
 /** What the autopilot does with the controls while engaged, in ControlInput's units. */

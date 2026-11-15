@@ -238,13 +238,14 @@ class AvionicsStack implements AvionicsUnit {
       cockpit.get('nav1Standby'),
       cockpit.get('obs1'),
     );
+    const tune = this.config.nav2Tuning?.(cockpit);
     this.nav2.update(
       dt,
       input,
       this.db,
-      cockpit.get('nav2Active'),
+      tune ? tune.frequency : cockpit.get('nav2Active'),
       cockpit.get('nav2Standby'),
-      cockpit.get('obs2'),
+      tune ? tune.course : cockpit.get('obs2'),
     );
 
     // ---- GPS ----
@@ -254,7 +255,10 @@ class AvionicsStack implements AvionicsUnit {
     if (this.source === 'gps') this.showGpsOnNav1();
 
     // ---- DME, ADF, transponder, markers ----
-    this.updateDme(cockpit.get('dmeSource') === 1 ? this.nav2 : this.nav1, cockpit, powered);
+    const dme2 =
+      cockpit.get('dmeSource') === 1 ||
+      (this.config.nav2Tuning !== undefined && this.source === 'nav2');
+    this.updateDme(dme2 ? this.nav2 : this.nav1, dme2, powered);
     this.updateAdf(dt, input, cockpit.get('adfFrequency'));
     this.updateTransponder(dt, cockpit, powered);
     const m = t.markers;
@@ -342,9 +346,9 @@ class AvionicsStack implements AvionicsUnit {
     }
   }
 
-  private updateDme(n: NavReceiver, cockpit: Cockpit, powered: boolean) {
+  private updateDme(n: NavReceiver, second: boolean, powered: boolean) {
     const d = this.telemetry.dme;
-    d.source = cockpit.get('dmeSource') === 1 ? 'nav2' : 'nav1';
+    d.source = second ? 'nav2' : 'nav1';
     if (!powered || !n.dmeValid) {
       d.distanceNm = undefined;
       d.groundSpeedKt = undefined;
