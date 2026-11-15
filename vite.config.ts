@@ -30,5 +30,8 @@ export default defineConfig({
   },
   test: {
     include: ['tests/**/*.test.ts'],
+    // Some tests fly whole approaches through the flight model: seconds on a fast machine,
+    // more on a build server or under load. The default 5 s made them fail at random.
+    testTimeout: 30_000,
   },
 });
