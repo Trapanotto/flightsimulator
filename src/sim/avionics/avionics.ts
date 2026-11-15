@@ -140,6 +140,13 @@ class AvionicsStack implements AvionicsUnit {
     needle: 0,
     angleDeg: 3,
   };
+  /** The guidance of every source, whichever one the indicator shows. */
+  private readonly all: Record<NavSource, { lateral: LateralGuidance; vertical: VerticalGuidance }> =
+    {
+      nav1: newGuidance(),
+      gps: newGuidance(),
+      nav2: newGuidance(),
+    };
   private ndb: NavStation | undefined;
   private adfFrequency = -1;
   private adfTimer = 0;
@@ -175,6 +182,8 @@ class AvionicsStack implements AvionicsUnit {
       lateral: this.lateral,
       vertical: this.vertical,
       source: 'nav1',
+      sources: this.all,
+      gps: this.gps.telemetry,
     };
   }
 
@@ -266,6 +275,7 @@ class AvionicsStack implements AvionicsUnit {
 
     // ---- autopilot ----
     this.guidance(this.source);
+    for (const k of SOURCES) this.guidance(k, this.all[k].lateral, this.all[k].vertical);
     const ctx = this.context;
     ctx.input = input;
     ctx.cockpit = cockpit;
@@ -314,16 +324,23 @@ class AvionicsStack implements AvionicsUnit {
     n.bearing = g.bearing;
   }
 
-  private guidance(source: NavSource) {
-    const l = this.lateral;
-    const v = this.vertical;
+  private guidance(
+    source: NavSource,
+    l: LateralGuidance = this.lateral,
+    v: VerticalGuidance = this.vertical,
+  ) {
     v.valid = false;
     if (source === 'gps') {
       const g = this.gps;
       l.valid = g.valid;
       l.course = g.desiredTrack;
       l.offset = -g.crossTrack;
-      l.needle = this.telemetry.nav1.deviation;
+      l.needle =
+        l === this.lateral
+          ? this.telemetry.nav1.deviation
+          : g.valid
+            ? clamp1(-g.crossTrack / NM / g.fullScaleNm())
+            : 0;
       l.frozen = false;
       return;
     }
@@ -419,3 +436,10 @@ function swap(cockpit: Cockpit, active: string, standby: string) {
 }
 
 const clamp1 = (v: number) => (v < -1 ? -1 : v > 1 ? 1 : v);
+
+const SOURCES: readonly NavSource[] = ['nav1', 'gps', 'nav2'];
+
+const newGuidance = () => ({
+  lateral: { valid: false, course: 0, offset: 0, needle: 0, frozen: false } as LateralGuidance,
+  vertical: { valid: false, heightError: 0, needle: 0, angleDeg: 3 } as VerticalGuidance,
+});

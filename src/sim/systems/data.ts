@@ -164,6 +164,11 @@ export interface IcingData {
   iceMass: number;
   /** Pneumatic de-icing boots: selector control and the cycle period of each position, s (0 off). */
   boots?: { control: string; cycles: number[] };
+  /**
+   * Phase 4: the control whose ON heats the pitot (default 'pitotHeat'); with `auto` the
+   * probes are also heated whenever an engine runs (an airliner's probe heat).
+   */
+  probeHeat?: { control: string; auto?: boolean };
 }
 
 export interface SystemsData {

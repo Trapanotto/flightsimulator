@@ -69,6 +69,12 @@ export interface TurbofanData {
   };
   /** Angular momentum of the spools at full power, kg m²/s. */
   angularMomentum: number;
+  /**
+   * Phase 4: the engine control's thrust rating schedule, lever travel (0..1) to the share
+   * of the fan range it asks for (an airliner's detents: idle, climb, maximum continuous,
+   * take-off). Without it the lever asks for the fan range in proportion.
+   */
+  lever?: Table;
   afterburner?: {
     /** Lever share at military power; above it the afterburner. */
     military: number;
@@ -172,6 +178,7 @@ export class TurbofanPowerplant implements Powerplant {
   private dryLever(input: PowerplantInput): number {
     const ab = this.def.engine.afterburner;
     const t = clamp(input.throttle, 0, 1);
+    if (this.def.engine.lever) return lookup(this.def.engine.lever, t);
     return ab ? Math.min(1, t / ab.military) : t;
   }
 

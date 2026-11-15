@@ -10,8 +10,12 @@
  * - `PassThroughLaw`: the trivial fly-by-wire law, stick to surfaces with powered actuators.
  *   The A320's and the F/A-18's own laws replace it (`AircraftDefinition.controlLaw`).
  */
+import type { Cockpit } from './cockpit';
 import type { AircraftDefinition } from './definition';
 import { clamp } from './math';
+import type { Powerplant, PowerplantInput } from './propulsion';
+import type { AircraftSystems } from './systems/systems';
+import type { Failures } from './systemsTypes';
 import type { AircraftState, ControlInput, Telemetry } from './types';
 
 /** Where the surfaces should go. Angles in rad, shares of travel -1..1 or 0..1. */
@@ -32,6 +36,13 @@ export interface SurfaceCommand {
   /** Trailing-edge flaps and leading-edge devices, rad; undefined: as the flap lever schedules. */
   flap: number | undefined;
   leadingEdge: number | undefined;
+  /**
+   * Phase 4: wheel brakes applied by a brake computer (autobrake), 0..1 on both sides, on top
+   * of the pedals; undefined: the pedals alone.
+   */
+  brake?: number;
+  /** Phase 4: nose wheel steering, share of the wheel's steering angle; undefined: the pedals. */
+  steering?: number;
 }
 
 export const newSurfaceCommand = (): SurfaceCommand => ({
@@ -44,6 +55,8 @@ export const newSurfaceCommand = (): SurfaceCommand => ({
   differentialTail: 0,
   flap: undefined,
   leadingEdge: undefined,
+  brake: undefined,
+  steering: undefined,
 });
 
 /** What a law is given each step. */
@@ -69,6 +82,24 @@ export interface ControlLawContext {
   /** The stall protection has power. */
   readonly stallProtection: boolean;
   readonly dt: number;
+  /** Phase 4: the cockpit, for laws whose computers read the pedestal and overhead. */
+  readonly cockpit: Cockpit;
+}
+
+/**
+ * Phase 4: what a fly-by-wire type's computers see of the systems each step, after the
+ * generic systems have set up the engines' inputs and before the engines run. Its computers
+ * may change those inputs (a pneumatic starter: `starter`, `starterPower`, `ignition`).
+ */
+export interface TypeSystemsContext {
+  readonly controls: ControlInput;
+  readonly cockpit: Cockpit;
+  readonly telemetry: Telemetry;
+  readonly systems: AircraftSystems;
+  readonly engines: readonly Powerplant[];
+  readonly engineInputs: readonly PowerplantInput[];
+  readonly failures: Failures;
+  readonly dt: number;
 }
 
 export interface ControlLaw {
@@ -77,6 +108,11 @@ export interface ControlLaw {
   readonly pusher: boolean;
   reset(): void;
   step(ctx: ControlLawContext, out: SurfaceCommand): void;
+  /**
+   * Phase 4, optional: the type's own system computers (bleed and start valves, APU, brake
+   * control), run every step between the generic systems and the engines.
+   */
+  systems?(ctx: TypeSystemsContext): void;
 }
 
 /** Pitch trim as a stabiliser incidence or an equivalent elevator angle, rad. */

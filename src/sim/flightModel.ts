@@ -23,6 +23,7 @@ import {
   trimAngle,
   type ControlLaw,
   type ControlLawContext,
+  type TypeSystemsContext,
 } from './controlLaw';
 import { AircraftSystems } from './systems/systems';
 import { ALL_FAILURES, FailureSet } from './systems/failures';
@@ -35,7 +36,7 @@ import {
   type MachEffects,
   type SectionCoefficients,
 } from './airfoil';
-import type { AircraftDefinition, ContactPoint, WheelDef } from './definition';
+import type { AircraftDefinition, ContactPoint, StripControl, WheelDef } from './definition';
 import {
   bladeForces,
   createPowerplant,
@@ -227,6 +228,9 @@ export class FlightModel implements SimAircraft {
     stallProtection: boolean;
     dt: number;
   };
+  private readonly systemsContext: TypeSystemsContext & { dt: number };
+  /** Every device of each strip (its `controls`, or its one `control`). */
+  private readonly stripControls: StripControl[][];
 
   // Aerodynamic state.
   private readonly separation: Float64Array;
@@ -401,7 +405,10 @@ export class FlightModel implements SimAircraft {
       this.controls.condition = Array.from({ length: n }, () => 1);
       this.controls.reverse = false;
     }
-    if (def.speedbrake || def.strips.some((s) => s.control?.kind === 'spoiler'))
+    if (
+      def.speedbrake ||
+      def.strips.some((s) => (s.controls ?? [s.control]).some((c) => c?.kind === 'spoiler'))
+    )
       this.controls.speedbrake = 0;
     if (def.controls.rollTrim) this.controls.rollTrim = 0;
     if (def.controls.yawTrim) this.controls.yawTrim = 0;
@@ -419,7 +426,9 @@ export class FlightModel implements SimAircraft {
       yawDamper: false,
       stallProtection: false,
       dt: 0,
+      cockpit: this.cockpit,
     };
+    this.stripControls = def.strips.map((s) => s.controls ?? (s.control ? [s.control] : []));
     this.telemetry = {
       time: 0,
       ias: 0,
@@ -458,6 +467,17 @@ export class FlightModel implements SimAircraft {
     if (def.controls.trim === 'stabiliser') t.stabiliser = 0;
     if (def.limits) t.exceedances = this.exceedances;
     this.lawContext.telemetry = t;
+    this.avionicsInput.telemetry = t;
+    this.systemsContext = {
+      controls: this.controls,
+      cockpit: this.cockpit,
+      telemetry: t,
+      systems: this.systems,
+      engines: this.engines,
+      engineInputs: this.engineInputs,
+      failures: this.failures,
+      dt: 0,
+    };
     this.bindCockpit();
   }
 
@@ -943,20 +963,26 @@ export class FlightModel implements SimAircraft {
       const v2 = uc * uc + un * un;
       const alphaGeo = Math.atan2(-un, uc);
       const foil = strip.foil;
-      const control = strip.control;
+      const devices = this.stripControls[i]!;
       let alpha = alphaGeo - this.groupInduced[strip.group]!;
-      // A movable stabiliser turns the whole tailplane: nose-up trim is leading edge down.
-      if (control?.kind === 'elevator' && def.controls.trim === 'stabiliser')
-        alpha -= this.stabiliser;
       let ctrl = 0;
       let sepShift = 0;
       let spoiled = 0;
-      if (control) {
-        if (control.kind === 'slat') sepShift = control.effectiveness * this.slat;
+      let hinged = false;
+      let flap: StripControl | undefined;
+      for (let k = 0; k < devices.length; k++) {
+        const control = devices[k]!;
+        // A movable stabiliser turns the whole tailplane: nose-up trim is leading edge down.
+        if (control.kind === 'elevator' && def.controls.trim === 'stabiliser')
+          alpha -= this.stabiliser;
+        if (control.kind === 'slat') sepShift += control.effectiveness * this.slat;
         else if (control.kind === 'spoiler')
-          spoiled = this.spoilerShare(control.side, control.roll);
-        else
-          ctrl = this.controlAlpha(control.kind, control.effectiveness, control.side, control.roll);
+          spoiled = Math.max(spoiled, this.spoilerShare(control.side, control.roll));
+        else {
+          ctrl += this.controlAlpha(control.kind, control.effectiveness, control.side, control.roll);
+          if (control.effectiveness < 0.95) hinged = true;
+          if (control.kind === 'flap') flap = control;
+        }
       }
       // Compressibility on the flow normal to the sweep.
       const cosSweep = strip.sweep ? Math.cos(strip.sweep) : 1;
@@ -970,13 +996,7 @@ export class FlightModel implements SimAircraft {
         extraDrag = mo.drag;
         cpShift = mo.cpShift;
         // An all-moving tail keeps its power; a hinged surface loses it behind the shock.
-        if (
-          control &&
-          control.kind !== 'slat' &&
-          control.kind !== 'spoiler' &&
-          control.effectiveness < 0.95
-        )
-          ctrl *= mo.control;
+        if (hinged) ctrl *= mo.control;
       }
       // A raised spoiler destroys most of the lift behind it.
       if (spoiled > 0) ctrl -= 0.6 * spoiled * (alpha - foil.alpha0) + 4 * DEG * spoiled;
@@ -996,15 +1016,16 @@ export class FlightModel implements SimAircraft {
       let cd = c.cd + extraDrag;
       if (ice > 0) cd += ICE_DRAG * ice;
       let area = strip.area;
-      if (control?.kind === 'flap') {
+      if (flap) {
         const sf = Math.sin(this.flap);
         cd += def.controls.flapDrag * sf * sf;
         // A Fowler flap runs out behind the wing: more area as it extends.
-        if (control.extension) {
+        if (flap.extension) {
           const travel = def.controls.flapDetents[def.controls.flapDetents.length - 1]!;
-          area *= 1 + control.extension * clamp(this.flap / travel, 0, 1);
+          area *= 1 + flap.extension * clamp(this.flap / travel, 0, 1);
         }
-      } else if (spoiled > 0) cd += (def.controls.spoilerDrag ?? 0.1) * spoiled;
+      }
+      if (spoiled > 0) cd += (def.controls.spoilerDrag ?? 0.1) * spoiled;
       this.stripCl[i] = cl;
       this.stripAlpha[i] = alphaControl;
       const qS = 0.5 * rho * v2 * area * (strip.qFactor ?? 1);
@@ -1246,7 +1267,8 @@ export class FlightModel implements SimAircraft {
     if (normal > 0) this.wheelsLoaded++;
 
     // Rolling direction: body x turned by the steering angle, laid into the ground plane.
-    const steer = (wheel.steering ?? 0) * clamp(this.controls.yaw, -1, 1);
+    const steering = this.surfaceCommand.steering ?? this.controls.yaw;
+    const steer = (wheel.steering ?? 0) * clamp(steering, -1, 1);
     const fwd = this.t2;
     set(fwd, Math.cos(steer), Math.sin(steer), 0);
     rotate(fwd, this.state.orientation, fwd);
@@ -1260,7 +1282,9 @@ export class FlightModel implements SimAircraft {
     const mu = surf.dry + (surf.wet - surf.dry) * plane.wetness;
     const rolling = surf.rolling * (1 + plane.wetness);
     const c = this.controls;
-    const pedal = wheel.brake === 'left' ? c.brakeLeft : wheel.brake === 'right' ? c.brakeRight : 0;
+    let pedal = wheel.brake === 'left' ? c.brakeLeft : wheel.brake === 'right' ? c.brakeRight : 0;
+    const auto = this.surfaceCommand.brake;
+    if (auto !== undefined && wheel.brake) pedal = Math.max(pedal, auto);
     // Brake pads hold a standing wheel harder than they slow a turning one (static friction
     // of the pads): the brakes hold a full-power run-up but still let a landing roll out.
     const stiction = 1 + 0.5 * (1 - smoothstep(0.05, 0.5, Math.abs(vLong)));
@@ -1379,6 +1403,10 @@ export class FlightModel implements SimAircraft {
     const tas = length(vc);
     this.stepAvionics(dt, env);
     this.systems.beforeEngines(dt, this.engineInputs, this.controls.starter, this.time);
+    if (this.controlLaw.systems) {
+      this.systemsContext.dt = dt;
+      this.controlLaw.systems(this.systemsContext);
+    }
     this.moveSurfaces(dt, q);
     this.moveGear(dt);
 
@@ -1777,6 +1805,8 @@ export class FlightModel implements SimAircraft {
     this.spoiler = 0;
     this.speedbrake = 0;
     this.differentialTail = 0;
+    this.surfaceCommand.brake = undefined;
+    this.surfaceCommand.steering = undefined;
     // Bus, ignition and fuel supply as the switches now stand, before anything is trimmed.
     this.systems.beforeEngines(0, this.engineInputs, undefined, 0);
     this.flap = this.flapTarget();

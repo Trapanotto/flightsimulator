@@ -367,7 +367,11 @@ export class AircraftSystems {
     } else if (this.turbine) this.turbineOil(dt, ambient);
     const severity = icingSeverity(ambient, air.moisture ?? 0);
     const melt = meltRate(ambient);
-    const pitotHeat = c.get('pitotHeat') === 1 && this.electrical.busPowered;
+    const probe = d.icing.probeHeat;
+    const pitotHeat =
+      (c.get(probe?.control ?? 'pitotHeat') === 1 ||
+        (probe?.auto === true && this.plants.some((p) => p.running))) &&
+      this.electrical.busPowered;
     const boots = d.icing.boots;
     const bootCycle =
       boots && this.electrical.busPowered && (first?.running ?? false)
