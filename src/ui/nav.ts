@@ -10,7 +10,7 @@ import { status } from './state';
  */
 export const nav = {
   /** Page of the main menu. */
-  page: signal<'main' | 'setup' | 'hangar'>('main'),
+  page: signal<'main' | 'setup' | 'hangar' | 'school' | 'logbook'>('main'),
   /** The settings dialog, over the menu or over the pause screen. */
   settingsOpen: signal(false),
 };
@@ -28,6 +28,15 @@ export const flownAircraft = computed(() =>
 
 /** The flight has ended in a crash (a boolean, so readers re-render only when it flips). */
 export const crashed = computed(() => !!game.telemetry.value?.crashed);
+
+/** Phase 5: a lesson is being flown (a boolean, so the HUD re-renders only when it flips). */
+export const inLesson = computed(() => game.lesson.value !== null);
+
+/** Phase 5: the lesson has been passed or failed and its debrief is up. */
+export const lessonEnded = computed(() => {
+  const s = game.lesson.value?.state;
+  return s === 'passed' || s === 'failed';
+});
 
 /** `?debug` in the address shows the debug overlay. */
 export const debugOn = signal(false);

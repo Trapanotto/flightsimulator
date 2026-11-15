@@ -15,10 +15,12 @@ import {
 } from '../components/icons';
 import { arrowNav } from '../focus';
 import { type Lang, lang, setLang, t } from '../i18n';
-import { nav } from '../nav';
+import { actions, nav } from '../nav';
 import { status } from '../state';
+import { FlightSchool } from './FlightSchool';
 import { FlightSetup } from './FlightSetup';
 import { Hangar } from './Hangar';
+import { Logbook } from './Logbook';
 
 /** Wordmark: stays in exactly the same place from the loading screen to the menu. */
 function Brand({ compact }: { compact?: boolean }) {
@@ -137,19 +139,21 @@ function MainMenu() {
         icon={<IconHangar />}
         onClick={() => (nav.page.value = 'hangar')}
       />
+      {/* Without the app's lessons there is nothing to start: the entry says it comes later. */}
       <MenuItem
         index={2}
-        soon
+        soon={!actions.startLesson}
         label={t('menu.school')}
         sub={t('menu.school.sub')}
         icon={<IconSchool />}
+        onClick={() => (nav.page.value = 'school')}
       />
       <MenuItem
         index={3}
-        soon
         label={t('menu.logbook')}
         sub={t('menu.logbook.sub')}
         icon={<IconLogbook />}
+        onClick={() => (nav.page.value = 'logbook')}
       />
       <MenuItem
         index={4}
@@ -186,12 +190,14 @@ function LanguageSwitch() {
  */
 export function MenuStage() {
   const loading = game.screen.value === 'loading';
-  const setup = !loading && nav.page.value === 'setup';
-  const hangar = !loading && nav.page.value === 'hangar';
-  const away = setup || hangar;
+  const page = loading ? 'main' : nav.page.value;
+  const hangar = page === 'hangar';
+  // The flight school and the logbook are sheets like the setup and share its stage.
+  const sheet = page === 'setup' || page === 'school' || page === 'logbook';
+  const away = sheet || hangar;
   return (
     <div
-      class={`menu-stage${loading ? ' is-loading' : ''}${setup ? ' is-setup' : ''}${hangar ? ' is-hangar' : ''}`}
+      class={`menu-stage${loading ? ' is-loading' : ''}${sheet ? ' is-setup' : ''}${hangar ? ' is-hangar' : ''}`}
     >
       <div class="menu-backdrop" aria-hidden="true" />
       <div class="menu-scrim" aria-hidden="true" />
@@ -212,8 +218,10 @@ export function MenuStage() {
           )}
         </footer>
       )}
-      {setup && <FlightSetup />}
+      {page === 'setup' && <FlightSetup />}
       {hangar && <Hangar />}
+      {page === 'school' && <FlightSchool />}
+      {page === 'logbook' && <Logbook />}
     </div>
   );
 }

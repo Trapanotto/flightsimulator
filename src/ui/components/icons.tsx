@@ -343,6 +343,33 @@ export const IconReverse = (p: P) => (
   </Icon>
 );
 
+// Phase 5: replay, photo mode, logbook.
+export const IconReplay = (p: P) => (
+  <Icon {...p}>
+    <path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5" />
+    <path d="M4 4v4.5h4.5" />
+    <path d="M10.5 9.2v5.6l4.6-2.8z" fill="currentColor" stroke-width="1.25" />
+  </Icon>
+);
+export const IconCamera = (p: P) => (
+  <Icon {...p}>
+    <path d="M3.5 8.5A1.5 1.5 0 0 1 5 7h2.5l1.6-2.2h5.8L16.5 7H19a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z" />
+    <circle cx="12" cy="12.8" r="3.4" />
+  </Icon>
+);
+export const IconTrash = (p: P) => (
+  <Icon {...p}>
+    <path d="M4.5 7h15M9.5 7V4.8h5V7M6.5 7l.9 12.2h9.2L17.5 7M10.2 10.5v5.5M13.8 10.5v5.5" />
+  </Icon>
+);
+export const IconHide = (p: P) => (
+  <Icon {...p}>
+    <path d="M3 12s3.3-6 9-6 9 6 9 6-3.3 6-9 6-9-6-9-6z" />
+    <circle cx="12" cy="12" r="2.6" />
+    <path d="M4.5 19.5 19.5 4.5" />
+  </Icon>
+);
+
 /** The icon of a kind of aircraft. */
 export function CategoryIcon({ category, size }: { category: string; size?: number }) {
   switch (category) {
