@@ -262,6 +262,10 @@ const F404: TurbofanDef['engine'] = {
   throttleRatio: 1.05,
   temperatureLapse: 3.5,
   machLapse: 0,
+  // Reconstructed against the published 50 000 ft service ceiling: about a fifth of the
+  // pressure-ratio thrust is gone at 50 000 ft and Mach 0.9 (RNI 0.23), a few per cent in the
+  // cruise at 36 000 ft, nothing at the high Mach numbers of the dash or below 30 000 ft.
+  reynolds: { index: 0.5, loss: 0.45 },
   n1Rpm: 13_270,
   n1Max: 1,
   n1Idle: 0.62,
