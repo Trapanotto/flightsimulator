@@ -60,7 +60,11 @@ import { Flight } from './Flight';
 import { FlightDeck, frequenciesFor } from './flightDeck';
 import { fetchLiveWeather } from './liveWeather';
 import { type InputEvents, KEYS, Keyboard, PilotInput, keyAuthorityAt, readGamepad } from './input';
-import { dateAtSwissHour } from './time';
+import { dateAtSwissHour, swissOffsetMinutes } from './time';
+import { FreeCamera } from './freeCamera';
+import { FlightLogger, GeoRunwayFinder, Logbook, worthKeeping } from './logbook';
+import { type RenderPose, stateToRenderPose } from './pose';
+import { FlightRecording, ReplayPlayer, pictureName, savePicture } from './replay';
 
 /** Where the menu scene is set and where the first flight starts. */
 const HOME = { icao: 'LSZB', runway: '32' };
@@ -117,6 +121,8 @@ export interface AppDebug {
   audioLevel: () => number;
   /** For tests: starts a flight as the menu would, and operates a cockpit control. */
   startFlight: (plan: FlightPlan) => void;
+  /** Everything the interface can ask for (replay, photo mode, pause …). */
+  actions: UiActions;
   setControl: (id: string, value: number) => void;
   /** The interface's state (radio, checklist, cockpit values). */
   game: typeof game;
@@ -426,6 +432,66 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
 
   /** The type the menu's flight shows (the hangar changes it). */
   let menuAircraft: AircraftId = 'c172';
+  // ---- logbook, replay and photo mode ----
+  const storage = (() => {
+    try {
+      return window.localStorage;
+    } catch {
+      // Storage can be blocked: the logbook then lives for this visit only.
+      return undefined;
+    }
+  })();
+  const logbook = new Logbook();
+  game.logbook.value = logbook.load(storage);
+  const runways = new GeoRunwayFinder();
+  let logger: FlightLogger | undefined;
+  /** The flight in progress has been off the ground. */
+  let flew = false;
+  /** Set by the flight school when a lesson ends. */
+  let lessonPassed: boolean | undefined;
+  let lessonId: string | undefined;
+  const recording = new FlightRecording();
+  let player: ReplayPlayer | undefined;
+  const freeCam = new FreeCamera();
+  const replayPose: RenderPose = {
+    position: { x: 0, y: 0, z: 0 },
+    quaternion: { x: 0, y: 0, z: 0, w: 1 },
+  };
+  /** The photo mode was opened from the replay (else from the pause menu). */
+  let photoFromReplay = false;
+  /** The sky's time before the photo mode changed it. */
+  let photoDate: Date | undefined;
+  let saveNext = false;
+  let replayTime = 0;
+  /** Closes the logbook entry of the flight in progress. */
+  const closeLog = () => {
+    if (!logger || !flight) return;
+    const t = flight.aircraft.telemetry;
+    const entry = logger.finish(
+      t.crashed ? 'crashed' : t.onGround && flew ? 'landed' : 'ended',
+      lessonPassed,
+    );
+    logger = undefined;
+    if (worthKeeping(entry)) game.logbook.value = logbook.add(entry);
+  };
+  const openLog = (aircraft: AircraftId) => {
+    flew = false;
+    lessonPassed = undefined;
+    logger = new FlightLogger({ aircraft, date: new Date(), lesson: lessonId, runways });
+  };
+  /** Leaves replay and photo mode (the camera goes back to the rig). */
+  const leaveStill = () => {
+    freeCam.detach();
+    player = undefined;
+    game.replay.value = null;
+    game.photo.value = null;
+    if (photoDate) sky.setTime(photoDate);
+    photoDate = undefined;
+    visual.object.visible = true;
+  };
+  // A closed tab is the end of the flight too.
+  window.addEventListener('pagehide', closeLog);
+
   /** The radio, checklists and switches of the flight in progress. */
   let deck: FlightDeck | undefined;
   const openDeck = () => {
@@ -450,6 +516,10 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
    * appears once the terrain under it is loaded.
    */
   const prepare = (p: FlightPlan | null) => {
+    closeLog();
+    leaveStill();
+    recording.clear();
+    game.canReplay.value = false;
     flight = undefined;
     visual.object.visible = false;
     game.telemetry.value = null;
@@ -647,6 +717,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     );
     assist.reset();
     visual.object.visible = true;
+    if (p.plan) openLog(aircraft.info.id);
     // A few frames behind the loading screen: the aircraft settles on its wheels.
     reveal = { screen: p.plan ? 'flight' : 'menu', frames: 10 };
   };
@@ -685,7 +756,11 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     resume: togglePause,
     restart() {
       if (!flight) return;
+      closeLog();
+      leaveStill();
       flight.restart();
+      recording.clear();
+      openLog(flight.aircraft.info.id);
       flight.paused = false;
       openDeck();
       input.reset(
@@ -707,6 +782,85 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     openChecklist: (id) => deck?.openChecklist(id),
     checkItem: () => deck?.checkItem(),
     setFailure: (id, failed) => deck?.setFailure(id, failed),
+    deleteLogEntry: (id) => (game.logbook.value = logbook.remove(id)),
+    clearLogbook: () => (game.logbook.value = logbook.clear()),
+    openReplay() {
+      if (!flight || !plan || recording.duration < 2) return;
+      if (game.screen.value !== 'paused' && game.screen.value !== 'flight') return;
+      flight.paused = true;
+      player = new ReplayPlayer(recording);
+      // The last minute is what one wants to see again; the rest is a drag of the bar away.
+      player.seek(Math.max(player.start, player.end - 60));
+      player.play(true);
+      // From outside: the cockpit view hides most of the aircraft.
+      visual.setCockpitView(false);
+      freeCam.groundY = rig.groundY;
+      freeCam.begin(camera, visual.object.position);
+      freeCam.follow(visual.object.position);
+      freeCam.attach(canvas);
+      game.replay.value = player.view();
+      game.screen.value = 'replay';
+    },
+    closeReplay() {
+      if (game.screen.value !== 'replay') return;
+      leaveStill();
+      visual.setCockpitView(game.view.value === 'cockpit');
+      game.screen.value = 'paused';
+    },
+    replaySeek: (time) => player?.seek(time),
+    replayPlay: (playing) => player?.play(playing),
+    replaySpeed: (speed) => player?.setSpeed(speed),
+    openPhoto() {
+      if (!flight || !plan) return;
+      const from = game.screen.value;
+      if (from !== 'paused' && from !== 'replay' && from !== 'flight') return;
+      photoFromReplay = from === 'replay';
+      flight.paused = true;
+      if (player) player.play(false);
+      else {
+        freeCam.groundY = rig.groundY;
+        freeCam.begin(camera, visual.object.position);
+        freeCam.follow(visual.object.position);
+        freeCam.attach(canvas);
+      }
+      freeCam.set({ fov: camera.fov, roll: 0 });
+      photoDate = new Date(sky.state.date);
+      const minutes =
+        photoDate.getUTCHours() * 60 + photoDate.getUTCMinutes() + swissOffsetMinutes(photoDate);
+      game.photo.value = {
+        fov: Math.round(freeCam.fov),
+        roll: 0,
+        time: (((minutes / 60) % 24) + 24) % 24,
+        aircraft: true,
+      };
+      game.screen.value = 'photo';
+    },
+    closePhoto() {
+      if (game.screen.value !== 'photo') return;
+      game.photo.value = null;
+      if (photoDate) sky.setTime(photoDate);
+      photoDate = undefined;
+      visual.object.visible = true;
+      freeCam.set({ roll: 0 });
+      if (photoFromReplay && player) {
+        game.screen.value = 'replay';
+        return;
+      }
+      leaveStill();
+      game.screen.value = 'paused';
+    },
+    photoSet(patch) {
+      const now = game.photo.value;
+      if (!now) return;
+      const next = { ...now, ...patch };
+      freeCam.set({ fov: next.fov, roll: next.roll });
+      next.fov = freeCam.fov;
+      next.roll = freeCam.roll;
+      if (patch.time !== undefined && photoDate) sky.setTime(dateAtSwissHour(photoDate, next.time));
+      visual.object.visible = next.aircraft;
+      game.photo.value = next;
+    },
+    photoSave: () => void (saveNext = true),
     showAircraft(id) {
       showcase.sideShift = id ? 0.03 : 0.14;
       const next = id ?? 'c172';
@@ -830,6 +984,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     audioLevel: () => audio.level(),
     loading: () => ({ compiling, calm, modelReady }),
     startFlight: (p) => actions.startFlight(p),
+    actions,
     setControl: (id, value) => setControl(id, value),
     visual: () => visual,
     game,
@@ -929,8 +1084,29 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       });
       // The menu's aircraft is not simulated: it follows its loop, and so does the camera.
       const tour = plan === null;
+      // Replay and photo mode: the flight stands still and the free camera looks at it.
+      const still = !tour && (game.screen.value === 'replay' || game.screen.value === 'photo');
+      const shown = still && player ? player : undefined;
+      const replayDt = shown ? shown.advance(dt) : 0;
+      const tape = shown?.frame();
+      const placeAircraft = () => {
+        if (!tape) return flight!.place(visual.object, frame, alpha);
+        stateToRenderPose(tape.state, frame, replayPose);
+        const { position: at, quaternion: q } = replayPose;
+        visual.object.position.set(at.x, at.y, at.z);
+        visual.object.quaternion.set(q.x, q.y, q.z, q.w);
+        return tape.state;
+      };
+      if (flying) {
+        if (!aircraft.telemetry.onGround) flew = true;
+        ecefToGeodetic(aircraft.state.position, geo);
+        logger?.sample(dt, aircraft.telemetry, geo);
+        recording.record(flight.time, aircraft);
+        const can = recording.duration > 2;
+        if (game.canReplay.value !== can) game.canReplay.value = can;
+      }
       if (tour) flyShowcase(shot ? 0 : dt);
-      else flight.place(visual.object, frame, alpha);
+      else placeAircraft();
 
       // Keep the render origin near the aircraft: single precision is exact to millimetres
       // only within a few kilometres.
@@ -940,9 +1116,9 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
           rebase(showcase.geo.lon, showcase.geo.lat);
           flyShowcase(0);
         } else {
-          ecefToGeodetic(aircraft.state.position, geo);
+          ecefToGeodetic((tape?.state ?? aircraft.state).position, geo);
           rebase(geo.lon, geo.lat);
-          flight.place(visual.object, frame, alpha);
+          placeAircraft();
         }
       }
       if (deck && flying) {
@@ -954,7 +1130,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
         const mark = deck.highlighted;
         if (mark !== highlighted) visual.highlightControl((highlighted = mark));
       }
-      if (!tour) {
+      if (!tour && !still) {
         // Zoomed in on the panel in the cockpit, the usual angle outside.
         const base = canvas.clientWidth < canvas.clientHeight ? 70 : 55;
         const fov = game.view.value === 'cockpit' ? cockpitFov * (base / 55) : base;
@@ -964,8 +1140,22 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
         }
       }
       visual.setExposure(sky.state.exposure);
-      visual.update(dt, aircraft.telemetry, aircraft.controls, tour ? undefined : aircraft.cockpit);
-      if (!tour)
+      if (tape) visual.update(replayDt, tape.telemetry, tape.controls, tape.cockpit);
+      else
+        visual.update(
+          still ? 0 : dt,
+          aircraft.telemetry,
+          aircraft.controls,
+          tour ? undefined : aircraft.cockpit,
+        );
+      if (still) {
+        freeCam.update(dt, camera);
+        replayTime += dt;
+        if (shown && replayTime >= 0.05) {
+          replayTime = 0;
+          game.replay.value = shown.view();
+        }
+      } else if (!tour)
         rig.update(dt, camera, visual.object, visual.view, flying && !aircraft.telemetry.onGround);
       // The picture dips to black around the menu's camera cuts.
       const opacity = tour && game.screen.value === 'menu' ? showcase.fade.toFixed(2) : '';
@@ -1080,6 +1270,14 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     else {
       pipeline.render();
       drawnOnce = true;
+      // The canvas can only be read in the frame that drew it.
+      if (saveNext) {
+        saveNext = false;
+        const name = flight?.aircraft.info.name ?? 'flight';
+        savePicture(canvas, pictureName(name, new Date())).catch((err: unknown) =>
+          console.warn(err),
+        );
+      }
     }
 
     debug.frames++;
