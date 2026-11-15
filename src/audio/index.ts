@@ -108,3 +108,4 @@ export {
   synthExplosion,
   type CrashSoundOptions,
 } from './CrashSound';
+export { PilotSound } from './PilotSound';

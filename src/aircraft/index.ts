@@ -47,3 +47,5 @@ export {
 export { ParticleSystem, type ParticleSpec } from './wreck/particles';
 export { WreckFx, type WreckFxOptions } from './wreck/WreckFx';
 export { Wreck, type WreckEnv, type WreckOptions } from './wreck/Wreck';
+export { PilotVisual, loadPilotVisual, type PilotVisualOptions } from './PilotVisual';
+export { PilotCamera } from './pilotCamera';
