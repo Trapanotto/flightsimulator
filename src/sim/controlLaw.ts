@@ -151,8 +151,8 @@ export class DirectLaw implements ControlLaw {
       this.pushTime = 0;
     } else if (this.pusher) {
       this.pushTime += ctx.dt;
-      // Held for at least half a second, until the angle is well back.
-      if (!on || (a < push - sp.release && this.pushTime > 0.5)) this.pusher = false;
+      // Held for at least a second, until the angle is well back.
+      if (!on || (a < push - sp.release && this.pushTime > 1)) this.pusher = false;
     }
     if (this.pusher) {
       // The pusher's servo overpowers the pilot's pull.

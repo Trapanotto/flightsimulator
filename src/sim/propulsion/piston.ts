@@ -31,6 +31,7 @@ export class PistonPowerplant implements Powerplant {
   /** Brake power, W (never negative). */
   power = 0;
   cranking = false;
+  readonly shortfall = 0;
   private readonly out: EngineOutput = {
     torque: 0,
     power: 0,

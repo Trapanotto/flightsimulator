@@ -107,6 +107,7 @@ export class TurbopropPowerplant implements Powerplant {
   reactionTorque = 0;
   fuelFlow = 0;
   cranking = false;
+  shortfall = 0;
   /** Gas generator speed, share of 100 %. */
   ng = 0;
   /** Propeller shaft speed, rad/s, and blade angle at 3/4 radius, rad. */
@@ -354,6 +355,8 @@ export class TurbopropPowerplant implements Powerplant {
     this.itt = lookup(d.itt, this.ng / sq) * thetaT;
     this.fuelFlow = lookup(d.fuel, this.ng / sq) * deltaT * sq;
     this.omegaRate = 0;
+    const asked = this.reverseActive(input) ? 0 : clamp(input.throttle, 0, 1);
+    this.shortfall = Math.max(0, asked - (this.shaftTorque * this.omega) / d.ratedPower);
     this.finish();
   }
 

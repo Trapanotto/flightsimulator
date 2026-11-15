@@ -246,7 +246,11 @@ export function pc12Landing(
       c.throttle[0] = 0;
       // Round out and put it on: the PC-12 is landed, not held off.
       const vsTarget = -0.7 - 0.5 * Math.max(agl - 0.3, 0);
-      const theta = clamp(flareTheta + flare.update(vsTarget - t.verticalSpeed, dt), -2 * DEG, 6 * DEG);
+      const theta = clamp(
+        flareTheta + flare.update(vsTarget - t.verticalSpeed, dt),
+        -2 * DEG,
+        6 * DEG,
+      );
       attitude.pitchTo(theta, dt);
       attitude.ball();
       if (t.onGround) {

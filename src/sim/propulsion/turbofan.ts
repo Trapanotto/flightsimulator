@@ -104,6 +104,7 @@ export class TurbofanPowerplant implements Powerplant {
   readonly reactionTorque = 0;
   fuelFlow = 0;
   cranking = false;
+  shortfall = 0;
   /** Spool speeds as shares of 100 %. */
   n1 = 0;
   n2 = 0;
@@ -350,6 +351,9 @@ export class TurbofanPowerplant implements Powerplant {
       this.afterburner = 0;
     }
     this.output(input, thetaT, deltaT, sq);
+    const asked = this.lit ? this.dryLever(input) : 0;
+    const got = (this.n1For(this.n2) - d.n1Idle) / (d.n1Max - d.n1Idle);
+    this.shortfall = Math.max(0, asked - got);
     this.finish();
   }
 

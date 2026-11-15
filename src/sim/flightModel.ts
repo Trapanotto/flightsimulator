@@ -1613,19 +1613,29 @@ export class FlightModel implements SimAircraft {
     const bz = rotate(this.t1, s.orientation, Z_AXIS);
     t.bank = Math.atan2(-byUp, -dot(bz, up));
     t.loadFactor = -this.specificForceZ / G0;
-    // Height of the lowest wheel bottom above the ground.
+    // Height of the lowest wheel bottom above the ground; with the gear up, of the lowest
+    // skid (what touches first).
     if (this.cgPlane.valid && !this.held) {
+      const up = this.gear >= GEAR_LOCKED;
       let lowest = Infinity;
-      for (let i = 0; i < def.wheels.length; i++) {
-        const plane = this.wheelPlanes[i]!.valid ? this.wheelPlanes[i]! : this.cgPlane;
-        const w = rotate(this.t3, s.orientation, def.wheels[i]!.position);
+      const n = up ? def.wheels.length : def.contacts.length;
+      for (let i = 0; i < n; i++) {
+        const point = up ? def.wheels[i]!.position : def.contacts[i]!.position;
+        if (!up && !def.contacts[i]!.skid) continue;
+        const own = up ? this.wheelPlanes[i]! : this.contactPlanes[i]!;
+        const plane = own.valid ? own : this.cgPlane;
+        const w = rotate(this.t3, s.orientation, point);
         add(w, w, s.position);
         sub(w, w, plane.point);
         lowest = Math.min(lowest, dot(w, plane.normal));
       }
-      t.agl = Math.max(0, lowest);
+      t.agl = Number.isFinite(lowest) ? Math.max(0, lowest) : undefined;
     } else t.agl = undefined;
-    t.onGround = this.held || this.compression.some((c) => c > 0);
+    // On the ground: a wheel carries weight, or, wheels up, a skid scrapes.
+    t.onGround =
+      this.held ||
+      this.compression.some((c) => c > 0) ||
+      this.contactTouching.some((c, i) => c > 0 && def.contacts[i]!.skid === true);
     const horn = this.stallHornAlpha > def.stallWarning.alpha && tas > 10 && !this.crashed;
     t.stallWarning = horn || this.controlLaw.shaker;
     if (t.stickShaker !== undefined) {
@@ -1943,8 +1953,13 @@ export class FlightModel implements SimAircraft {
       out[1] = (this.forceBody.z + grav.z) / m;
       out[2] = this.momentBody.y / (m * def.meanChord);
       // Beyond full throttle the residual keeps pulling, so the solver settles at the limit.
-      if (thr > 1) out[0] -= (thr - 1) * 0.5;
-      if (thr < 0) out[0] -= thr * 0.5;
+      // Past what the engines can give (full throttle, a turbine's temperature limit) the
+      // residual carries on as if they could, so the solver comes back from there.
+      let short = 0;
+      for (const e of this.engines) short += e.shortfall;
+      if (running && short > 0) out[0] += (short / this.engines.length) * 0.5;
+      if (thr > 1) out[0] += (thr - 1) * 0.5;
+      if (thr < 0) out[0] += thr * 0.5;
     };
 
     const x = [4 * DEG, 0, 0.6];

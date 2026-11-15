@@ -266,7 +266,7 @@ const PT6A_67P: TurbopropDef['engine'] = {
   },
   inertia: 9,
   friction: 1.5,
-  governor: { gain: 0.6, damping: 0.08 },
+  governor: { gain: 1.2, damping: 0.15 },
   reverse: { power: 0.55, rpm: 0.95 },
   separatorLoss: 0.035,
   featherNg: 0.45,
@@ -304,8 +304,8 @@ const PC12_SYSTEMS: SystemsData = {
   // the standby one. Consumer currents are typical, not handbook figures.
   electrical: {
     batteries: [
-      { switch: 'battery', ampHours: 42, resistance: 0.012, fullVolts: 25.2, lowVolts: 24.0 },
-      { switch: 'battery2', ampHours: 10, resistance: 0.05, fullVolts: 25.2, lowVolts: 24.0 },
+      { switch: 'battery', ampHours: 42, resistance: 0.012, fullVolts: 24.8, lowVolts: 23.84 },
+      { switch: 'battery2', ampHours: 10, resistance: 0.05, fullVolts: 24.8, lowVolts: 23.84 },
     ],
     generators: [
       {
@@ -509,8 +509,8 @@ export const PC12: AircraftDefinition = {
     // Vane angles (the outboard wing strip's local angle) for flaps 0 / 15 / 30 / 40.
     shaker: [7.1 * DEG, 4.6 * DEG, 2.8 * DEG, 1.6 * DEG],
     pusher: [8.9 * DEG, 6.5 * DEG, 4.8 * DEG, 3.6 * DEG],
-    push: 0.6,
-    release: 3 * DEG,
+    push: 0.8,
+    release: 4 * DEG,
   },
   yawDamper: { gain: 0.9, washout: 2 },
   limits: {
@@ -564,8 +564,39 @@ export const PC12: AircraftDefinition = {
       reason: 'propeller',
       skid: true,
     },
-    { name: 'belly-front', position: v(2.5, 0, 1.15), crashSpeed: 2.5, maxDepth: 0.6, reason: 'ground', skid: true },
-    { name: 'belly-rear', position: v(-2.0, 0, 1.1), crashSpeed: 2.5, maxDepth: 0.6, reason: 'ground', skid: true },
+    {
+      name: 'belly-front',
+      position: v(2.5, 0, 1.15),
+      crashSpeed: 2.5,
+      maxDepth: 0.6,
+      reason: 'ground',
+      skid: true,
+    },
+    {
+      name: 'belly-rear',
+      position: v(-2.0, 0, 1.1),
+      crashSpeed: 2.5,
+      maxDepth: 0.6,
+      reason: 'ground',
+      skid: true,
+    },
+    // Wheels up it rests on the propeller, the belly and the wing roots' flap fairings.
+    {
+      name: 'belly-left',
+      position: v(-0.6, -1.3, 1.25),
+      crashSpeed: 2.5,
+      maxDepth: 0.6,
+      reason: 'ground',
+      skid: true,
+    },
+    {
+      name: 'belly-right',
+      position: v(-0.6, 1.3, 1.25),
+      crashSpeed: 2.5,
+      maxDepth: 0.6,
+      reason: 'ground',
+      skid: true,
+    },
     { name: 'left-wingtip', position: v(-0.2, -HALF_SPAN, 0.12), crashSpeed: 0, reason: 'wing' },
     { name: 'right-wingtip', position: v(-0.2, HALF_SPAN, 0.12), crashSpeed: 0, reason: 'wing' },
     { name: 'tail', position: v(-6.4, 0, 1.0), crashSpeed: 6, maxDepth: 0.8, reason: 'tail' },

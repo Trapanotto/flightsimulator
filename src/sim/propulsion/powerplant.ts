@@ -110,6 +110,12 @@ export interface Powerplant {
   readonly load: number;
   /** The starter turns the engine this step (it draws current or bleed air). */
   readonly cranking: boolean;
+  /**
+   * After `settle`: the share of the lever's request the engine cannot deliver in this air
+   * (a turbine at its temperature limit). The trim solver uses it to keep its throttle
+   * meaningful past the limit; 0 for an engine without such a cap.
+   */
+  readonly shortfall: number;
   /** Back to a running or a stopped, cold engine. */
   reset(running: boolean, inAir: boolean): void;
   step(dt: number, input: PowerplantInput, rotor: Rotor | undefined): void;
