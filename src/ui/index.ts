@@ -24,6 +24,7 @@ import './styles/dialogs.css';
 import './styles/replay.css';
 import './styles/startpick.css';
 import './styles/pilot.css';
+import './styles/flight.css';
 
 export { status } from './state';
 export {

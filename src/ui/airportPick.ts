@@ -207,3 +207,38 @@ export function mapAirports(
 ): AirportOption[] {
   return airports.filter((a) => eligible(a, category));
 }
+
+/**
+ * The map's name for a field: the town, short. Where the data's name is a field name or a
+ * pair of places, the town people know it by.
+ */
+const PLACE: Readonly<Record<string, string>> = {
+  LFSB: 'Basel',
+  LFGB: 'Habsheim',
+  LFLI: 'Annemasse',
+  LOIH: 'Hohenems',
+  LSGC: 'La Chaux-de-Fonds',
+  LSGP: 'Prangins',
+  LSGY: 'Yverdon',
+  LSYQ: 'Verbier',
+  LSZK: 'Fehraltorf',
+  LSPV: 'Lachen',
+  LSZI: 'Schupfart',
+  LSZN: 'Hausen',
+  LSZO: 'Beromünster',
+  LSZP: 'Biel',
+  LSZR: 'St. Gallen',
+  LSGT: 'Gruyère',
+};
+
+/** 'Bern-Belp' → 'Bern', 'Zürich' → 'Zürich', 'Basel-Mulhouse' → 'Basel' (by the table). */
+export function placeLabel(a: Pick<AirportOption, 'icao' | 'name'>): string {
+  const fixed = PLACE[a.icao];
+  if (fixed) return fixed;
+  const name = a.name
+    .replace(/\s+(Airport|Airfield|Flugplatz|Flughafen|Aérodrome|Aerodrome)$/i, '')
+    .trim();
+  // The first of a pair of places is the town; the second is the quarter or the field.
+  const first = name.split(/\s*[-/–]\s*/)[0] ?? name;
+  return first || a.icao;
+}

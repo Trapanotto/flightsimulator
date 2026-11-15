@@ -1,276 +1,49 @@
 import { useComputed, useSignal, useSignalEffect } from '@preact/signals';
 import { useEffect, useRef } from 'preact/hooks';
-import { game, settings } from '../api';
-import { IconExit, IconPause, IconRestart, IconView, IconWarning } from '../components/icons';
+import { game, settings, touchInput } from '../api';
+import {
+  IconChevronDown,
+  IconChevronUp,
+  IconClose,
+  IconExit,
+  IconGear,
+  IconMore,
+  IconPause,
+  IconRestart,
+  IconReverse,
+  IconSpeedbrake,
+  IconTools,
+  IconView,
+  IconWarning,
+} from '../components/icons';
+import { arrowNav, useEscape } from '../focus';
+import { panels } from '../panels';
 import {
   altitudeUnit,
   formatAltitude,
   formatHeading,
   formatPercent,
   formatSpeed,
-  formatVerticalSpeed,
   speedUnit,
-  verticalSpeedUnit,
 } from '../format';
-import { categoryOf, overspeedLimit, showsMach } from '../fleet';
+import { overspeedLimit, typeFeatures } from '../fleet';
 import { throttleLabel } from '../fleetText';
 import { type MessageKey, isMessageKey, lang, t } from '../i18n';
 import { actions, flownAircraft, pilotOut, showTouch } from '../nav';
 import { LeaveButton, PilotHud } from './PilotHud';
-import { autopilotModes } from './AvionicsPanels';
-import {
-  EngineBlock,
-  FighterRow,
-  FleetChips,
-  MachRow,
-  SpeedBand,
-  SpeedbrakeRow,
-  useSpeedState,
-} from './HudFleet';
+import { useSpeedState } from './HudFleet';
 import { ChecklistHint } from './ChecklistPanel';
 import { controlLabel, formatControlValue, positionLabel } from '../cockpitMeta';
-import { FlightPanels, RadioCaption, ToolsButton, showChecklistHint } from './FlightPanels';
-
-/** Pixels per degree on the heading tape. */
-const PX_PER_DEG = 4;
-/** The tape spans one and a half turns so the visible window never runs off its end. */
-const TAPE_FROM = -180;
-const TAPE_TO = 540;
-
-const CARDINAL: Record<number, string> = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' };
-const CARDINAL_DE: Record<number, string> = { 0: 'N', 90: 'O', 180: 'S', 270: 'W' };
-
-/** Static ticks and labels of the heading tape; built once, then only moved. */
-function TapeMarks({ de }: { de: boolean }) {
-  const marks = [];
-  for (let d = TAPE_FROM; d <= TAPE_TO; d += 5) {
-    const h = ((d % 360) + 360) % 360;
-    const major = h % 10 === 0;
-    const x = (d - TAPE_FROM) * PX_PER_DEG;
-    const card = (de ? CARDINAL_DE : CARDINAL)[h];
-    marks.push(
-      <span key={d} class={`tape-tick${major ? ' is-major' : ''}`} style={{ left: `${x}px` }}>
-        {major && (
-          <span class={`tape-label${card ? ' is-cardinal' : h % 30 === 0 ? ' is-thirty' : ''}`}>
-            {card ?? String(h / 10).padStart(2, '0')}
-          </span>
-        )}
-      </span>,
-    );
-  }
-  return <>{marks}</>;
-}
-
-function HeadingTape() {
-  const strip = useRef<HTMLDivElement>(null);
-  const tel = game.telemetry;
-  const hdg = useComputed(() => (tel.value ? formatHeading(tel.value.headingDeg) : '–––'));
-  // Writes the transform directly: the tape moves 20 times a second without re-rendering.
-  useSignalEffect(() => {
-    const h = tel.value?.headingDeg ?? 0;
-    const el = strip.current;
-    if (!el) return;
-    const wrapped = ((h % 360) + 360) % 360;
-    el.style.transform = `translate3d(${(-(wrapped - TAPE_FROM) * PX_PER_DEG).toFixed(1)}px,0,0)`;
-  });
-  return (
-    <div class="tape" aria-label={t('hud.hdg')} role="group">
-      <div class="tape-window" aria-hidden="true">
-        <div class="tape-strip" ref={strip}>
-          <TapeMarks de={lang.value === 'de'} />
-        </div>
-      </div>
-      <div class="tape-pointer" aria-hidden="true" />
-      <div class="tape-readout num">
-        <span class="visually-hidden">{t('hud.hdg')} </span>
-        {hdg}
-        <span class="tape-deg" aria-hidden="true">
-          °
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function SpeedCard() {
-  const tel = game.telemetry;
-  const units = settings.units.value;
-  const info = flownAircraft.value;
-  const ias = useComputed(() =>
-    tel.value ? formatSpeed(tel.value.ias, settings.units.value) : '–',
-  );
-  const state = useSpeedState(info);
-  const cls = useComputed(() => `hud-card hud-speed${state.value}`);
-  return (
-    <div class={cls}>
-      <span class="hud-label caps">{t('hud.ias')}</span>
-      <span class="hud-value num">{ias}</span>
-      <span class="hud-unit">{speedUnit(units)}</span>
-      {info && <SpeedBand info={info} />}
-      {showsMach(info) && <MachRow />}
-      {categoryOf(info) === 'fighter' && <FighterRow />}
-    </div>
-  );
-}
-
-function AltitudeCard() {
-  const tel = game.telemetry;
-  const units = settings.units.value;
-  const alt = useComputed(() =>
-    tel.value ? formatAltitude(tel.value.altitude, settings.units.value, lang.value) : '–',
-  );
-  const vs = useComputed(() =>
-    tel.value
-      ? formatVerticalSpeed(tel.value.verticalSpeed, settings.units.value, lang.value)
-      : '–',
-  );
-  const vsDir = useComputed(() => {
-    const v = tel.value?.verticalSpeed ?? 0;
-    return `hud-vs-arrow${v > 0.25 ? ' is-up' : v < -0.25 ? ' is-down' : ''}`;
-  });
-  // Height above the ground matters near it; above about 2500 ft it is noise.
-  const agl = useComputed(() => {
-    const a = tel.value?.agl;
-    return a !== undefined && a < 760 && !tel.value?.onGround
-      ? formatAltitude(Math.max(0, a), settings.units.value, lang.value)
-      : '';
-  });
-  const aglClass = useComputed(() => `hud-agl${agl.value ? '' : ' is-hidden'}`);
-  return (
-    <div class="hud-card hud-alt">
-      <span class="hud-label caps">{t('hud.alt')}</span>
-      <span class="hud-value num">{alt}</span>
-      <span class="hud-unit">{altitudeUnit(units)}</span>
-      <span class="hud-vs num">
-        <span class={vsDir} aria-hidden="true" />
-        <span class="visually-hidden">{t('hud.vs')} </span>
-        {vs}
-        <span class="hud-vs-unit">{verticalSpeedUnit(units)}</span>
-      </span>
-      <span class={aglClass}>
-        <span class="num">{agl}</span> {altitudeUnit(units)} {t('hud.agl')}
-      </span>
-    </div>
-  );
-}
-
-/** Throttle, flaps, gear and brakes; on touch devices the on-screen controls show these. */
-function Systems() {
-  const tel = game.telemetry;
-  const lev = game.levers;
-  const throttle = useComputed(() => lev.value?.throttle ?? tel.value?.engines[0]?.power ?? 0);
-  const throttleText = useComputed(() => formatPercent(throttle.value));
-  const throttleFill = useRef<HTMLSpanElement>(null);
-  const flapsText = useComputed(() => formatPercent(tel.value?.flaps ?? lev.value?.flaps ?? 0));
-  const flapsFill = useRef<HTMLSpanElement>(null);
-  useSignalEffect(() => {
-    if (throttleFill.current) throttleFill.current.style.transform = `scaleX(${throttle.value})`;
-    const f = tel.value?.flaps ?? lev.value?.flaps ?? 0;
-    if (flapsFill.current) flapsFill.current.style.transform = `scaleX(${f})`;
-  });
-  const gear = useComputed(() => {
-    const g = tel.value?.gear ?? 1;
-    return g >= 0.99 ? 'down' : g <= 0.01 ? 'up' : 'moving';
-  });
-  const gearClass = useComputed(() => `sys sys-gear is-${gear.value}`);
-  const gearText = useComputed(() =>
-    t(
-      gear.value === 'down'
-        ? 'hud.gear.down'
-        : gear.value === 'up'
-          ? 'hud.gear.up'
-          : 'hud.gear.moving',
-    ),
-  );
-  const brakeClass = useComputed(() => {
-    const l = lev.value;
-    return `sys sys-brake${l?.parkingBrake ? ' is-park' : l?.brake ? ' is-on' : ''}`;
-  });
-  const brakeText = useComputed(() =>
-    lev.value?.parkingBrake ? t('hud.parking') : t('hud.brake'),
-  );
-  const info = flownAircraft.value;
-  const notches = flapNotches(game.controls.value.find((c) => c.id === 'flaps')?.positions);
-  const wide = categoryOf(info) !== 'piston';
-  // The radio panel above it leaves room for the card as tall as the type makes it.
-  const card = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = card.current;
-    const hud = el?.closest<HTMLElement>('.hud');
-    if (!el || !hud || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() =>
-      hud.style.setProperty('--sys-h', `${Math.ceil(el.offsetHeight) + 10}px`),
-    );
-    ro.observe(el);
-    return () => {
-      ro.disconnect();
-      hud.style.removeProperty('--sys-h');
-    };
-  }, []);
-  return (
-    <div
-      ref={card}
-      class={`hud-systems hud-card${wide ? ' is-wide' : ''}`}
-      role="group"
-      aria-label={t('hud.flightData')}
-    >
-      <div class="sys sys-bar">
-        <span class="sys-label caps">{throttleLabel(info)}</span>
-        <span class="sys-meter">
-          <span class="sys-fill" ref={throttleFill} />
-        </span>
-        <span class="sys-value num">
-          {throttleText}
-          <small>%</small>
-        </span>
-      </div>
-      <div class="sys sys-bar">
-        <span class="sys-label caps">{t('hud.flaps')}</span>
-        <span class="sys-meter sys-meter--notched" style={notches}>
-          <span class="sys-fill" ref={flapsFill} />
-        </span>
-        <span class="sys-value num">
-          {flapsText}
-          <small>%</small>
-        </span>
-      </div>
-      {info?.speedbrake && <SpeedbrakeRow />}
-      {info && <EngineBlock info={info} />}
-      <div class="sys-chips">
-        <span class={gearClass}>
-          <span class="sys-lights" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </span>
-          <span class="sys-chip-text">
-            <span class="sys-label caps">{t('hud.gear')}</span>
-            <span class="sys-state">{gearText}</span>
-          </span>
-        </span>
-        <span class={brakeClass}>
-          <span class="sys-lamp" aria-hidden="true" />
-          <span class="sys-state">{brakeText}</span>
-        </span>
-        {info && <FleetChips info={info} />}
-      </div>
-    </div>
-  );
-}
-
-/**
- * The flap meter's detents where the lever clicks in. The stylesheet draws the Cessna's four
- * positions (thirds); another number of positions gets its own, evenly spaced.
- */
-function flapNotches(positions: readonly string[] | undefined): Record<string, string> | undefined {
-  const n = positions?.length ?? 0;
-  if (n < 2 || n === 4) return undefined;
-  const lines = Array.from({ length: n - 2 }, (_, i) => {
-    const at = ((i + 1) / (n - 1)) * 100;
-    return `linear-gradient(90deg, transparent calc(${at.toFixed(1)}% - 1px), rgb(0 0 0 / 0.7) 0 calc(${at.toFixed(1)}% + 1px), transparent 0)`;
-  });
-  return { '--notches': lines.length ? lines.join(', ') : 'none' };
-}
+import {
+  FlightPanels,
+  PANEL_ICON,
+  PANEL_LABEL,
+  RadioCaption,
+  availablePanels,
+  showChecklistHint,
+  toggle,
+} from './FlightPanels';
+import { PANEL_KEYS, keyLabel } from '../panels';
 
 /** game.message as a short notice; a message key is translated, plain text shown as is. */
 function Notice() {
@@ -355,65 +128,6 @@ function Warnings() {
   );
 }
 
-/** Full scale of the needles in pixels, from the centre. */
-const CDI_PX = 34;
-const GS_PX = 9;
-
-/**
- * NAV 1 at a glance: the station, both needles, the DME and the autopilot's modes. Like the
- * rest of the HUD it never re-renders with the telemetry: text nodes and transforms only,
- * every part a fixed width.
- */
-function NavStrip() {
-  const tel = game.telemetry;
-  const av = useComputed(() => {
-    const a = tel.value?.avionics;
-    return a?.powered ? a : undefined;
-  });
-  const ident = useComputed(() => (av.value?.nav1.valid ? av.value.nav1.ident || '–––' : '–––'));
-  const cdiClass = useComputed(() => `nav-bar nav-cdi${av.value?.nav1.valid ? '' : ' is-off'}`);
-  const gsClass = useComputed(
-    () => `nav-bar nav-gs${av.value?.nav1.glideSlope === undefined ? ' is-off' : ''}`,
-  );
-  const dme = useComputed(() => {
-    const d = av.value?.dme.distanceNm;
-    return d === undefined ? '–.–' : d >= 100 ? d.toFixed(0) : d.toFixed(1);
-  });
-  // Green modes already say the autopilot is engaged: 'AP' itself would only take room.
-  const apActive = useComputed(() => autopilotModes(av.value?.autopilot).active.slice(1).join(' '));
-  const apArmed = useComputed(() => autopilotModes(av.value?.autopilot).armed.join(' '));
-  const cdi = useRef<HTMLElement>(null);
-  const gs = useRef<HTMLElement>(null);
-  useSignalEffect(() => {
-    const n = av.value?.nav1;
-    const clamp = (v: number | undefined) => Math.max(-1, Math.min(1, v ?? 0));
-    if (cdi.current)
-      cdi.current.style.transform = `translate3d(${(clamp(n?.valid ? n.deviation : 0) * CDI_PX).toFixed(1)}px,0,0)`;
-    if (gs.current)
-      gs.current.style.transform = `translate3d(0,${(-clamp(n?.glideSlope) * GS_PX).toFixed(1)}px,0)`;
-  });
-  return (
-    <div class="hud-data nav-strip hud-card" role="group" aria-label={t('nav.strip')}>
-      <span class="nav-src caps">NAV 1</span>
-      <span class="nav-ident">{ident}</span>
-      <span class={cdiClass} role="img" aria-label={t('nav.cdi')}>
-        <i class="nav-needle" ref={cdi} />
-      </span>
-      <span class={gsClass} role="img" aria-label={t('nav.gs')}>
-        <i class="nav-needle" ref={gs} />
-      </span>
-      <span class="nav-dme num">
-        {dme}
-        <small>NM</small>
-      </span>
-      <span class="nav-ap num" aria-label={t('nav.ap')}>
-        {apActive}
-        <span class="nav-ap-armed">{apArmed}</span>
-      </span>
-    </div>
-  );
-}
-
 const ANNUNCIATORS = [
   'lowVolts',
   'lowFuelLeft',
@@ -446,17 +160,6 @@ const CRASH_TEXT: Record<string, MessageKey> = {
   overstress: 'crash.overstress',
   water: 'crash.water',
 };
-
-/** The engine's figures on touch, where the systems card has no room: torque, N1, ITT. */
-function TouchEngine() {
-  const info = flownAircraft.value;
-  if (!info || !info.category || info.category === 'piston') return null;
-  return (
-    <div class="hud-card hud-engine-touch">
-      <EngineBlock info={info} />
-    </div>
-  );
-}
 
 /** Seconds before the strip appears: the impact itself is seen with nothing over it. */
 const CRASH_DIALOG_DELAY = 1.5;
@@ -503,20 +206,44 @@ function CrashDialog({ reason }: { reason: string }) {
  */
 export function Hud() {
   // Out of the aircraft the aircraft's displays give way to the jumper's.
-  return pilotOut.value ? <PilotHud /> : <AircraftHud />;
+  return pilotOut.value ? <PilotHud /> : <FlightHud />;
 }
 
-function AircraftHud() {
-  const paused = game.screen.value === 'paused';
-  const cockpit = game.view.value === 'cockpit';
+/**
+ * The flight, kept to the minimum over the picture on every screen: one slim bar with speed,
+ * heading and altitude, pause and "more"; warnings in one line under it. Everything else
+ * (flaps, gear, speed brake, reverse, view, getting out, the panels) waits in the "more" sheet.
+ * On touch the stick and the throttle with the brake are the touch controls'; with keys a
+ * small line at the bottom left shows where the levers are, since nothing else would.
+ */
+function FlightHud() {
   const touch = showTouch.value;
-  const crashed = useComputed(() => game.telemetry.value?.crashed);
-  const hasAvionics = useComputed(() => !!game.telemetry.value?.avionics);
-  const nav = hasAvionics.value && settings.navStrip.value;
-  const viewLabel = t(cockpit ? 'hud.view.cockpit' : 'hud.view.outside');
-
-  // Keep focus off the flight buttons, also when the pause dialog hands focus back: Space or
-  // Enter on a focused button would trigger it while the pilot flies with the keyboard.
+  const paused = game.screen.value === 'paused';
+  const tel = game.telemetry;
+  const crashed = useComputed(() => tel.value?.crashed);
+  const info = flownAircraft.value;
+  const speedState = useSpeedState(info);
+  const more = useSignal(false);
+  const replies = useComputed(
+    () => (game.atc.value?.options.length ?? 0) > 0 && !panels.open.value.includes('radio'),
+  );
+  const units = settings.units.value;
+  const ias = useComputed(() =>
+    tel.value ? formatSpeed(tel.value.ias, settings.units.value) : '–',
+  );
+  const hdg = useComputed(() => (tel.value ? formatHeading(tel.value.headingDeg) : '–––'));
+  const alt = useComputed(() =>
+    tel.value ? formatAltitude(tel.value.altitude, settings.units.value, lang.value) : '–',
+  );
+  const vsDir = useComputed(() => {
+    const v = tel.value?.verticalSpeed ?? 0;
+    return `hud-vs-arrow${v > 0.25 ? ' is-up' : v < -0.25 ? ' is-down' : ''}`;
+  });
+  const speedClass = useComputed(() => `tbar-item tbar-speed${speedState.value}`);
+  // A sheet that was open when the flight was paused or ended does not come back by itself.
+  useEffect(() => {
+    if (paused || crashed.value) more.value = false;
+  }, [paused, crashed.value]);
   useEffect(() => {
     if (paused) return;
     if (document.activeElement instanceof HTMLElement && document.activeElement.closest('.ui'))
@@ -525,23 +252,27 @@ function AircraftHud() {
 
   return (
     <div
-      class={`hud${cockpit ? ' is-cockpit' : ''}${touch ? ' is-touch' : ''}${paused ? ' is-paused' : ''}${nav ? ' has-nav' : ''}${crashed.value ? ' is-crashed' : ''}`}
+      class={`hud hud--simple${touch ? ' is-touch' : ''}${game.view.value === 'cockpit' ? ' is-cockpit' : ''}${paused ? ' is-paused' : ''}${crashed.value ? ' is-crashed' : ''}`}
       inert={paused}
     >
-      <div class="hud-top">
-        <button
-          type="button"
-          class="btn btn--icon btn--glass hud-btn"
-          aria-label={`${t('hud.view')} (${viewLabel})`}
-          onClick={(e) => {
-            actions.toggleView();
-            (e.currentTarget as HTMLElement).blur();
-          }}
-        >
-          <IconView />
-        </button>
-        <div class="hud-data hud-data--tape">
-          <HeadingTape />
+      <div class="tbar-row">
+        <div class="tbar" role="group" aria-label={t('hud.flightData')}>
+          <span class={speedClass}>
+            <span class="visually-hidden">{t('hud.ias')} </span>
+            <b class="num">{ias}</b>
+            <small>{speedUnit(units)}</small>
+          </span>
+          <span class="tbar-item tbar-hdg">
+            <span class="visually-hidden">{t('hud.hdg')} </span>
+            <b class="num">{hdg}</b>
+            <small>°</small>
+          </span>
+          <span class="tbar-item tbar-alt">
+            <span class="visually-hidden">{t('hud.alt')} </span>
+            <b class="num">{alt}</b>
+            <small>{altitudeUnit(units)}</small>
+            <span class={vsDir} aria-hidden="true" />
+          </span>
         </div>
         <button
           type="button"
@@ -551,34 +282,241 @@ function AircraftHud() {
         >
           <IconPause />
         </button>
-        {touch ? <ToolsButton /> : <LeaveButton variant="hud" />}
+        <button
+          type="button"
+          class={`btn btn--icon btn--glass hud-btn${more.value ? ' is-on' : ''}`}
+          aria-label={t('more.open')}
+          aria-expanded={more.value}
+          aria-controls="more-sheet"
+          onClick={() => (more.value = !more.value)}
+        >
+          <IconMore />
+          {replies.value && <span class="tool-dot" aria-hidden="true" />}
+        </button>
       </div>
-      {nav && <NavStrip />}
 
-      <div class="hud-data hud-side hud-side--left">
-        <SpeedCard />
-        {touch && <TouchEngine />}
-      </div>
-      <div class="hud-data hud-side hud-side--right">
-        <AltitudeCard />
-      </div>
-      {!touch && (
-        <div class="hud-data hud-bottom-left">
-          <Systems />
-        </div>
-      )}
-
+      {!touch && !crashed.value && <LeverLine />}
       <ControlHint />
       <div class="hud-alerts">
         <Warnings />
         <Annunciators />
         <Notice />
         <RadioCaption />
-        {touch && showChecklistHint() && <ChecklistHint />}
+        {showChecklistHint() && <ChecklistHint />}
       </div>
 
       {!crashed.value && <FlightPanels />}
+      {more.value && !paused && !crashed.value && (
+        <MoreSheet onClose={() => (more.value = false)} />
+      )}
       {crashed.value && !paused && <CrashPanel reason={crashed.value} />}
     </div>
+  );
+}
+
+/** One large button of the "more" sheet: an icon, what it does, and its state below. */
+function MoreButton(props: {
+  label: string;
+  state?: string;
+  icon: preact.JSX.Element;
+  on?: boolean;
+  /** The key that does the same, shown on keyboard screens. */
+  keyHint?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      class={`more-btn${props.on ? ' is-on' : ''}`}
+      aria-pressed={props.on}
+      onClick={props.onClick}
+    >
+      {props.icon}
+      <span class="more-label">{props.label}</span>
+      {props.state && <span class="more-state num">{props.state}</span>}
+      {props.keyHint && !showTouch.value && <kbd class="more-key">{props.keyHint}</kbd>}
+    </button>
+  );
+}
+
+/**
+ * Everything of the flight that is not stick and throttle, as large buttons in a sheet from
+ * the bottom. It writes the same `touchInput` the old button pad did: counters for flaps and
+ * gear, values for the speed brake and reverse.
+ */
+function MoreSheet({ onClose }: { onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEscape(onClose);
+  const info = flownAircraft.value;
+  const f = typeFeatures(info);
+  const tel = game.telemetry.value;
+  const lev = game.levers.value;
+  const flaps = formatPercent(tel?.flaps ?? lev?.flaps ?? 0);
+  const g = tel?.gear ?? 1;
+  const gear = g >= 0.99 ? 'hud.gear.down' : g <= 0.01 ? 'hud.gear.up' : 'hud.gear.moving';
+  const sbOn = (touchInput.speedbrake.value ?? lev?.speedbrake ?? 0) > 0.5;
+  const revOn = touchInput.reverse.value || !!lev?.reverse;
+  const cockpit = game.view.value === 'cockpit';
+  const hasPanels = availablePanels.value.length > 0;
+  const touch = showTouch.value;
+  return (
+    <>
+      <div class="more-scrim" onPointerDown={onClose} />
+      <div
+        ref={ref}
+        id="more-sheet"
+        class="more-sheet glass enter"
+        role="dialog"
+        aria-label={t('more.title')}
+        onKeyDown={(e) => arrowNav(e, ref.current, 'button', 'both')}
+      >
+        <header class="more-head">
+          <h2 class="caps">{t('more.title')}</h2>
+          <button
+            type="button"
+            class="btn btn--icon btn--ghost"
+            aria-label={t('panel.close')}
+            onClick={onClose}
+          >
+            <IconClose />
+          </button>
+        </header>
+        <div class="more-grid">
+          <MoreButton
+            label={t('touch.flapsUp')}
+            state={`${flaps} %`}
+            icon={<IconChevronUp size={24} />}
+            onClick={() => touchInput.flapsUp.value++}
+          />
+          <MoreButton
+            label={t('touch.flapsDown')}
+            state={`${flaps} %`}
+            icon={<IconChevronDown size={24} />}
+            onClick={() => touchInput.flapsDown.value++}
+          />
+          {info?.retractableGear && (
+            <MoreButton
+              label={t('touch.gear')}
+              state={t(gear)}
+              icon={<IconGear size={24} />}
+              on={g >= 0.99}
+              onClick={() => touchInput.gearToggle.value++}
+            />
+          )}
+          {f.speedbrake && (
+            <MoreButton
+              label={t('touch.speedbrake')}
+              state={t(sbOn ? 'more.on' : 'more.off')}
+              icon={<IconSpeedbrake size={24} />}
+              on={sbOn}
+              onClick={() => (touchInput.speedbrake.value = sbOn ? 0 : 1)}
+            />
+          )}
+          {f.reverse && (
+            <MoreButton
+              label={t('touch.reverse')}
+              state={t(revOn ? 'more.on' : 'more.off')}
+              icon={<IconReverse size={24} />}
+              on={revOn}
+              onClick={() => (touchInput.reverse.value = !revOn)}
+            />
+          )}
+          <MoreButton
+            label={t('hud.view')}
+            state={t(cockpit ? 'hud.view.cockpit' : 'hud.view.outside')}
+            icon={<IconView size={24} />}
+            onClick={() => {
+              actions.toggleView();
+              onClose();
+            }}
+          />
+          {hasPanels && touch && (
+            <MoreButton
+              label={t('more.panels')}
+              icon={<IconTools size={24} />}
+              onClick={() => {
+                onClose();
+                panels.toolsOpen.value = true;
+              }}
+            />
+          )}
+          {!touch &&
+            availablePanels.value.map((id) => (
+              <MoreButton
+                key={id}
+                label={t(PANEL_LABEL[id])}
+                icon={PANEL_ICON[id]()}
+                keyHint={keyLabel(PANEL_KEYS[id])}
+                on={panels.open.value.includes(id)}
+                onClick={() => {
+                  onClose();
+                  toggle(id);
+                }}
+              />
+            ))}
+          <LeaveButton onDone={onClose} />
+        </div>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Where the levers are, for a pilot on the keyboard: throttle, flaps, gear and the speed brake
+ * where the type has one, as one quiet line in the bottom left corner.
+ */
+function LeverLine() {
+  const info = flownAircraft.value;
+  const tel = game.telemetry;
+  const lev = game.levers;
+  const throttle = useComputed(() =>
+    formatPercent(lev.value?.throttle ?? tel.value?.engines[0]?.power ?? 0),
+  );
+  const flaps = useComputed(() => formatPercent(tel.value?.flaps ?? lev.value?.flaps ?? 0));
+  const sb = useComputed(() => formatPercent(lev.value?.speedbrake ?? tel.value?.speedbrake ?? 0));
+  const gear = useComputed(() => {
+    const g = tel.value?.gear ?? 1;
+    return g >= 0.99 ? 'hud.gear.down' : g <= 0.01 ? 'hud.gear.up' : 'hud.gear.moving';
+  });
+  const brake = useComputed(() =>
+    lev.value?.parkingBrake ? 'hud.parking' : lev.value?.brake ? 'hud.brake' : '',
+  );
+  return (
+    <dl class="lever-line num" aria-label={t('hud.flightData')}>
+      <div>
+        <dt>{throttleLabel(info)}</dt>
+        <dd>
+          {throttle}
+          <small>%</small>
+        </dd>
+      </div>
+      <div>
+        <dt>{t('hud.flaps')}</dt>
+        <dd>
+          {flaps}
+          <small>%</small>
+        </dd>
+      </div>
+      {info?.speedbrake && (
+        <div>
+          <dt>{t('touch.speedbrake')}</dt>
+          <dd>
+            {sb}
+            <small>%</small>
+          </dd>
+        </div>
+      )}
+      {info?.retractableGear && (
+        <div>
+          <dt>{t('hud.gear')}</dt>
+          <dd>{t(gear.value as MessageKey)}</dd>
+        </div>
+      )}
+      {brake.value && (
+        <div class="is-brake">
+          <dd>{t(brake.value as MessageKey)}</dd>
+        </div>
+      )}
+    </dl>
   );
 }

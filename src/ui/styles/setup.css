@@ -150,10 +150,9 @@
 
 .swissmap-label {
   fill: var(--c-ink-2);
-  font-family: var(--f-display);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  font-family: var(--f-text);
+  font-size: 9.5px;
+  font-weight: 600;
   paint-order: stroke;
   stroke: rgb(0 0 0 / 0.6);
   stroke-width: 2.5px;
@@ -209,13 +208,19 @@
   border-radius: 0 var(--r-1) var(--r-1) 0;
 }
 
-.map-callout-icao {
-  font-family: var(--f-display);
-  font-weight: 700;
+.map-callout-place {
+  font-weight: 600;
   font-size: var(--fs-4);
-  letter-spacing: 0.08em;
-  line-height: 1.1;
+  line-height: 1.2;
   color: var(--c-accent);
+}
+
+.map-callout-code {
+  margin-left: 4px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-1);
+  font-weight: 500;
+  letter-spacing: 0.06em;
 }
 
 .map-callout-name {

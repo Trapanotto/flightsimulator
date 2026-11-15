@@ -257,8 +257,8 @@ const TAP_PX = 6;
 const PICK_PX = 22;
 
 /** Rough size of an ICAO label in map units at full view, for keeping labels apart. */
-const LABEL_W = 30;
-const LABEL_H = 11;
+const LABEL_CHAR_W = 6;
+const LABEL_H = 12;
 
 /**
  * Locator map of Switzerland. The airport list next to it is the accessible control; the
@@ -278,6 +278,8 @@ export function SwissMap(props: {
   route?: { from: string; to: string };
   /** Airports that get a label at any zoom (the others only once there is room). */
   isMain?: (a: AirportOption) => boolean;
+  /** The text of a dot's label (the place name); the ICAO code without it. */
+  labelOf?: (a: AirportOption) => string;
   /** Which label wins where two would overlap: higher first (e.g. the longest runway). */
   labelPriority?: (a: AirportOption) => number;
   /** The airport highlighted from outside (a list row under the pointer), and back out. */
@@ -302,6 +304,10 @@ export function SwissMap(props: {
   const k = v.w / MAP_W;
   const zoomed = v.w < MAP_W - 0.01;
   const hovered = props.hovered ?? hoverOwn.value;
+  const labelOf = (a: AirportOption) => props.labelOf?.(a) ?? a.icao;
+  const labelWidth = (a: AirportOption) => (labelOf(a).length * LABEL_CHAR_W + 4) * k;
+  // A label goes left of its dot where it would run out of the frame on the right.
+  const labelLeft = (a: AirportOption, x: number) => x + labelWidth(a) + 8 * k > v.x + v.w;
 
   const sel = props.airports.find((a) => a.icao === props.selected);
   const from = props.airports.find((a) => a.icao === props.route?.from);
@@ -446,8 +452,8 @@ export function SwissMap(props: {
       );
     for (const a of candidates) {
       const [x, y] = project(a.lon, a.lat);
-      const left = x > v.x + v.w * 0.78;
-      const bw = LABEL_W * k;
+      const left = labelLeft(a, x);
+      const bw = labelWidth(a);
       const bh = LABEL_H * k;
       const box: [number, number, number, number] = [
         left ? x - bw - 3 * k : x - 3 * k,
@@ -541,8 +547,7 @@ export function SwissMap(props: {
           const hover = a.icao === hovered && !on;
           // The other end of the route (the selection is one end already).
           const end = !on && !!to && (a === to || a === from);
-          // Labels go left of dots in the east of the frame so they stay inside it.
-          const left = x > v.x + v.w * 0.78;
+          const left = labelLeft(a, x);
           const main = !!props.isMain?.(a);
           return (
             <g
@@ -560,7 +565,7 @@ export function SwissMap(props: {
                   y="3"
                   text-anchor={left ? 'end' : 'start'}
                 >
-                  {a.icao}
+                  {labelOf(a)}
                 </text>
               )}
             </g>

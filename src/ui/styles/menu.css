@@ -37,36 +37,6 @@
   pointer-events: none;
 }
 
-/* The sheet sits in the flow here: the credits line has its own place below it. */
-.setup.setup--home {
-  position: relative;
-  inset: auto;
-  flex: 0 1 auto;
-  width: min(1240px, 100%);
-  min-height: 0;
-  max-height: 100%;
-  margin: 0;
-}
-
-.home-head {
-  padding: 10px var(--s-4) 10px var(--s-5);
-}
-
-.home-tools {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-  margin-left: auto;
-}
-
-.home-settings {
-  color: var(--c-ink-2);
-}
-
-.home-settings:hover {
-  color: var(--c-ink);
-}
-
 /* Wordmark: one title, the Swiss cross before it. */
 .brand {
   display: flex;
@@ -98,27 +68,324 @@
   box-shadow: 0 2px 12px rgb(227 49 58 / 0.4);
 }
 
-/* Credits and version: below the sheet, quiet; on a phone inside the sheet's foot. */
+/* The card ---------------------------------------------------------------------------- */
+
+.home-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(640px, 100%);
+  max-height: 100%;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-3);
+  background: var(--c-glass-strong);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.home-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 14px 12px 6px var(--s-6);
+}
+
+.home-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.home-lang,
+.home-settings {
+  min-height: 40px;
+  color: var(--c-ink-3);
+}
+
+.home-lang {
+  gap: 6px;
+  padding: 0 10px;
+  font-size: var(--fs-2);
+  font-weight: 600;
+}
+
+.home-lang:hover,
+.home-settings:hover {
+  color: var(--c-ink);
+}
+
+.home-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: var(--s-4) var(--s-6) var(--s-5);
+  scrollbar-width: thin;
+}
+
+.home-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.home-label {
+  color: var(--c-ink-3);
+}
+
+/* Segmented choices in the card: wide, light. */
+.home-seg {
+  width: 100%;
+}
+
+.home-seg .seg-option {
+  flex: 1;
+  min-height: 44px;
+  padding-inline: 6px;
+}
+
+.home-seg--time .seg-option {
+  padding-inline: 2px;
+  font-size: var(--fs-2);
+}
+
+/* The airport: one field that reads like the answer, and opens the picker. */
+.airport-field {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-areas: 'place code name go';
+  align-items: baseline;
+  column-gap: 10px;
+  min-height: 56px;
+  padding: 10px 16px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  background: var(--c-fill);
+  color: var(--c-ink);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease-out),
+    border-color var(--t-fast) var(--ease-out);
+}
+
+.airport-field:hover {
+  border-color: var(--c-line-strong);
+  background: var(--c-fill-hover);
+}
+
+.airport-field-place {
+  grid-area: place;
+  font-size: var(--fs-5);
+  font-weight: 600;
+}
+
+.airport-field-code {
+  grid-area: code;
+  color: var(--c-ink-4);
+  font-size: var(--fs-0);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.airport-field-name {
+  grid-area: name;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--c-ink-3);
+  font-size: var(--fs-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.airport-field-go {
+  grid-area: go;
+  color: var(--c-accent);
+  font-size: var(--fs-2);
+  font-weight: 600;
+}
+
+/* The small choices beside the start's label: runway, height or distance. */
+.home-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  min-height: 24px;
+}
+
+.home-detail {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px 14px;
+}
+
+.mini-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  color: var(--c-ink-2);
+}
+
+.mini-select select {
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 32px;
+  padding: 0 22px 0 2px;
+  border: 0;
+  border-bottom: 1px dashed var(--c-line-strong);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--fs-2);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mini-select select:hover {
+  color: var(--c-ink);
+}
+
+.mini-select select option {
+  background: #10151f;
+  color: var(--c-ink);
+}
+
+.mini-select .icon {
+  position: absolute;
+  right: 0;
+  pointer-events: none;
+}
+
+/* Weather: icons only, the chosen one with its name. */
+.weather-icons {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.weather-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 56px;
+  padding: 4px 2px;
+  border: 1px solid transparent;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--c-ink-3);
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease-out),
+    color var(--t-fast) var(--ease-out);
+}
+
+.weather-icon:hover {
+  background: var(--c-fill);
+  color: var(--c-ink);
+}
+
+.weather-icon.is-on {
+  border-color: var(--c-accent);
+  background: var(--c-accent-dim);
+  color: var(--c-ink);
+}
+
+.weather-name {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: var(--fs-0);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Aircraft: four tiles, icon and name. */
+.craft-names {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.craft-name-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 68px;
+  padding: 10px 12px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  background: var(--c-fill);
+  color: var(--c-ink-2);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease-out),
+    border-color var(--t-fast) var(--ease-out),
+    color var(--t-fast) var(--ease-out);
+}
+
+.craft-name-tile:hover {
+  background: var(--c-fill-hover);
+  border-color: var(--c-line-strong);
+  color: var(--c-ink);
+}
+
+.craft-name-tile.is-on {
+  border-color: var(--c-accent);
+  background: var(--c-accent-dim);
+  color: var(--c-ink);
+}
+
+.craft-name-tile.is-on .icon {
+  color: var(--c-accent);
+}
+
+.craft-name-text {
+  min-width: 0;
+  font-size: var(--fs-2);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.craft-name-short {
+  display: none;
+}
+
+/* The foot: the start button, and the credits as one tiny line. */
+.home-foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: var(--s-3) var(--s-6) 10px;
+  border-top: 1px solid var(--c-line);
+}
+
+.home-go {
+  width: 100%;
+  min-height: 56px;
+}
+
 .home-credits {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 4px var(--s-4);
+  gap: 2px 14px;
   margin: 0;
-  color: var(--c-ink-3);
-  font-size: var(--fs-1);
-}
-
-.home-credits--outer {
-  position: relative;
-  flex: none;
-}
-
-.home-credits--inner {
-  display: none;
-  flex: none;
-  width: 100%;
-  font-size: 10px;
+  color: var(--c-ink-4);
+  font-size: 10.5px;
 }
 
 .home-credits a,
@@ -133,71 +400,283 @@
   text-decoration: underline;
 }
 
-.home-version {
-  color: var(--c-ink-4);
-}
-
-/* Language: a small DE | EN beside the settings. */
-.lang-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-2);
-  color: var(--c-ink-3);
-}
-
-.lang-switch .seg {
-  background: rgb(0 0 0 / 0.3);
-}
-
-.lang-switch .seg {
-  padding: 3px;
-}
-
-.lang-switch .seg-option {
-  flex: none;
-  min-height: 30px;
-  padding: 0 var(--s-3);
-}
-
-/* Phones and short screens: the sheet fills the screen, the credits move into its foot. */
+/* Phones and short screens: the card is the screen. */
 @media (max-width: 700px), (max-height: 560px) {
   .home {
     padding: 0;
   }
-  .setup.setup--home {
+  .home-card {
     width: 100%;
     height: 100%;
-    max-height: 100%;
     border: 0;
     border-radius: 0;
-  }
-  .home-credits--outer {
-    display: none;
-  }
-  .home-credits--inner {
-    display: flex;
+    box-shadow: none;
+    background: #0b1019;
   }
   .home-head {
-    padding: max(6px, env(safe-area-inset-top)) max(var(--s-3), env(safe-area-inset-right)) 6px
+    padding: max(6px, env(safe-area-inset-top)) max(6px, env(safe-area-inset-right)) 0
       max(var(--s-4), env(safe-area-inset-left));
   }
   .brand {
-    font-size: var(--fs-4);
-    gap: 10px;
+    font-size: var(--fs-3);
+    gap: 8px;
+  }
+  .brand-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .brand-mark {
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
     background:
-      linear-gradient(#fff, #fff) center / 12px 3.5px no-repeat,
-      linear-gradient(#fff, #fff) center / 3.5px 12px no-repeat,
+      linear-gradient(#fff, #fff) center / 10px 3px no-repeat,
+      linear-gradient(#fff, #fff) center / 3px 10px no-repeat,
       var(--c-brand);
   }
-  .lang-switch .icon {
+  /* The language lives in the settings on a phone. */
+  .home-lang {
     display: none;
   }
-  .lang-switch .seg-option {
-    padding: 0 10px;
+  .home-body {
+    justify-content: space-between;
+    gap: clamp(10px, 2.4vh, 22px);
+    padding: var(--s-3) max(var(--s-4), env(safe-area-inset-right)) var(--s-3)
+      max(var(--s-4), env(safe-area-inset-left));
+  }
+  .home-foot {
+    padding: var(--s-2) max(var(--s-4), env(safe-area-inset-right))
+      max(6px, env(safe-area-inset-bottom)) max(var(--s-4), env(safe-area-inset-left));
+    border-top: 0;
+  }
+  .craft-names {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .craft-name-tile {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 12px;
+    min-height: 52px;
+    padding: 8px 14px;
+  }
+  .craft-name-long {
+    display: none;
+  }
+  .craft-name-short {
+    display: inline;
+    font-size: var(--fs-3);
+  }
+  .airport-field {
+    min-height: 52px;
+  }
+  .airport-field-name {
+    display: none;
+  }
+  .weather-icon {
+    min-height: 52px;
+  }
+}
+
+/* Small phones: tighter still, so it fits without scrolling. */
+@media (max-width: 700px) and (max-height: 700px) {
+  .home-body {
+    gap: 8px;
+  }
+  .home-field {
+    gap: 4px;
+  }
+  .craft-name-tile,
+  .weather-icon,
+  .airport-field {
+    min-height: 46px;
+  }
+  .home-seg .seg-option {
+    min-height: 42px;
+  }
+  .home-go {
+    min-height: 50px;
+  }
+}
+
+/* Landscape phones: two columns, the start button across the foot. */
+@media (max-height: 560px) and (min-width: 600px) {
+  .home-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-auto-flow: dense;
+    align-content: start;
+    gap: 10px var(--s-5);
+  }
+  .home-body {
+    grid-template-areas:
+      'aircraft start'
+      'aircraft weather'
+      'airport time';
+    gap: 6px var(--s-5);
+  }
+  .home-field--aircraft {
+    grid-area: aircraft;
+  }
+  .home-field--airport {
+    grid-area: airport;
+  }
+  .home-field--start {
+    grid-area: start;
+  }
+  .home-field--weather {
+    grid-area: weather;
+  }
+  .home-field--time {
+    grid-area: time;
+  }
+  .home-field {
+    gap: 4px;
+  }
+  .weather-icon {
+    min-height: 44px;
+  }
+  .home-seg .seg-option {
+    min-height: 40px;
+  }
+  .home-foot {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--s-4);
+  }
+  .home-go {
+    order: 2;
+    width: 50%;
+    min-height: 48px;
+    margin-left: auto;
+  }
+  .home-credits {
+    order: 1;
+    justify-content: flex-start;
+  }
+  .craft-name-tile {
+    min-height: 44px;
+  }
+}
+
+/* Airport picker ------------------------------------------------------------------------ */
+
+.picker-layer {
+  z-index: 3;
+  background: rgb(4 7 12 / 0.6);
+}
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 100%);
+  height: min(720px, 100%);
+  background: #0b1019;
+  overflow: hidden;
+}
+
+.picker-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 8px 8px 8px var(--s-3);
+  border-bottom: 1px solid var(--c-line);
+}
+
+.picker-back {
+  display: none;
+}
+
+.picker-title {
+  flex: 1;
+  margin-left: var(--s-2);
+  font-size: var(--fs-4);
+  font-weight: 600;
+}
+
+.picker-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 1fr);
+}
+
+.picker-map {
+  min-height: 0;
+  margin: var(--s-4);
+  border-radius: var(--r-2);
+}
+
+.picker-map .swissmap svg {
+  max-height: none;
+  height: 100%;
+}
+
+.picker-map .swissmap,
+.picker-map .swissmap-frame {
+  height: 100%;
+}
+
+.picker-list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 var(--s-4) var(--s-4) 0;
+}
+
+.picker-list .apt-pick {
+  margin-top: var(--s-4);
+}
+
+.picker-list .apt-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Phones: full screen, the list first; the map on top only where the phone is tall. */
+@media (max-width: 700px), (max-height: 560px) {
+  .picker-layer {
+    padding: 0;
+  }
+  .picker {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+    background: #0b1019;
+  }
+  .picker-head {
+    padding-top: max(8px, env(safe-area-inset-top));
+  }
+  .picker-back {
+    display: inline-flex;
+  }
+  .picker-close {
+    display: none;
+  }
+  .picker-title {
+    margin-left: 0;
+  }
+  .picker-body {
+    display: flex;
+    flex-direction: column;
+  }
+  .picker-map {
+    display: none;
+  }
+  .picker-list {
+    flex: 1;
+    padding: 0 max(var(--s-4), env(safe-area-inset-right))
+      max(var(--s-4), env(safe-area-inset-bottom)) max(var(--s-4), env(safe-area-inset-left));
+  }
+}
+
+@media (max-width: 700px) and (min-height: 760px) {
+  .picker-map {
+    display: block;
+    flex: none;
+    height: 190px;
+    margin: var(--s-3) var(--s-4) 0;
   }
 }
 
@@ -304,77 +783,13 @@
   top: calc(var(--safe-t, 0px) + 6px);
 }
 
-/* Aircraft: the names as a row of choices ---------------------------------------------- */
-
-.craft-names {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
+.home-version {
+  color: var(--c-ink-4);
 }
 
-.craft-name-tile {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 6px;
-  min-height: 72px;
-  padding: 10px 12px;
-  border: 1px solid var(--c-line);
-  border-radius: var(--r-2);
-  background: var(--c-fill);
-  color: var(--c-ink-2);
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background var(--t-fast) var(--ease-out),
-    border-color var(--t-fast) var(--ease-out),
-    color var(--t-fast) var(--ease-out);
-}
-
-.craft-name-tile:hover {
-  background: var(--c-fill-hover);
-  border-color: var(--c-line-strong);
-  color: var(--c-ink);
-}
-
-.craft-name-tile.is-on {
-  border-color: var(--c-accent);
-  background: var(--c-accent-dim);
-  color: var(--c-ink);
-}
-
-.craft-name-tile.is-on .icon {
-  color: var(--c-accent);
-}
-
-.craft-name-text {
-  min-width: 0;
-  font-size: var(--fs-2);
-  font-weight: 600;
-  line-height: 1.25;
-}
-
-@media (max-width: 1100px) and (min-width: 701px), (max-width: 480px) {
-  .craft-names {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-/* Short screens: icon beside the name, one row lower. */
-@media (max-height: 560px) {
-  .craft-name-tile {
-    flex-direction: row;
-    align-items: center;
-    justify-content: flex-start;
-    min-height: 48px;
-    padding-block: 6px;
-  }
-}
-
-@media (max-width: 700px), (max-height: 560px) {
-  .setup--home .setup-foot {
-    flex-wrap: wrap;
-    row-gap: 6px;
+/* In the card on a large screen the title is a size smaller than on the loading screen. */
+@media (min-width: 701px) and (min-height: 561px) {
+  .home-card .brand {
+    font-size: var(--fs-5);
   }
 }

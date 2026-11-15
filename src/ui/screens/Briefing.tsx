@@ -19,7 +19,7 @@ import {
   IconSun,
   IconWarning,
 } from '../components/icons';
-import { approachSpeed, categoryOf, rotateSpeed, typeFeatures } from '../fleet';
+import { approachSpeed, categoryOf, rotateSpeed } from '../fleet';
 import { KEY_ROWS, flyingKeyRows } from '../fleetText';
 import { positionLabel } from '../cockpitMeta';
 import { routeNm } from '../plan';
@@ -37,6 +37,7 @@ import {
 import { type MessageKey, lang, t } from '../i18n';
 import { showTouch } from '../nav';
 import { swissNowHours } from '../sun';
+import { placeLabel } from '../airportPick';
 import { heightLabel } from './FlightSetup';
 import { SwissMap } from './SwissMap';
 
@@ -134,7 +135,7 @@ function Fact({ label, value }: { label: string; value: string }) {
   );
 }
 
-function TouchHints({ features }: { features: ReturnType<typeof typeFeatures> }) {
+function TouchHints() {
   return (
     <ul class="touch-hints">
       <li>
@@ -146,25 +147,9 @@ function TouchHints({ features }: { features: ReturnType<typeof typeFeatures> })
         {t('touch.hint.throttle')}
       </li>
       <li>
-        <span class="hint-glyph hint-glyph--rudder" aria-hidden="true" />
-        {t('touch.hint.rudder')}
-      </li>
-      <li>
         <span class="hint-glyph hint-glyph--buttons" aria-hidden="true" />
         {t('touch.hint.buttons')}
       </li>
-      {features.speedbrake && (
-        <li>
-          <span class="hint-glyph hint-glyph--lever" aria-hidden="true" />
-          {t('touch.hint.speedbrake')}
-        </li>
-      )}
-      {features.reverse && (
-        <li>
-          <span class="hint-glyph hint-glyph--buttons" aria-hidden="true" />
-          {t('touch.hint.reverse')}
-        </li>
-      )}
     </ul>
   );
 }
@@ -237,7 +222,6 @@ export function Briefing() {
   const vr = info ? speedText(rotateSpeed(info)) : '';
   const vapp = info ? speedText(approachSpeed(info)) : '';
   const category = categoryOf(info);
-  const features = typeFeatures(info);
   const flaps = flapText();
   const typeRows = flyingKeyRows(info).filter((r) =>
     ['keys.gear', 'keys.speedbrake', 'keys.reverse'].includes(r.label),
@@ -297,6 +281,7 @@ export function Briefing() {
                   airports={airports}
                   selected={airport.icao}
                   route={dest ? { from: airport.icao, to: dest.icao } : undefined}
+                  labelOf={placeLabel}
                   label={t('setup.map')}
                 />
               </div>
@@ -443,7 +428,7 @@ export function Briefing() {
             <div class="brief-card glass brief-controls">
               <h2 class="caps brief-card-title">{t('briefing.controls')}</h2>
               {showTouch.value ? (
-                <TouchHints features={features} />
+                <TouchHints />
               ) : (
                 <dl class="key-list key-list--compact">
                   {flyingKeyRows(info).map((row) => (

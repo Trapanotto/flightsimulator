@@ -88,9 +88,7 @@ const de = {
 
   'hud.ias': 'IAS',
   'hud.alt': 'ALT',
-  'hud.vs': 'V/S',
   'hud.hdg': 'HDG',
-  'hud.agl': 'über Grund',
   'hud.throttle': 'Gas',
   'hud.flaps': 'Klappen',
   'hud.gear': 'Fahrwerk',
@@ -204,16 +202,14 @@ const de = {
 
   'touch.controls': 'Steuerung am Bildschirm',
   'touch.stick': 'Steuerknüppel',
-  'touch.rudder': 'Seitenruder',
   'touch.throttle': 'Gashebel',
   'touch.flapsUp': 'Klappen einfahren',
   'touch.flapsDown': 'Klappen ausfahren',
   'touch.gear': 'Fahrwerk',
   'touch.brake': 'Bremse',
   'touch.hint.stick': 'Linker Daumen: Knüppel zum Nicken und Rollen',
-  'touch.hint.throttle': 'Rechter Daumen: Gashebel bleibt, wo du ihn lässt',
-  'touch.hint.rudder': 'Unten in der Mitte: Seitenruder',
-  'touch.hint.buttons': 'Klappen, Fahrwerk und Bremse neben dem Gas',
+  'touch.hint.throttle': 'Rechter Daumen: Gashebel, die Bremse daneben',
+  'touch.hint.buttons': 'Klappen, Fahrwerk und mehr: Knopf ··· oben',
 
   'status.renderer': 'Grafik',
   'status.device': 'Gerät',
@@ -382,11 +378,6 @@ const de = {
   'pos.nav2': 'NAV 2',
   'pos.gps': 'GPS',
 
-  'nav.strip': 'Navigation',
-  'nav.cdi': 'Kursablage',
-  'nav.gs': 'Gleitweg',
-  'nav.ap': 'Autopilot',
-
   'annun.lowVolts': 'Spannung',
   'annun.lowFuelLeft': 'Treibstoff L',
   'annun.lowFuelRight': 'Treibstoff R',
@@ -405,8 +396,6 @@ const de = {
 
   'settings.tab.display': 'Anzeige',
   'settings.hud': 'Im Flug',
-  'settings.navStrip': 'Navigationsleiste',
-  'settings.navStrip.hint': 'NAV 1, Kursablage, Gleitweg und DME unter dem Kursband.',
   'settings.radioText': 'Funktext',
   'settings.radioText.hint': 'Neue Funksprüche als Textzeile, solange das Funkfeld zu ist.',
   'settings.checklistHints': 'Checklisten-Hinweise',
@@ -421,10 +410,6 @@ const de = {
   'key.click': 'Klick',
   'key.wheel': 'Mausrad',
   'key.drag': 'Ziehen',
-
-  'pause.failure': 'Panne auslösen',
-  'pause.failure.hint': 'Zum Üben. Nochmals wählen behebt sie.',
-  'pause.failure.active': 'aktiv',
 
   // ---- Phase 4: the fleet ----
 
@@ -467,12 +452,9 @@ const de = {
   'hud.afterburner': 'Nachbrenner',
   'hud.loadFactor': 'Lastvielfaches',
   'hud.alpha': 'Anstellwinkel',
-  'hud.mach': 'Machzahl',
 
   'touch.speedbrake': 'Bremsklappen',
-  'touch.reverse': 'Umkehrschub (halten)',
-  'touch.hint.speedbrake': 'Bremsklappen: der Schieber neben den Knöpfen',
-  'touch.hint.reverse': 'REV halten: Umkehrschub nach dem Aufsetzen',
+  'touch.reverse': 'Umkehrschub',
 
   'group.engine.turbine': 'Triebwerk',
   'group.lightsOnly': 'Licht',
@@ -726,6 +708,24 @@ const de = {
   'pilot.enter': 'Einsteigen',
   'pilot.newFlight': 'Neuer Flug',
   'home.planning': 'Flugplanung',
+  // The simple planning card and the flight's "more" sheet.
+  'phone.airport': 'Flugplatz',
+  'phone.change': 'Ändern',
+  'phone.start.runway': 'Piste',
+  'phone.start.air': 'In der Luft',
+  'phone.start.approach': 'Anflug',
+  'phone.above': '{h} über Grund',
+  'phone.final': '{n} NM Endanflug',
+  'phone.time.now': 'Jetzt',
+  'phone.time.morning': 'Morgen',
+  'phone.time.noon': 'Mittag',
+  'phone.time.evening': 'Abend',
+  'phone.time.night': 'Nacht',
+  'more.open': 'Mehr',
+  'more.title': 'Bedienung',
+  'more.on': 'ein',
+  'more.off': 'aus',
+  'more.panels': 'Instrumente und Funk',
 } as const;
 
 export type MessageKey = keyof typeof de;
@@ -815,9 +815,7 @@ const en: Record<MessageKey, string> = {
 
   'hud.ias': 'IAS',
   'hud.alt': 'ALT',
-  'hud.vs': 'V/S',
   'hud.hdg': 'HDG',
-  'hud.agl': 'above ground',
   'hud.throttle': 'Throttle',
   'hud.flaps': 'Flaps',
   'hud.gear': 'Gear',
@@ -932,16 +930,14 @@ const en: Record<MessageKey, string> = {
 
   'touch.controls': 'On-screen controls',
   'touch.stick': 'Control stick',
-  'touch.rudder': 'Rudder',
   'touch.throttle': 'Throttle lever',
   'touch.flapsUp': 'Flaps up',
   'touch.flapsDown': 'Flaps down',
   'touch.gear': 'Landing gear',
   'touch.brake': 'Brake',
   'touch.hint.stick': 'Left thumb: stick for pitch and roll',
-  'touch.hint.throttle': 'Right thumb: the throttle stays where you leave it',
-  'touch.hint.rudder': 'Bottom centre: rudder',
-  'touch.hint.buttons': 'Flaps, gear and brake next to the throttle',
+  'touch.hint.throttle': 'Right thumb: the throttle, the brake beside it',
+  'touch.hint.buttons': 'Flaps, gear and more: the ··· button at the top',
 
   'status.renderer': 'Graphics',
   'status.device': 'Device',
@@ -1110,11 +1106,6 @@ const en: Record<MessageKey, string> = {
   'pos.nav2': 'NAV 2',
   'pos.gps': 'GPS',
 
-  'nav.strip': 'Navigation',
-  'nav.cdi': 'Course deviation',
-  'nav.gs': 'Glide slope',
-  'nav.ap': 'Autopilot',
-
   'annun.lowVolts': 'Volts',
   'annun.lowFuelLeft': 'Fuel L',
   'annun.lowFuelRight': 'Fuel R',
@@ -1133,8 +1124,6 @@ const en: Record<MessageKey, string> = {
 
   'settings.tab.display': 'Display',
   'settings.hud': 'In flight',
-  'settings.navStrip': 'Navigation strip',
-  'settings.navStrip.hint': 'NAV 1, course deviation, glide slope and DME under the heading tape.',
   'settings.radioText': 'Radio text',
   'settings.radioText.hint': 'New radio calls as a line of text while the radio panel is closed.',
   'settings.checklistHints': 'Checklist hints',
@@ -1149,10 +1138,6 @@ const en: Record<MessageKey, string> = {
   'key.click': 'Click',
   'key.wheel': 'Wheel',
   'key.drag': 'Drag',
-
-  'pause.failure': 'Trigger a failure',
-  'pause.failure.hint': 'For practice. Choose it again to repair it.',
-  'pause.failure.active': 'active',
 
   // ---- Phase 4: the fleet ----
 
@@ -1195,12 +1180,9 @@ const en: Record<MessageKey, string> = {
   'hud.afterburner': 'Afterburner',
   'hud.loadFactor': 'Load factor',
   'hud.alpha': 'Angle of attack',
-  'hud.mach': 'Mach number',
 
   'touch.speedbrake': 'Speed brake',
-  'touch.reverse': 'Reverse thrust (hold)',
-  'touch.hint.speedbrake': 'Speed brake: the slider next to the buttons',
-  'touch.hint.reverse': 'Hold REV: reverse thrust after touchdown',
+  'touch.reverse': 'Reverse thrust',
 
   'group.engine.turbine': 'Engine',
   'group.lightsOnly': 'Lights',
@@ -1454,6 +1436,24 @@ const en: Record<MessageKey, string> = {
   'pilot.enter': 'Get in',
   'pilot.newFlight': 'New flight',
   'home.planning': 'Flight planning',
+  // The simple planning card and the flight's "more" sheet.
+  'phone.airport': 'Airport',
+  'phone.change': 'Change',
+  'phone.start.runway': 'Runway',
+  'phone.start.air': 'In the air',
+  'phone.start.approach': 'Approach',
+  'phone.above': '{h} above ground',
+  'phone.final': '{n} NM final',
+  'phone.time.now': 'Now',
+  'phone.time.morning': 'Morning',
+  'phone.time.noon': 'Noon',
+  'phone.time.evening': 'Evening',
+  'phone.time.night': 'Night',
+  'more.open': 'More',
+  'more.title': 'Controls',
+  'more.on': 'on',
+  'more.off': 'off',
+  'more.panels': 'Instruments and radio',
 };
 
 const MESSAGES: Record<Lang, Record<MessageKey, string>> = { de, en };

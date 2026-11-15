@@ -77,12 +77,6 @@ function Display() {
     <Field label={t('settings.hud')} id="set-hud">
       <div class="toggle-list">
         <Toggle
-          label={t('settings.navStrip')}
-          hint={t('settings.navStrip.hint')}
-          checked={settings.navStrip.value}
-          onChange={(v) => (settings.navStrip.value = v)}
-        />
-        <Toggle
           label={t('settings.radioText')}
           hint={t('settings.radioText.hint')}
           checked={settings.radioText.value}

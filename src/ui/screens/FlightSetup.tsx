@@ -1,17 +1,20 @@
 import { useSignal } from '@preact/signals';
 import { AIRCRAFT, type AircraftInfo } from '@sim';
 import { useEffect, useMemo, useRef } from 'preact/hooks';
-import { type AirportOption, type SeasonChoice, type WeatherChoice, game, settings } from '../api';
-import { Brand, LanguageSwitch, Version } from '../components/Brand';
+import { type AirportOption, type WeatherChoice, game, settings } from '../api';
+import { Brand, Version } from '../components/Brand';
 import { Credits } from '../components/Credits';
-import { Field, Segmented, Slider } from '../components/controls';
+import { Segmented } from '../components/controls';
 import {
   CategoryIcon,
   IconApproach,
+  IconBack,
+  IconChevronDown,
   IconClimb,
   IconClose,
   IconCloud,
   IconFair,
+  IconGlobe,
   IconLive,
   IconOvercast,
   IconPlane,
@@ -23,32 +26,21 @@ import {
 } from '../components/icons';
 import { airportEligibility, categoryOf, shortName, typeDefaults } from '../fleet';
 import { eligibilityText } from '../fleetText';
-import { arrowNav } from '../focus';
-import {
-  altitudeUnit,
-  convertAltitude,
-  formatClock,
-  formatSpec,
-  groupThousands,
-  runwayHeading,
-} from '../format';
-import { type MessageKey, lang, t } from '../i18n';
+import { arrowNav, useDialog } from '../focus';
+import { altitudeUnit, convertAltitude, formatSpec, groupThousands } from '../format';
+import { type MessageKey, lang, setLang, t } from '../i18n';
 import { actions, nav } from '../nav';
 import { browserStorage, readJson, writeJson } from '../persist';
 import {
   DRAFT_KEY,
   type SetupDraft,
-  SEASON_CHOICES,
   type StartKind,
   WEATHER_CHOICES,
-  airAltitudeRange,
   draftToPlan,
-  nearestAirport,
   planProblem,
   sanitizeDraft,
   usableEnds,
 } from '../plan';
-import { dayGradient, sunTimes, swissNowHours } from '../sun';
 import {
   type SectionKey,
   airportFacts,
@@ -56,24 +48,34 @@ import {
   labelPriority,
   mapAirports,
   orderAirports,
+  placeLabel,
   readRecent,
   rememberAirport,
 } from '../airportPick';
 import { SwissMap } from './SwissMap';
 
+const WEATHER_ICON: Record<WeatherChoice, () => preact.JSX.Element> = {
+  live: () => <IconLive size={24} />,
+  clear: () => <IconSun size={24} />,
+  fair: () => <IconFair size={24} />,
+  cloudy: () => <IconCloud size={24} />,
+  overcast: () => <IconOvercast size={24} />,
+  lowStratus: () => <IconStratus size={24} />,
+};
+
+/** Times of day on offer: the calendar's now, or a moment that reads as a part of the day. */
+export const TIME_CHOICES = [
+  { key: 'now', time: 'now' },
+  { key: 'morning', time: 8 },
+  { key: 'noon', time: 12 },
+  { key: 'evening', time: 18.5 },
+  { key: 'night', time: 23 },
+] as const;
+
 /** The aircraft's name as the picker shows it: the maker's long name gives way to the type. */
 function displayName(info: AircraftInfo): string {
   return info.name.replace(/^McDonnell Douglas /, '');
 }
-
-const WEATHER_ICON: Record<WeatherChoice, () => preact.JSX.Element> = {
-  live: () => <IconLive size={22} />,
-  clear: () => <IconSun size={22} />,
-  fair: () => <IconFair size={22} />,
-  cloudy: () => <IconCloud size={22} />,
-  overcast: () => <IconOvercast size={22} />,
-  lowStratus: () => <IconStratus size={22} />,
-};
 
 /** Height in the current units, rounded the way a pilot would say it. */
 export function heightLabel(m: number): string {
@@ -92,20 +94,6 @@ const SECTION_TITLE: Record<SectionKey, MessageKey> = {
 };
 
 /** Elevation, longest runway with its surface, military: what tells fields apart. */
-/** An altitude above sea level as a pilot sets it: feet in hundreds, metres in fifties. */
-function altitudeLabel(m: number): string {
-  return heightLabel(m);
-}
-
-/** The altitude slider's step: 500 ft, or 100 m. */
-function altitudeStep(): number {
-  return settings.units.value === 'aviation' ? 500 * 0.3048 : 100;
-}
-
-function zoomLabels() {
-  return { in: t('map.zoomIn'), out: t('map.zoomOut'), reset: t('map.reset') };
-}
-
 function AirportFactsLine({ a }: { a: AirportOption }) {
   const f = airportFacts(a);
   const len = f.longest ? formatSpec('length', f.longest, settings.units.value, lang.value) : null;
@@ -275,30 +263,371 @@ function AirportList(props: {
   );
 }
 
-/** ['14', '32', '10', '28'] → '14/32 10/28': opposite ends belong to one strip. */
-export function pairRunways(ends: string[]): string {
-  const left = [...ends];
-  const out: string[] = [];
-  while (left.length) {
-    const a = left.shift()!;
-    const h = runwayHeading(a);
-    const suffix = a.replace(/^\d+/, '');
-    const opp = { L: 'R', R: 'L', C: 'C' }[suffix] ?? '';
-    const want = String(((h / 10 + 18 - 1) % 36) + 1).padStart(2, '0') + opp;
-    const j = left.indexOf(want);
-    if (j >= 0) {
-      left.splice(j, 1);
-      out.push(h <= runwayHeading(want) ? `${a}/${want}` : `${want}/${a}`);
-    } else out.push(a);
-  }
-  return out.join('  ');
+/** A small choice inside a sentence: the native select, so phones show their own picker. */
+function MiniSelect<T extends string | number>(props: {
+  label: string;
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <label class="mini-select">
+      <span class="visually-hidden">{props.label}</span>
+      <select
+        value={String(props.value)}
+        onChange={(e) => {
+          const raw = (e.currentTarget as HTMLSelectElement).value;
+          const hit = props.options.find((o) => String(o.value) === raw);
+          if (hit) props.onChange(hit.value);
+        }}
+      >
+        {props.options.map((o) => (
+          <option key={String(o.value)} value={String(o.value)}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <IconChevronDown size={16} />
+    </label>
+  );
 }
 
 /**
- * The aircraft as a row of choices, each with its icon and its name: nothing else is needed
- * to choose, and the four always fit (two by two on a phone).
+ * The choice of the airport in a dialog of its own: search and list (recent first), and the map
+ * with place names where there is room for it (beside the list on a large screen, above it on a
+ * tall phone). Picking closes it.
  */
-function AircraftPicker(props: {
+function AirportPicker(props: {
+  airports: AirportOption[];
+  selected: string;
+  info?: AircraftInfo;
+  recent: readonly string[];
+  onPick: (icao: string) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const hovered = useSignal<string | null>(null);
+  useDialog(ref, props.onClose);
+  const category = categoryOf(props.info);
+  const usable = useMemo(() => mapAirports(props.airports, category), [props.airports, category]);
+  return (
+    <div
+      class="modal-layer picker-layer fade-in"
+      onPointerDown={(e) => e.target === e.currentTarget && props.onClose()}
+    >
+      <div
+        ref={ref}
+        class="picker glass enter"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="picker-title"
+      >
+        <header class="picker-head">
+          <button
+            type="button"
+            class="btn btn--icon btn--ghost picker-back"
+            aria-label={t('panel.close')}
+            onClick={props.onClose}
+          >
+            <IconBack />
+          </button>
+          <h2 id="picker-title" class="picker-title">
+            {t('phone.airport')}
+          </h2>
+          <button
+            type="button"
+            class="btn btn--icon btn--ghost picker-close"
+            aria-label={t('panel.close')}
+            onClick={props.onClose}
+          >
+            <IconClose />
+          </button>
+        </header>
+        <div class="picker-body">
+          <div class="picker-map setup-map-wrap">
+            <SwissMap
+              airports={usable}
+              selected={props.selected}
+              onSelect={props.onPick}
+              isMain={isMainAirport}
+              labelPriority={labelPriority}
+              labelOf={placeLabel}
+              hovered={hovered.value}
+              onHover={(icao) => (hovered.value = icao)}
+              zoomable
+              zoomLabels={{ in: t('map.zoomIn'), out: t('map.zoomOut'), reset: t('map.reset') }}
+              label={t('setup.map')}
+            />
+          </div>
+          <div class="picker-list">
+            <AirportList
+              airports={props.airports}
+              selected={props.selected}
+              info={props.info}
+              recent={props.recent}
+              hovered={hovered.value}
+              onHover={(icao) => (hovered.value = icao)}
+              onSelect={props.onPick}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The home screen: the game opens here and every flight ends here. One calm card with the few
+ * choices a flight needs: the aircraft, the airport (in a picker of its own), how to start, the
+ * weather and the time of day, and the start button. The same on every screen, only laid out
+ * to fit it; the season is the calendar's, the runway the airport's first unless changed.
+ */
+export function FlightSetup() {
+  const ref = useRef<HTMLElement>(null);
+  const airports = game.airports.value;
+  const aircraft = AIRCRAFT;
+  const storage = browserStorage();
+  const draft = useSignal<SetupDraft>(
+    sanitizeDraft(readJson(storage, DRAFT_KEY), airports, aircraft),
+  );
+  const picking = useSignal(false);
+  // Read once per visit: the list must not reshuffle while the pilot is choosing.
+  const recent = useMemo(() => readRecent(storage), []);
+
+  // The app may deliver airports after the page opened: fit the remembered choice to them.
+  useEffect(() => {
+    draft.value = sanitizeDraft(readJson(storage, DRAFT_KEY) ?? draft.value, airports, aircraft);
+  }, [airports, aircraft.length]);
+
+  const set = (patch: Partial<SetupDraft>) => {
+    draft.value = sanitizeDraft({ ...draft.value, ...patch }, airports, aircraft);
+    writeJson(storage, DRAFT_KEY, draft.value);
+  };
+  // What is no longer chosen here: the season is the calendar's, an air start is above the
+  // airport (a place on the map from an older version is forgotten).
+  useEffect(() => {
+    const d = draft.value;
+    if (d.season !== 'now' || d.airPlace !== 'airport') set({ season: 'now', airPlace: 'airport' });
+  }, []);
+
+  const d = draft.value;
+  const plan = draftToPlan(d, airports, aircraft);
+  const problem = planProblem(d, airports, aircraft);
+  const airport = airports.find((a) => a.icao === d.airport);
+  const info = aircraft.find((a) => a.id === d.aircraft);
+  const category = categoryOf(info);
+  const defaults = typeDefaults(info);
+  const runways = airport ? usableEnds(airport, category) : [];
+
+  // The app may show the choice somewhere; debounced so quick taps are cheap.
+  const planKey = JSON.stringify(plan);
+  useEffect(() => {
+    if (!plan || !actions.preview) return;
+    const id = setTimeout(() => actions.preview?.(plan), 250);
+    return () => clearTimeout(id);
+  }, [planKey]);
+
+  const start = () => {
+    if (!plan) return;
+    if (plan.airport) rememberAirport(storage, plan.airport);
+    game.plan.value = plan;
+    actions.startFlight(plan);
+  };
+
+  const runwayChoice = runways.length > 0 && (
+    <MiniSelect<string>
+      label={t('setup.runway')}
+      value={d.runway}
+      options={runways.map((r) => ({ value: r, label: t('briefing.runway', { rwy: r }) }))}
+      onChange={(v) => set({ runway: v })}
+    />
+  );
+  const timeKey = TIME_CHOICES.find((c) => c.time === d.time)?.key;
+
+  return (
+    <>
+      <main ref={ref} class="home-card enter" aria-labelledby="home-title" inert={picking.value}>
+        <header class="home-head">
+          <Brand id="home-title" />
+          <div class="home-tools">
+            <button
+              type="button"
+              class="btn btn--ghost home-lang"
+              aria-label={t('menu.language')}
+              title={t('menu.language')}
+              onClick={() => setLang(lang.value === 'de' ? 'en' : 'de')}
+            >
+              <IconGlobe size={18} />
+              <span>{lang.value === 'de' ? 'DE' : 'EN'}</span>
+            </button>
+            <button
+              type="button"
+              class="btn btn--icon btn--ghost home-settings"
+              aria-label={t('menu.settings')}
+              title={t('menu.settings')}
+              onClick={() => (nav.settingsOpen.value = true)}
+            >
+              <IconSettings />
+            </button>
+          </div>
+        </header>
+
+        <div class="home-body">
+          <section class="home-field home-field--aircraft" aria-labelledby="home-aircraft">
+            <h2 class="caps home-label" id="home-aircraft">
+              {t('setup.aircraft')}
+            </h2>
+            <AircraftTiles
+              aircraft={aircraft}
+              selected={d.aircraft}
+              onSelect={(id) => set({ aircraft: id })}
+            />
+          </section>
+
+          <section class="home-field home-field--airport" aria-labelledby="home-airport">
+            <h2 class="caps home-label" id="home-airport">
+              {t('phone.airport')}
+            </h2>
+            <button
+              type="button"
+              class="airport-field"
+              aria-haspopup="dialog"
+              onClick={() => (picking.value = true)}
+            >
+              {airport ? (
+                <>
+                  <span class="airport-field-place">{placeLabel(airport)}</span>
+                  <span class="airport-field-code">{airport.icao}</span>
+                  {airport.name !== placeLabel(airport) && (
+                    <span class="airport-field-name">{airport.name}</span>
+                  )}
+                </>
+              ) : (
+                <span class="airport-field-name">{t('setup.problem.noAirport')}</span>
+              )}
+              <span class="airport-field-go">{t('phone.change')}</span>
+            </button>
+          </section>
+
+          <section class="home-field home-field--start" aria-labelledby="home-start">
+            <div class="home-label-row">
+              <h2 class="caps home-label" id="home-start">
+                {t('setup.start')}
+              </h2>
+              <span class="home-detail">
+                {runwayChoice}
+                {d.start === 'air' && (
+                  <MiniSelect<number>
+                    label={t('setup.height')}
+                    value={d.airHeight}
+                    options={defaults.airHeights.map((h, i) => ({
+                      value: i,
+                      label: t('phone.above', { h: heightLabel(h) }),
+                    }))}
+                    onChange={(v) => set({ airHeight: v })}
+                  />
+                )}
+                {d.start === 'approach' && (
+                  <MiniSelect<number>
+                    label={t('setup.approachDistance')}
+                    value={d.approachNm}
+                    options={defaults.approachDistances.map((n) => ({
+                      value: n,
+                      label: t('phone.final', { n }),
+                    }))}
+                    onChange={(v) => set({ approachNm: v })}
+                  />
+                )}
+              </span>
+            </div>
+            <Segmented<StartKind>
+              label={t('setup.start')}
+              class="home-seg"
+              value={d.start}
+              onChange={(v) => set({ start: v })}
+              options={[
+                { value: 'runway', label: t('phone.start.runway'), icon: <IconRunway size={18} /> },
+                { value: 'air', label: t('phone.start.air'), icon: <IconClimb size={18} /> },
+                {
+                  value: 'approach',
+                  label: t('phone.start.approach'),
+                  icon: <IconApproach size={18} />,
+                },
+              ]}
+            />
+          </section>
+
+          <section class="home-field home-field--weather" aria-labelledby="home-weather">
+            <h2 class="caps home-label" id="home-weather">
+              {t('setup.weather')}
+            </h2>
+            <WeatherIcons value={d.weather} onChange={(v) => set({ weather: v })} />
+          </section>
+
+          <section class="home-field home-field--time" aria-labelledby="home-time">
+            <h2 class="caps home-label" id="home-time">
+              {t('setup.time')}
+            </h2>
+            <Segmented<string>
+              label={t('setup.time')}
+              class="home-seg home-seg--time"
+              value={timeKey ?? ''}
+              onChange={(k) => {
+                const c = TIME_CHOICES.find((x) => x.key === k);
+                if (c) set({ time: c.time });
+              }}
+              options={TIME_CHOICES.map((c) => ({ value: c.key, label: t(`phone.time.${c.key}`) }))}
+            />
+          </section>
+        </div>
+
+        <footer class="home-foot">
+          <button
+            type="button"
+            class="btn btn--primary home-go"
+            disabled={!plan}
+            aria-describedby={problem ? 'setup-problem' : undefined}
+            onClick={start}
+          >
+            {t('setup.go')}
+            <IconPlane size={20} />
+          </button>
+          {problem && (
+            <span id="setup-problem" class="visually-hidden">
+              {t(
+                problem === 'noAirport'
+                  ? 'setup.problem.noAirport'
+                  : problem === 'runway'
+                    ? 'setup.problem.runway'
+                    : 'setup.problem.noAircraft',
+              )}
+            </span>
+          )}
+          <p class="home-credits">
+            <Credits />
+            <Version />
+          </p>
+        </footer>
+      </main>
+      {picking.value && (
+        <AirportPicker
+          airports={airports}
+          selected={d.airport}
+          info={info}
+          recent={recent}
+          onPick={(icao) => {
+            set({ airport: icao, runway: '' });
+            picking.value = false;
+          }}
+          onClose={() => (picking.value = false)}
+        />
+      )}
+    </>
+  );
+}
+
+/** The four types as large tiles: icon and name (the short name where room is scarce). */
+function AircraftTiles(props: {
   aircraft: AircraftInfo[];
   selected: string;
   onSelect: (id: AircraftInfo['id']) => void;
@@ -331,13 +660,19 @@ function AircraftPicker(props: {
             role="radio"
             key={a.id}
             aria-checked={on}
+            aria-label={a.name}
             title={a.name}
             tabIndex={on || (!chosen && i === 0) ? 0 : -1}
             class={`craft-name-tile${on ? ' is-on' : ''}`}
             onClick={() => props.onSelect(a.id)}
           >
-            <CategoryIcon category={categoryOf(a)} size={22} />
-            <span class="craft-name-text">{displayName(a)}</span>
+            <CategoryIcon category={categoryOf(a)} size={24} />
+            <span class="craft-name-text craft-name-long" aria-hidden="true">
+              {displayName(a)}
+            </span>
+            <span class="craft-name-text craft-name-short" aria-hidden="true">
+              {shortName(a)}
+            </span>
           </button>
         );
       })}
@@ -345,430 +680,40 @@ function AircraftPicker(props: {
   );
 }
 
-function TimePicker(props: {
-  draft: SetupDraft;
-  airport?: AirportOption;
-  onChange: (time: 'now' | number) => void;
-}) {
-  const lat = props.airport?.lat ?? 46.91;
-  const lon = props.airport?.lon ?? 7.5;
-  const today = new Date();
-  const dayKey = today.toDateString();
-  const gradient = useMemo(() => dayGradient(today, lat, lon), [lat, lon, dayKey]);
-  const sun = useMemo(() => sunTimes(today, lat, lon), [lat, lon, dayKey]);
-  const now = props.draft.time === 'now';
-  const value = now ? swissNowHours(today) : (props.draft.time as number);
-  return (
-    <Field
-      label={t('setup.time')}
-      id="setup-time"
-      aside={
-        sun && (
-          <span class="sun-times num">
-            <span title={t('setup.sunrise')}>
-              <span class="visually-hidden">{t('setup.sunrise')} </span>↑ {formatClock(sun.sunrise)}
-            </span>
-            <span title={t('setup.sunset')}>
-              <span class="visually-hidden">{t('setup.sunset')} </span>↓ {formatClock(sun.sunset)}
-            </span>
-          </span>
-        )
-      }
-    >
-      <div class="time-row">
-        <Segmented<'now' | 'set'>
-          label={t('setup.time')}
-          class="time-mode"
-          value={now ? 'now' : 'set'}
-          onChange={(m) => props.onChange(m === 'now' ? 'now' : Math.round(value * 4) / 4)}
-          options={[
-            { value: 'now', label: t('setup.time.now') },
-            { value: 'set', label: t('setup.time.set') },
-          ]}
-        />
-        <Slider
-          id="setup-time-slider"
-          class={`time-slider${now ? ' is-now' : ''}`}
-          label={t('setup.time.slider')}
-          min={0}
-          max={24}
-          step={0.25}
-          value={value}
-          valueText={formatClock(value)}
-          trackStyle={`--day:${gradient}`}
-          onInput={(v) => props.onChange(v)}
-        />
-        <output class={`time-value num${now ? ' is-now' : ''}`} for="setup-time-slider">
-          {formatClock(value)}
-        </output>
-      </div>
-    </Field>
-  );
-}
-
-/**
- * The home screen: the game opens here and every flight ends here. One sheet under the title:
- * where (map, search, list), how (start, runway), with what, when and in which weather.
- */
-export function FlightSetup() {
+/** The weather as a row of icons; only the chosen one says its name. */
+function WeatherIcons(props: { value: WeatherChoice; onChange: (v: WeatherChoice) => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  const airports = game.airports.value;
-  const aircraft = AIRCRAFT;
-  const storage = browserStorage();
-  const draft = useSignal<SetupDraft>(
-    sanitizeDraft(readJson(storage, DRAFT_KEY), airports, aircraft),
-  );
-  const hovered = useSignal<string | null>(null);
-  // Read once per visit: the list must not reshuffle while the pilot is choosing.
-  const recent = useMemo(() => readRecent(storage), []);
-
-  // The app may deliver airports after the page opened: fit the remembered choice to them.
-  useEffect(() => {
-    draft.value = sanitizeDraft(readJson(storage, DRAFT_KEY) ?? draft.value, airports, aircraft);
-  }, [airports, aircraft.length]);
-
-  const d = draft.value;
-  const set = (patch: Partial<SetupDraft>) => {
-    draft.value = sanitizeDraft({ ...draft.value, ...patch }, airports, aircraft);
-    writeJson(storage, DRAFT_KEY, draft.value);
-  };
-
-  const plan = draftToPlan(d, airports, aircraft);
-  const problem = planProblem(d, airports, aircraft);
-  const airport = airports.find((a) => a.icao === d.airport);
-  const info = aircraft.find((a) => a.id === d.aircraft);
-  const category = categoryOf(info);
-  const defaults = typeDefaults(info);
-  const runways = airport ? usableEnds(airport, category) : [];
-  // Only what the chosen type can use is drawn on the map.
-  const usable = useMemo(() => mapAirports(airports, category), [airports, category]);
-
-  // The app may show the choice somewhere (it used to in the menu scene); debounced so a
-  // dragged slider is cheap.
-  const planKey = JSON.stringify(plan);
-  useEffect(() => {
-    if (!plan || !actions.preview) return;
-    const id = setTimeout(() => actions.preview?.(plan), 250);
-    return () => clearTimeout(id);
-  }, [planKey]);
-
-  const fly = (from: SetupDraft) => {
-    const p = draftToPlan(from, airports, aircraft);
-    if (!p) return;
-    if (p.airport) rememberAirport(storage, p.airport);
-    game.plan.value = p;
-    actions.startFlight(p);
-  };
-  const start = () => fly(d);
-  // An air start put on the map; the map taps place it instead of picking an airport.
-  const placing = d.start === 'air' && d.airPlace === 'map';
-  const place =
-    placing && d.airLon !== null && d.airLat !== null
-      ? { lon: d.airLon, lat: d.airLat, heading: d.airHeading }
-      : null;
-  const near = place ? nearestAirport(airports, place.lon, place.lat) : undefined;
-  const altRange = airAltitudeRange(category);
-  const selectAirport = (icao: string) => {
-    const a = airports.find((x) => x.icao === icao);
-    // With a place on the map, choosing an airport moves the place over it.
-    if (placing && a) set({ airport: icao, runway: '', airLon: a.lon, airLat: a.lat });
-    else set({ airport: icao, runway: '' });
-  };
-  const setAirPlace = (p: 'airport' | 'map') => {
-    // The first time on the map: above the chosen airport, lined up with its runway.
-    if (p === 'map' && d.airLon === null && airport)
-      set({
-        airPlace: p,
-        airLon: airport.lon,
-        airLat: airport.lat,
-        airHeading: runways[0] ? runwayHeading(runways[0]) % 360 : 0,
-        airAltitude: Math.max(
-          d.airAltitude,
-          airport.elevation + (defaults.airHeights[d.airHeight] ?? 900),
-        ),
-      });
-    else set({ airPlace: p });
-  };
-
-  const timeText = d.time === 'now' ? t('setup.time.now') : formatClock(d.time);
-  const startText =
-    d.start === 'air' && place
-      ? `${t('setup.start.air')} · ${altitudeLabel(d.airAltitude)} · ${String(d.airHeading).padStart(3, '0')}°`
-      : d.start === 'air'
-        ? t('briefing.air', { h: heightLabel(defaults.airHeights[d.airHeight] ?? 0) })
-        : d.start === 'approach'
-          ? `${t('briefing.runway', { rwy: d.runway })} · ${t('briefing.approach', { d: t('setup.nm', { n: d.approachNm }) })}`
-          : t('briefing.runway', { rwy: d.runway });
-
   return (
-    <main ref={ref} class="setup setup--home enter" aria-labelledby="home-title">
-      <header class="setup-head home-head">
-        <Brand id="home-title" />
-        <div class="home-tools">
-          <LanguageSwitch />
+    <div
+      ref={ref}
+      class="weather-icons"
+      role="radiogroup"
+      aria-label={t('setup.weather')}
+      onKeyDown={(e) => arrowNav(e, ref.current, '[role="radio"]', 'horizontal')?.click()}
+    >
+      {WEATHER_CHOICES.map((w) => {
+        const on = w === props.value;
+        return (
           <button
             type="button"
-            class="btn btn--icon btn--ghost home-settings"
-            aria-label={t('menu.settings')}
-            title={t('menu.settings')}
-            onClick={() => (nav.settingsOpen.value = true)}
+            role="radio"
+            key={w}
+            aria-checked={on}
+            aria-label={t(`weather.${w}`)}
+            title={t(`weather.${w}`)}
+            tabIndex={on ? 0 : -1}
+            class={`weather-icon${on ? ' is-on' : ''}`}
+            onClick={() => props.onChange(w)}
           >
-            <IconSettings />
+            {WEATHER_ICON[w]()}
+            {on && (
+              <span class="weather-name" aria-hidden="true">
+                {t(`weather.${w}`)}
+              </span>
+            )}
           </button>
-        </div>
-      </header>
-
-      <div class="setup-body">
-        <div class="setup-col setup-where">
-          <Field
-            label={d.start === 'approach' ? t('setup.airport') : t('setup.departure')}
-            id="setup-departure"
-          >
-            <div class={`setup-map-wrap setup-map-main${placing ? ' is-placing' : ''}`}>
-              <SwissMap
-                airports={usable}
-                selected={d.airport}
-                onSelect={placing ? undefined : selectAirport}
-                onPlace={placing ? (lon, lat) => set({ airLon: lon, airLat: lat }) : undefined}
-                place={place}
-                isMain={isMainAirport}
-                labelPriority={labelPriority}
-                hovered={hovered.value}
-                onHover={(icao) => (hovered.value = icao)}
-                zoomable
-                zoomLabels={zoomLabels()}
-                label={t(placing ? 'setup.map.place' : 'setup.map')}
-              />
-              {placing ? (
-                <div class="map-callout" aria-hidden="true">
-                  <span class="map-callout-icao">{t('setup.start.air')}</span>
-                  <span class="map-callout-name">
-                    {near ? t('setup.air.near', { name: near.name }) : t('setup.air.hint')}
-                  </span>
-                </div>
-              ) : (
-                airport && (
-                  <div class="map-callout" aria-hidden="true">
-                    <span class="map-callout-icao">{airport.icao}</span>
-                    <span class="map-callout-name">{airport.name}</span>
-                  </div>
-                )
-              )}
-            </div>
-            {placing && (
-              <div class="air-controls">
-                <label class="air-control">
-                  <span class="sub-label">{t('setup.altitude')}</span>
-                  <output class="air-value num">{altitudeLabel(d.airAltitude)}</output>
-                  <Slider
-                    label={t('setup.altitude')}
-                    min={altRange[0]}
-                    max={altRange[1]}
-                    step={altitudeStep()}
-                    value={d.airAltitude}
-                    valueText={altitudeLabel(d.airAltitude)}
-                    onInput={(v) => set({ airAltitude: v })}
-                  />
-                </label>
-                <label class="air-control">
-                  <span class="sub-label">{t('setup.heading')}</span>
-                  <output class="air-value num">
-                    <span
-                      class="air-arrow"
-                      aria-hidden="true"
-                      style={{ transform: `rotate(${d.airHeading}deg)` }}
-                    >
-                      ↑
-                    </span>
-                    {String(d.airHeading).padStart(3, '0')}°
-                  </output>
-                  <Slider
-                    label={t('setup.heading')}
-                    min={0}
-                    max={355}
-                    step={5}
-                    value={d.airHeading}
-                    valueText={`${d.airHeading}°`}
-                    onInput={(v) => set({ airHeading: v })}
-                  />
-                </label>
-              </div>
-            )}
-            <AirportList
-              airports={airports}
-              selected={d.airport}
-              info={info}
-              recent={recent}
-              hovered={hovered.value}
-              onHover={(icao) => (hovered.value = icao)}
-              onSelect={selectAirport}
-            />
-          </Field>
-        </div>
-
-        <div class="setup-col setup-how">
-          <div class="start-grid">
-            <Field label={t('setup.start')} id="setup-start">
-              <Segmented<StartKind>
-                label={t('setup.start')}
-                class="start-seg"
-                value={d.start}
-                onChange={(v) => set({ start: v })}
-                options={[
-                  {
-                    value: 'runway',
-                    label: t('setup.start.runway'),
-                    icon: <IconRunway size={18} />,
-                  },
-                  { value: 'air', label: t('setup.start.air'), icon: <IconClimb size={18} /> },
-                  {
-                    value: 'approach',
-                    label: t('setup.start.approach'),
-                    icon: <IconApproach size={18} />,
-                  },
-                ]}
-              />
-            </Field>
-            {runways.length > 0 && !placing && (
-              <Field label={t('setup.runway')} id="setup-runway">
-                <Segmented<string>
-                  label={t('setup.runway')}
-                  class="rwy-seg"
-                  value={d.runway}
-                  onChange={(v) => set({ runway: v })}
-                  options={runways.map((r) => ({
-                    value: r,
-                    label: r,
-                    sub: `${String(runwayHeading(r)).padStart(3, '0')}°`,
-                  }))}
-                />
-              </Field>
-            )}
-            {d.start === 'air' && (
-              <div class="start-height">
-                <Field label={t('setup.air.place')} id="setup-air-place">
-                  <Segmented<'airport' | 'map'>
-                    label={t('setup.air.place')}
-                    value={d.airPlace}
-                    onChange={setAirPlace}
-                    options={[
-                      { value: 'airport', label: t('setup.air.overAirport') },
-                      { value: 'map', label: t('setup.air.onMap') },
-                    ]}
-                  />
-                  {placing && <p class="field-hint">{t('setup.air.hint')}</p>}
-                </Field>
-              </div>
-            )}
-            {d.start === 'air' && !placing && (
-              <div class="start-height">
-                <Field label={t('setup.height')} id="setup-height">
-                  <Segmented<number>
-                    label={t('setup.height')}
-                    value={d.airHeight}
-                    onChange={(v) => set({ airHeight: v })}
-                    options={defaults.airHeights.map((h, i) => ({
-                      value: i,
-                      label: heightLabel(h),
-                    }))}
-                  />
-                </Field>
-              </div>
-            )}
-            {d.start === 'approach' && (
-              <div class="start-height">
-                <Field label={t('setup.approachDistance')} id="setup-approach">
-                  <Segmented<number>
-                    label={t('setup.approachDistance')}
-                    value={d.approachNm}
-                    onChange={(v) => set({ approachNm: v })}
-                    options={defaults.approachDistances.map((n) => ({
-                      value: n,
-                      label: t('setup.nm', { n }),
-                    }))}
-                  />
-                </Field>
-              </div>
-            )}
-          </div>
-
-          <Field label={t('setup.aircraft')} id="setup-aircraft">
-            <AircraftPicker
-              aircraft={aircraft}
-              selected={d.aircraft}
-              onSelect={(id) => set({ aircraft: id })}
-            />
-          </Field>
-
-          <TimePicker draft={d} airport={airport} onChange={(time) => set({ time })} />
-
-          <Field label={t('setup.weather')} id="setup-weather">
-            <Segmented<WeatherChoice>
-              label={t('setup.weather')}
-              variant="tiles"
-              value={d.weather}
-              onChange={(v) => set({ weather: v })}
-              options={WEATHER_CHOICES.map((w) => ({
-                value: w,
-                label: t(`weather.${w}`),
-                icon: WEATHER_ICON[w](),
-              }))}
-            />
-          </Field>
-
-          <Field label={t('setup.season')} id="setup-season">
-            <Segmented<SeasonChoice>
-              label={t('setup.season')}
-              value={d.season}
-              onChange={(v) => set({ season: v })}
-              options={SEASON_CHOICES.map((v) => ({ value: v, label: t(`season.${v}`) }))}
-            />
-          </Field>
-        </div>
-      </div>
-
-      <footer class="setup-foot">
-        <div class="setup-summary" aria-live="polite">
-          {airport ? (
-            <>
-              <span class="summary-main">
-                <span class="summary-icao">{(near ?? airport).icao}</span>
-                <span class="summary-name">{(near ?? airport).name}</span>
-              </span>
-              <span class="summary-sub">
-                {startText} · {timeText} · {t(`weather.${d.weather}`)}
-              </span>
-            </>
-          ) : (
-            <span class="summary-sub">{t('setup.problem.noAirport')}</span>
-          )}
-        </div>
-        <button
-          type="button"
-          class="btn btn--primary setup-go"
-          disabled={!plan}
-          aria-describedby={problem ? 'setup-problem' : undefined}
-          onClick={start}
-        >
-          {t('setup.go')}
-          <IconPlane size={20} />
-        </button>
-        {problem && (
-          <span id="setup-problem" class="visually-hidden">
-            {t(
-              problem === 'noAirport'
-                ? 'setup.problem.noAirport'
-                : problem === 'runway'
-                  ? 'setup.problem.runway'
-                  : 'setup.problem.noAircraft',
-            )}
-          </span>
-        )}
-        <p class="home-credits home-credits--inner">
-          <Credits />
-          <Version />
-        </p>
-      </footer>
-    </main>
+        );
+      })}
+    </div>
   );
 }

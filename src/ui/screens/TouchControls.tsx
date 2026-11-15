@@ -1,15 +1,8 @@
-import { signal, useComputed, useSignal, useSignalEffect } from '@preact/signals';
+import { useComputed, useSignal, useSignalEffect } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { game, settings, touchInput } from '../api';
-import {
-  IconBrake,
-  IconChevronDown,
-  IconChevronUp,
-  IconGear,
-  IconReverse,
-} from '../components/icons';
-import { typeFeatures } from '../fleet';
+import { IconBrake } from '../components/icons';
 import { throttleLabel } from '../fleetText';
 import { formatPercent } from '../format';
 import { t } from '../i18n';
@@ -17,19 +10,11 @@ import { flownAircraft, pilotOut } from '../nav';
 import {
   clampToCircle,
   leverValue,
-  sliderAxis,
   stickAxes,
   stickToControls,
   tiltAngles,
   tiltAxes,
-  travelValue,
 } from '../touchMath';
-
-/** Portrait or not: the speed brake lever lies down in portrait, it stands in landscape. */
-const PORTRAIT = '(orientation: portrait)';
-const portrait = signal(typeof matchMedia !== 'undefined' && matchMedia(PORTRAIT).matches);
-if (typeof matchMedia !== 'undefined')
-  matchMedia(PORTRAIT).addEventListener('change', (e) => (portrait.value = e.matches));
 
 /**
  * One pointer per control: each control captures the pointer that started on it and ignores
@@ -182,145 +167,6 @@ function Throttle() {
   );
 }
 
-/**
- * The speed brake: a lever that stays where it is left, like the throttle. It shows the
- * aircraft's lever while not touched, so the keys show here too.
- */
-function SpeedbrakeLever() {
-  const track = useRef<HTMLDivElement>(null);
-  const handle = useRef<HTMLDivElement>(null);
-  const owner = usePointerOwner();
-  const dragging = useSignal(false);
-  const local = useSignal(0);
-  const flat = portrait.value;
-  const shown = useComputed(() =>
-    dragging.value
-      ? local.value
-      : (game.levers.value?.speedbrake ?? touchInput.speedbrake.value ?? 0),
-  );
-  const out = useComputed(() => shown.value > 0.02);
-  useSignalEffect(() => {
-    const v = shown.value;
-    const el = track.current;
-    el?.setAttribute('aria-valuenow', String(Math.round(v * 100)));
-    el?.style.setProperty('--level', String(v));
-    if (handle.current && el) {
-      const travel = flat
-        ? el.clientWidth - handle.current.offsetWidth
-        : el.clientHeight - handle.current.offsetHeight;
-      handle.current.style.transform = flat
-        ? `translate3d(${(v * travel).toFixed(1)}px, 0, 0)`
-        : `translate3d(0, ${(v * travel).toFixed(1)}px, 0)`;
-    }
-  });
-  const set = (e: PointerEvent) => {
-    const el = track.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const h = handle.current;
-    const v = flat
-      ? travelValue(e.clientX, r.left + (h?.offsetWidth ?? 0) / 2, r.width - (h?.offsetWidth ?? 0))
-      : travelValue(
-          e.clientY,
-          r.top + (h?.offsetHeight ?? 0) / 2,
-          r.height - (h?.offsetHeight ?? 0),
-        );
-    local.value = v;
-    touchInput.speedbrake.value = v;
-  };
-  const release = (e: PointerEvent) => {
-    if (e.pointerId !== owner.current) return;
-    owner.current = null;
-    dragging.value = false;
-  };
-  return (
-    <div class={`speedbrake${flat ? ' is-flat' : ''}`}>
-      <span class="touch-caption caps" aria-hidden="true">
-        SPD BRK
-      </span>
-      <div
-        ref={track}
-        class={`speedbrake-track${dragging.value ? ' is-active' : ''}${out.value ? ' is-out' : ''}`}
-        role="slider"
-        aria-label={t('touch.speedbrake')}
-        aria-orientation={flat ? 'horizontal' : 'vertical'}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        onPointerDown={(e) => {
-          if (owner.current !== null) return;
-          e.preventDefault();
-          owner.current = e.pointerId;
-          track.current?.setPointerCapture(e.pointerId);
-          dragging.value = true;
-          set(e);
-        }}
-        onPointerMove={(e) => {
-          if (e.pointerId === owner.current) set(e);
-        }}
-        onPointerUp={release}
-        onPointerCancel={release}
-        onLostPointerCapture={release}
-      >
-        <span class="speedbrake-fill" aria-hidden="true" />
-        <div class="speedbrake-handle" ref={handle} aria-hidden="true" />
-      </div>
-    </div>
-  );
-}
-
-function Rudder() {
-  const track = useRef<HTMLDivElement>(null);
-  const knob = useRef<HTMLDivElement>(null);
-  const owner = usePointerOwner();
-  const set = (x: number) => {
-    const el = track.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const v = sliderAxis(x, r.left, r.width);
-    touchInput.yaw.value = v;
-    const k = Math.max(-1, Math.min(1, ((x - r.left) / r.width) * 2 - 1));
-    if (knob.current)
-      knob.current.style.transform = `translate3d(${((k * (r.width - 48)) / 2).toFixed(1)}px,0,0)`;
-  };
-  const release = (e: PointerEvent) => {
-    if (e.pointerId !== owner.current) return;
-    owner.current = null;
-    track.current?.classList.remove('is-active');
-    if (knob.current) knob.current.style.transform = '';
-    touchInput.yaw.value = null;
-  };
-  return (
-    <div class="rudder">
-      <span class="touch-caption caps" aria-hidden="true">
-        {t('touch.rudder')}
-      </span>
-      <div
-        ref={track}
-        class="rudder-track"
-        role="group"
-        aria-label={t('touch.rudder')}
-        onPointerDown={(e) => {
-          if (owner.current !== null) return;
-          e.preventDefault();
-          owner.current = e.pointerId;
-          track.current?.setPointerCapture(e.pointerId);
-          track.current?.classList.add('is-active');
-          set(e.clientX);
-        }}
-        onPointerMove={(e) => {
-          if (e.pointerId === owner.current) set(e.clientX);
-        }}
-        onPointerUp={release}
-        onPointerCancel={release}
-        onLostPointerCapture={release}
-      >
-        <span class="rudder-centre" aria-hidden="true" />
-        <div class="rudder-knob" ref={knob} aria-hidden="true" />
-      </div>
-    </div>
-  );
-}
-
 /** A button that acts on touch-down (no waiting for the finger to lift), for flight. */
 function PadButton(props: {
   label: string;
@@ -368,70 +214,19 @@ function PadButton(props: {
   );
 }
 
-function Buttons({ reverse }: { reverse: boolean }) {
-  // Computed: the buttons re-render only when a state flips, not with every telemetry update.
-  const gear = useComputed(() => {
-    const g = game.telemetry.value?.gear ?? 1;
-    return g >= 0.99 ? 'down' : g <= 0.01 ? 'up' : 'moving';
-  });
+/** The wheel brake beside the throttle: held, it brakes. */
+function BrakeButton() {
   const braking = useComputed(() => touchInput.brake.value || !!game.levers.value?.brake);
-  const reversing = useComputed(() => touchInput.reverse.value || !!game.levers.value?.reverse);
-  const meter = useRef<HTMLElement>(null);
-  useSignalEffect(() => {
-    const f = game.telemetry.value?.flaps ?? game.levers.value?.flaps ?? 0;
-    if (meter.current) meter.current.style.transform = `scaleX(${f})`;
-  });
-  const gearState = gear.value;
-  const brake = braking.value;
   return (
-    <div class="pad">
-      <PadButton
-        label={t('touch.flapsUp')}
-        class="pad-flaps-up"
-        onPress={() => touchInput.flapsUp.value++}
-      >
-        <IconChevronUp size={22} />
-        <span class="pad-text">{t('hud.flaps')}</span>
-      </PadButton>
-      <PadButton
-        label={t('touch.gear')}
-        class={`pad-gear is-${gearState}`}
-        onPress={() => touchInput.gearToggle.value++}
-      >
-        <IconGear size={22} />
-        <span class="pad-text">{t('hud.gear')}</span>
-      </PadButton>
-      <PadButton
-        label={t('touch.flapsDown')}
-        class="pad-flaps-down"
-        onPress={() => touchInput.flapsDown.value++}
-      >
-        <IconChevronDown size={22} />
-        <span class="pad-flaps-meter" aria-hidden="true">
-          <i ref={meter} />
-        </span>
-      </PadButton>
-      <PadButton
-        label={t('touch.brake')}
-        class={`pad-brake${brake ? ' is-on' : ''}`}
-        onPress={() => (touchInput.brake.value = true)}
-        onRelease={() => (touchInput.brake.value = false)}
-      >
-        <IconBrake size={22} />
-        <span class="pad-text">{t('hud.brake')}</span>
-      </PadButton>
-      {reverse && (
-        <PadButton
-          label={t('touch.reverse')}
-          class={`pad-rev${reversing.value ? ' is-on' : ''}`}
-          onPress={() => (touchInput.reverse.value = true)}
-          onRelease={() => (touchInput.reverse.value = false)}
-        >
-          <IconReverse size={22} />
-          <span class="pad-text">REV</span>
-        </PadButton>
-      )}
-    </div>
+    <PadButton
+      label={t('touch.brake')}
+      class={`pad-brake${braking.value ? ' is-on' : ''}`}
+      onPress={() => (touchInput.brake.value = true)}
+      onRelease={() => (touchInput.brake.value = false)}
+    >
+      <IconBrake size={22} />
+      <span class="pad-text">{t('hud.brake')}</span>
+    </PadButton>
   );
 }
 
@@ -465,7 +260,10 @@ function useTilt(enabled: boolean) {
   }, [enabled]);
 }
 
-/** On-screen flight controls for touch: stick, rudder, throttle and the system buttons. */
+/**
+ * On-screen flight controls for touch: the stick on the left, the throttle with the brake on
+ * the right. Flaps, gear, speed brake and reverse are in the HUD's "more" sheet.
+ */
 export function TouchControls() {
   useTilt(settings.tiltSteering.value);
   useEffect(() => {
@@ -481,8 +279,6 @@ export function TouchControls() {
       touchInput.reverse.value = false;
     };
   }, []);
-  // Speed brake and reverse only for the types that have them: the Cessna's layout stays.
-  const f = typeFeatures(flownAircraft.value);
   // Outside the aircraft only the stick is left: it steers the canopy and walks the pilot.
   if (pilotOut.value)
     return (
@@ -497,16 +293,16 @@ export function TouchControls() {
     );
   return (
     <div
-      class={`touch${game.view.value === 'cockpit' ? ' is-cockpit' : ''}${f.speedbrake ? ' has-sb' : ''}${f.reverse ? ' has-rev' : ''}`}
+      class={`touch${game.view.value === 'cockpit' ? ' is-cockpit' : ''}`}
       aria-label={t('touch.controls')}
       role="group"
       onContextMenu={(e) => e.preventDefault()}
     >
       <Stick />
-      <Rudder />
-      <Buttons reverse={f.reverse} />
-      {f.speedbrake && <SpeedbrakeLever />}
-      <Throttle />
+      <div class="touch-right">
+        <BrakeButton />
+        <Throttle />
+      </div>
     </div>
   );
 }
