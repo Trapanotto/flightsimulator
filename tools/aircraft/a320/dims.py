@@ -118,5 +118,5 @@ NOSE_STROKE = 0.14
 
 # Cockpit (captain's design eye position).
 FLOOR_WL = 3.62
-EYE = (0.53, 3.72, 4.83)
+EYE = (0.53, 3.72, 4.95)
 SEAT_BL = 0.53

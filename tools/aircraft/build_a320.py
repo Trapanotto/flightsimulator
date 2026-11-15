@@ -58,11 +58,12 @@ SCRATCH = os.path.join(ROOT, ".scratch", "preview")
 STATIC_JOIN = {
     "Airframe": ["Fuselage", "Wing", "WingCentreTE", "WingTipTE_L", "WingTipTE_R", "Fence_L", "Fence_R",
                  "FlapTracks", "Fin", "FinCap", "TailFairings", "BellyFairing", "Nacelle_L", "Nacelle_R",
-                 "Pylon_L", "Pylon_R", "Strake_L", "Strake_R"],
+                 "Pylon_L", "Pylon_R", "Strake_L", "Strake_R", "NoseWell", "MainWells"],
+    "Antennas": ["Antennas", "Wicks", "Wipers"],
     "EngineMetal": ["EngineMetal_L", "EngineMetal_R"],
     "EngineDark": ["EngineDark_L", "EngineDark_R"],
     "EngineCore": ["EngineCore_L", "EngineCore_R"],
-    "EngineHot": ["EngineHot_L", "EngineHot_R"],
+    "EngineHot": ["EngineHot_L", "EngineHot_R", "ApuExhaust"],
 }
 
 
@@ -115,6 +116,10 @@ def build_geometry(with_cockpit=True):
     t = time.time()
     skin, glass, lining = fuselage.build(col, mats)
     parts.update(Fuselage=skin, Glass=glass, CabinLining=lining)
+    # One material for the lining and its window reveals: one draw call less.
+    for p in lining.data.polygons:
+        p.material_index = 0
+    lining.data.materials.pop(index=1)
     parts["NoseWell"] = fuselage.nose_well(col, mats)
     parts["BellyFairing"] = fuselage.belly(col, mats)
     parts["MainWells"] = fuselage.wheel_wells(col, mats)

@@ -22,7 +22,7 @@ from .fuselage import T
 
 # --- main panel: leans back 13 degrees, lower edge at FS 3.06, WL 3.90 ----------------------
 TILT = math.radians(13)
-PANEL_O = np.array([0.0, 3.06, 3.90])
+PANEL_O = np.array([0.0, 3.06, 4.00])
 VX = np.array([1.0, 0.0, 0.0])
 VV = np.array([0.0, -math.sin(TILT), math.cos(TILT)])
 VN = np.array([0.0, math.cos(TILT), math.sin(TILT)])
@@ -42,7 +42,7 @@ def pp(bl, v, s=0.0):
 
 
 # --- glareshield face: vertical, facing aft -----------------------------------------------------
-GLARE_O = np.array([0.0, 2.905, 4.505])
+GLARE_O = np.array([0.0, 2.905, 4.605])
 GLARE_R = np.column_stack([(-1.0, 0, 0), (0, 0, 1.0), (0, 1.0, 0)])
 
 
@@ -53,7 +53,7 @@ def gg(bl, dz, s=0.0):
 # --- overhead: on the roof, facing down and aft. Looking up at it from the seat the top of the
 # picture is aft: the panel's "up" is aft, so its labels read upright (as on the PC-12).
 OVH_TILT = math.radians(17)
-OVH_O = np.array([0.0, 3.50, 5.44])                               # forward edge, centre
+OVH_O = np.array([0.0, 3.15, 5.30])                               # forward edge, centre
 OV_V = np.array([0.0, math.cos(OVH_TILT), math.sin(OVH_TILT)])    # up on the panel = aft
 OV_N = np.array([0.0, math.sin(OVH_TILT), -math.cos(OVH_TILT)])   # out of the panel: down, aft
 OVH_R = np.column_stack([(-1.0, 0, 0), OV_V, OV_N])
@@ -68,15 +68,15 @@ def oo(bl, d, s=0.0):
 
 # --- pedestal: the sloping MCDU face, then the flat top ----------------------------------------
 PED_HALF = 0.255
-PED_TOP_WL = 3.82
-MCDU_TOP = np.array([0.0, 3.10, 3.975])         # forward (upper) edge of the MCDU face
+PED_TOP_WL = 3.92
+MCDU_TOP = np.array([0.0, 3.10, 4.075])         # forward (upper) edge of the MCDU face
 MCDU_BOT = np.array([0.0, 3.43, PED_TOP_WL])
 _mv = (MCDU_TOP - MCDU_BOT) / np.linalg.norm(MCDU_TOP - MCDU_BOT)
 MV = _mv                                            # up the face (forward)
 MN = np.cross(np.array([-1.0, 0, 0]), MV)           # out of the face: up and aft
 MCDU_R = np.column_stack([(-1.0, 0, 0), MV, MN])
 MCDU_LEN = float(np.linalg.norm(MCDU_TOP - MCDU_BOT))
-PED_FS = (3.43, 4.72)
+PED_FS = (3.43, 4.48)
 TOP_R = np.column_stack([(-1.0, 0, 0), (0, -1.0, 0), (0, 0, 1.0)])   # x right, y forward, z up
 
 
@@ -89,7 +89,7 @@ def tt(bl, fs, s=0.0):
     return np.array([bl, fs, PED_TOP_WL + s])
 
 
-CONSOLE_WL = 4.02
+CONSOLE_WL = 4.10
 
 
 def plate(origin, frame, w, h, depth, rad=0.004):
@@ -151,9 +151,9 @@ def glareshield(b):
     rows = []
     us = np.linspace(-1, 1, 25)
     top = pp(0, PANEL_H)
-    prof = [(top[1] + 0.01, top[2] - 0.01), (GLARE_O[1] + 0.005, 4.445), (GLARE_O[1], 4.45),
-            (GLARE_O[1] - 0.002, 4.575), (GLARE_O[1] - 0.05, 4.60), (GLARE_O[1] - 0.20, 4.615),
-            (2.50, 4.62)]
+    prof = [(top[1] + 0.01, top[2] - 0.01), (GLARE_O[1] + 0.005, 4.545), (GLARE_O[1], 4.55),
+            (GLARE_O[1] - 0.002, 4.675), (GLARE_O[1] - 0.05, 4.70), (GLARE_O[1] - 0.20, 4.66),
+            (2.42, 4.53), (2.14, 4.44)]
     for u in us:
         row = []
         for fs, wl in prof:
@@ -196,7 +196,7 @@ def pedestal(b):
     b.add("panel", (np.array(pts), faces))
     b.add("korry", plate(mm(0, MCDU_LEN / 2), MCDU_R, 2 * hw - 0.01, MCDU_LEN - 0.01, 0.004, 0.004))
     # The flat top's panels (thrust quadrant, engine, ECAM, radios), each a dark plate.
-    for fs0, fs1 in ((3.44, 3.84), (3.85, 3.97), (3.98, 4.08), (4.09, 4.31), (4.32, 4.46), (4.47, 4.71)):
+    for fs0, fs1 in ((3.44, 3.84), (3.85, 3.97), (3.98, 4.08), (4.09, 4.255), (4.26, 4.345), (4.35, 4.47)):
         b.add("korry", plate(tt(0, (fs0 + fs1) / 2), TOP_R, 2 * hw - 0.01, fs1 - fs0 - 0.004, 0.004, 0.004))
     # Thrust quadrant housing with the slots and detent marks.
     b.add("panel", M.rounded_box((0.0, 3.64, PED_TOP_WL + 0.03), (0.20, 0.38, 0.06), 0.02, 2))
@@ -223,15 +223,15 @@ def floor_and_walls(b):
 
 def seats(b):
     for bl in (D.SEAT_BL, -D.SEAT_BL):
-        b.add("sheepskin", M.rounded_box((bl, 4.12, 3.95), (0.50, 0.50, 0.13), 0.05, 3))
+        b.add("sheepskin", M.rounded_box((bl, 4.12, 4.05), (0.50, 0.50, 0.13), 0.05, 3))
         back = M.rounded_box((0.0, 0.0, 0.0), (0.52, 0.13, 0.78), 0.06, 3)
         rot = M.rot_axis((1, 0, 0), math.radians(-12))
-        b.add("sheepskin", (M.transform(back[0], rot=rot, offset=(bl, 4.44, 4.40)), back[1]))
+        b.add("sheepskin", (M.transform(back[0], rot=rot, offset=(bl, 4.44, 4.50)), back[1]))
         head = M.rounded_box((0.0, 0.0, 0.0), (0.30, 0.11, 0.20), 0.045, 3)
-        b.add("sheepskin", (M.transform(head[0], rot=rot, offset=(bl, 4.53, 4.90)), head[1]))
-        b.add("steel", M.rounded_box((bl, 4.15, 3.68), (0.30, 0.40, 0.14), 0.02, 1))
+        b.add("sheepskin", (M.transform(head[0], rot=rot, offset=(bl, 4.53, 5.00)), head[1]))
+        b.add("steel", M.rounded_box((bl, 4.15, 3.76), (0.30, 0.40, 0.26), 0.02, 1))
         for dx in (-0.29, 0.29):
-            b.add("interior_dark", M.rounded_box((bl + dx, 4.24, 4.18), (0.06, 0.34, 0.05), 0.018, 2))
+            b.add("interior_dark", M.rounded_box((bl + dx, 4.24, 4.28), (0.06, 0.34, 0.05), 0.018, 2))
 
 
 def sidesticks(b):

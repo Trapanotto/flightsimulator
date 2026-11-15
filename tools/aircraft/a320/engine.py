@@ -158,9 +158,10 @@ def pylon(side):
     for fs in np.linspace(11.9, 18.9, 30):
         lower_wing, _ = W.surface_point(bl, min(fs, W._le(bl)[0] + 0.65 * W.chord(bl)))
         le_fs = W._le(bl)[0]
-        if fs < le_fs + 0.2:
-            top = W._le(bl)[1] + 0.05 + 0.25 * max(0.0, (fs - 12.6) / (le_fs - 12.6))
-            top = min(top, lower_wing[2] + 0.3) if fs > le_fs - 0.3 else top
+        if fs < le_fs:
+            # Ahead of the wing the pylon's top rises from the nacelle to the leading edge.
+            t = min(1.0, max(0.0, (fs - 11.9) / (le_fs - 11.9)))
+            top = (top_nac + 0.10) + t ** 0.7 * (W._le(bl)[1] - 0.06 - (top_nac + 0.10))
         else:
             top = lower_wing[2] + 0.05
         if fs < 16.0:

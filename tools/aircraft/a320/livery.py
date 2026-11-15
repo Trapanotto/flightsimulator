@@ -198,7 +198,7 @@ def compute(pos, nrm, pid, cov, ao, names):
     bmp, gpx, pad = B.text_bitmap(REG, _font(False), bold=0.01)
     rh = 0.30
     rw = rh * (bmp.shape[1] - 2 * pad) / gpx
-    r_fs0, r_wl0 = 27.2, WIN_WL - 0.10
+    r_fs0, r_wl0 = 31.1, WIN_WL - 0.15
     cov_l = B.sample_bitmap(bmp, fs - r_fs0, wl - r_wl0, rh, gpx, pad)
     cov_r = B.sample_bitmap(bmp, (r_fs0 + rw) - fs, wl - r_wl0, rh, gpx, pad)
     for m, c in ((left, cov_l), (right, cov_r)):

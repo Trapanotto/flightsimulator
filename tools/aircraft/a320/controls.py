@@ -451,9 +451,10 @@ def thrust_quadrant(P):
                 side_frame)
     # Hit boxes over the arc each lever sweeps (the lever's angle tells the side).
     for n, bl in ((1, 0.045), (2, -0.045)):
-        P.hit(f"throttle{n}", tt(bl, pivot_fs - 0.01, TOP_S + 0.16), (0.022, 0.11, 0.05), frame=np.eye(3),
+        P.hit(f"throttle{n}", tt(bl, pivot_fs - 0.01, TOP_S + 0.17), (0.020, 0.11, 0.04), frame=np.eye(3),
               side=np.array([0, -1.0, 0]))
-    P.hit("reverse", tt(0.0, pivot_fs - 0.06, TOP_S + 0.155), (0.028, 0.012, 0.016), frame=np.eye(3))
+    # Ahead of the handles, where the latches are (the levers' own boxes end behind them).
+    P.hit("reverse", tt(0.0, pivot_fs - 0.135, TOP_S + 0.20), (0.034, 0.012, 0.02), frame=np.eye(3))
     P.hit("athrDisconnect", tt(0.072, pivot_fs - 0.01, TOP_S + 0.175), (0.006, 0.09, 0.03), frame=np.eye(3))
     for text, fs in (("TOGA", pivot_fs - 0.105), ("FLX MCT", pivot_fs - 0.075), ("CL", pivot_fs - 0.035),
                      ("IDLE", pivot_fs + 0.045), ("REV", pivot_fs + 0.08)):
@@ -475,7 +476,7 @@ def thrust_quadrant(P):
     label(P, "SPEED BRAKE", tt(bl, f0 - 0.028, TOP_S), 0.0036, TOP_R)
     label(P, "ARM", tt(bl - 0.028, f0 - 0.012, TOP_S), 0.0030, TOP_R)
     # Flap lever (right): five gates, 0 forward to FULL aft.
-    bl, f0, travel = -0.165, 3.48, 0.13
+    bl, f0, travel = -0.180, 3.48, 0.13
     lever_slot(P, bl, f0, f0 + travel)
     for i in range(5):
         K.static(P.b, "steel", K.box(0, 0, 0.001, 0.022, 0.003, 0.002), tt(bl, f0 + travel * i / 4, TOP_S), TOP_R)
@@ -483,7 +484,7 @@ def thrust_quadrant(P):
     fl = M.merge([M.cylinder((0, 0, -0.01), (0, 0, 0.075), 0.0055, 8),
                   M.rounded_box((0, 0, 0.085), (0.050, 0.024, 0.016), 0.007, 2)])
     K.attach(P.b, "Ctl_flaps_mesh", K.mesh_data("flap_handle", fl, P.b.mats["placard"]), piv, TOP_R)
-    P.hit("flaps", tt(bl, f0 + travel / 2, TOP_S + 0.08), (0.028, travel / 2 + 0.014, 0.016), frame=TOP_R,
+    P.hit("flaps", tt(bl, f0 + travel / 2, TOP_S + 0.09), (0.030, travel / 2 + 0.014, 0.018), frame=TOP_R,
           side=np.array([0, 1.0, 0]), extra={"lever": 1})
     for i, text in enumerate(("0", "1", "2", "3", "FULL")):
         label(P, text, tt(bl - 0.032, f0 + travel * i / 4, TOP_S), 0.0040, TOP_R)
@@ -541,31 +542,32 @@ def rmp(P):
     s = TOP_S
     for n, x0 in ((1, 0.250), (2, -0.010)):
         u = lambda d, x0=x0: x0 - d  # noqa: E731
-        for row, fs, kind in ((0, 4.130, "COM"), (1, 4.185, "NAV")):
+        for row, fs, kind in ((0, 4.118, "COM"), (1, 4.165, "NAV")):
             P.display(f"RMP{n}_{kind}", tt(u(0.058), fs, s + 0.0004), *WINDOWS[f"RMP{n}_{kind}"], frame=TOP_R)
             low = kind.lower()
             active_hit(P, f"{low}{n}Active", tt(u(0.036), fs, s + 0.002))
             button(P, f"{low}{n}Swap", tt(u(0.122), fs, s), TOP_R, w=0.016, h=0.010)
             dual_knob(P, f"{low}{n}Standby", tt(u(0.165), fs, s), TOP_R, 1000)
-            label(P, "ACTIVE", tt(u(0.036), fs + 0.012, s), 0.0026, TOP_R)
-            label(P, "STBY/CRS", tt(u(0.082), fs + 0.012, s), 0.0026, TOP_R)
+            label(P, "ACTIVE", tt(u(0.036), fs + 0.0115, s), 0.0024, TOP_R)
+            label(P, "STBY/CRS", tt(u(0.082), fs + 0.0115, s), 0.0024, TOP_R)
             label(P, f"VHF {n}" if kind == "COM" else f"NAV {n}", tt(u(0.205), fs, s), 0.0028, TOP_R, BLUE)
-        fs = 4.255
+        fs = 4.215
         knob(P, f"obs{n}", tt(u(0.165), fs, s), TOP_R, r=0.0085, length=0.011, shape="crs")
         knob_hit(P, f"obs{n}", tt(u(0.165), fs, s), TOP_R, 0.0085, 0.011)
-        label(P, f"CRS {n}", tt(u(0.165), fs + 0.016, s), 0.0028, TOP_R)
-        for i in range(4):
-            dummy_korry(P, tt(u(0.025 + i * 0.03), fs, s), TOP_R, w=0.018, h=0.012)
-        label(P, f"RMP {n}", tt(u(0.12), 4.29, s), 0.0030, TOP_R)
+        label(P, f"CRS {n}", tt(u(0.165), fs + 0.0155, s), 0.0026, TOP_R)
+        if n == 1:
+            for i in range(4):
+                dummy_korry(P, tt(u(0.025 + i * 0.03), fs, s), TOP_R, w=0.018, h=0.012)
+        label(P, f"RMP {n}", tt(u(0.12), 4.245, s), 0.0028, TOP_R)
     # ADF on the second panel.
-    P.display("ADF", tt(-0.085, 4.285, s + 0.0004), *WINDOWS["ADF"], frame=TOP_R)
-    dual_knob(P, "adfFrequency", tt(-0.205, 4.285, s), TOP_R, 100)
-    label(P, "ADF", tt(-0.145, 4.285, s), 0.0030, TOP_R, BLUE)
+    P.display("ADF", tt(-0.050, 4.215, s + 0.0004), *WINDOWS["ADF"], frame=TOP_R)
+    dual_knob(P, "adfFrequency", tt(-0.110, 4.215, s), TOP_R, 100)
+    label(P, "ADF", tt(-0.050, 4.229, s), 0.0026, TOP_R, BLUE)
 
 
 def atc(P):
     s = TOP_S
-    fs = 4.375
+    fs = 4.300
     P.display("ATC", tt(0.170, fs, s + 0.0004), *WINDOWS["ATC"], frame=TOP_R)
     grp = P.pivot("Ctl_xpdrCode", tt(0.03, fs, s))
     for i in range(4):
@@ -579,37 +581,35 @@ def atc(P):
               suffix="" if i == 0 else f"__d{i}")
     rotary(P, "xpdrMode", tt(-0.120, fs, s), TOP_R, (60.0, 20.0, -20.0, -60.0), ["OFF", "STBY", "ON", "ALT"],
            r=0.009, lh=0.0028)
-    button(P, "xpdrIdent", tt(0.170, fs + 0.032, s), TOP_R, w=0.022, h=0.012)
-    label(P, "IDENT", tt(0.170, fs + 0.047, s), 0.0028, TOP_R)
-    label(P, "ATC", tt(0.170, fs - 0.016, s), 0.0034, TOP_R, BLUE)
-    label(P, "CODE", tt(0.065, fs - 0.016, s), 0.0028, TOP_R)
-    for i in range(3):
-        dummy_korry(P, tt(-0.20 + i * 0.0, fs - 0.03 + i * 0.03, s), TOP_R, w=0.016, h=0.012)
+    button(P, "xpdrIdent", tt(0.225, fs, s), TOP_R, w=0.016, h=0.012)
+    label(P, "IDENT", tt(0.225, fs + 0.016, s), 0.0024, TOP_R)
+    label(P, "ATC", tt(0.170, fs - 0.0145, s), 0.0030, TOP_R, BLUE)
+    label(P, "CODE", tt(0.065, fs - 0.0155, s), 0.0026, TOP_R)
+    dummy_korry(P, tt(-0.20, fs, s), TOP_R, w=0.016, h=0.012)
 
 
 def aft_pedestal(P):
     s = TOP_S
-    fs = 4.545
+    fs = 4.405
     knob(P, "rudderTrim", tt(0.140, fs, s), TOP_R, r=0.011, length=0.014, shape="rud_trim")
     knob_hit(P, "rudderTrim", tt(0.140, fs, s), TOP_R, 0.011, 0.014)
-    P.display("RUDTRIM", tt(0.140, fs + 0.04, s + 0.0004), *WINDOWS["RUDTRIM"], frame=TOP_R)
-    dummy_korry(P, tt(0.075, fs, s), TOP_R)
-    label(P, "RUD TRIM", tt(0.140, fs - 0.022, s), 0.0032, TOP_R)
-    label(P, "RESET", tt(0.075, fs - 0.016, s), 0.0026, TOP_R)
-    label(P, "NOSE L    NOSE R", tt(0.140, fs + 0.018, s), 0.0024, TOP_R)
+    P.display("RUDTRIM", tt(0.065, fs, s + 0.0004), *WINDOWS["RUDTRIM"], frame=TOP_R)
+    dummy_korry(P, tt(0.205, fs, s), TOP_R)
+    label(P, "RUD TRIM", tt(0.140, fs + 0.024, s), 0.0030, TOP_R)
+    label(P, "RESET", tt(0.205, fs - 0.015, s), 0.0024, TOP_R)
+    label(P, "L    R", tt(0.140, fs - 0.020, s), 0.0024, TOP_R)
     # Parking brake: a T-handle turned a quarter turn.
-    at = tt(-0.110, 4.62, s)
+    at = tt(-0.140, 4.41, s)
     piv = P.pivot("Ctl_parkingBrake", at, axis=np.array([0, 0, 1.0]), props={"detents": [0.0, -90.0]})
     h = M.merge([M.cylinder((0, 0, 0), (0, 0, 0.03), 0.008, 10),
                  M.rounded_box((0, 0, 0.035), (0.075, 0.020, 0.016), 0.007, 2)])
     K.attach(P.b, "Ctl_parkingBrake_mesh", K.mesh_data("park_brake", h, P.b.mats["plastic_black"]), piv, TOP_R)
     P.hit("parkingBrake", at + np.array([0, 0, 0.032]), (0.042, 0.042, 0.016), frame=np.eye(3))
-    label(P, "PARK BRK", tt(-0.110, 4.665, s), 0.0034, TOP_R)
-    label(P, "ON", tt(-0.110, 4.582, s), 0.0030, TOP_R)
-    label(P, "OFF", tt(-0.165, 4.62, s), 0.0030, TOP_R)
-    for i in range(3):
-        dummy_knob(P, tt(0.03 - i * 0.06, 4.50, s), TOP_R, 0.006)
-    label(P, "WX RADAR", tt(-0.03, 4.48, s), 0.0030, TOP_R)
+    label(P, "PARK BRK", tt(-0.140, 4.452, s), 0.0030, TOP_R)
+    label(P, "ON", tt(-0.140, 4.372, s), 0.0026, TOP_R)
+    label(P, "OFF", tt(-0.195, 4.41, s), 0.0026, TOP_R)
+    for i in range(2):
+        dummy_knob(P, tt(-0.01 - i * 0.04, 4.41, s), TOP_R, 0.006)
 
 
 def sidestick_button(P):

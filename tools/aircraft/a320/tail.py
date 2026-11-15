@@ -125,6 +125,6 @@ def apu_exhaust(col, mats):
     outer = M.lathe([(-0.05, 0.27), (0.12, 0.24), (0.37, 0.20), (0.37, 0.17), (0.20, 0.17)], c, (0, 1.0, 0),
                     n=24, close_start=False, close_end=False)
     inner = M.lathe([(0.20, 0.17), (0.0, 0.0)], c, (0, 1.0, 0), n=24, close_start=False, close_end=False)
-    a = M.make_object("ApuExhaust", *outer, col, mats["metal_dark"], sharp_angle=50)
-    b = M.make_object("ApuExhaustIn", *inner, col, mats["intake"], sharp_angle=50)
+    a = M.make_object("ApuExhaust", *outer, col, mats["exhaust"], sharp_angle=50)
+    b = M.make_object("ApuExhaustIn", *inner, col, mats["exhaust"], sharp_angle=50)
     return M.join([a, b], "ApuExhaust")

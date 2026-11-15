@@ -43,14 +43,14 @@ def build(col, mats, parts):
     # Wipers: parked along the lower frame of each windshield, pointing inboard.
     wip = []
     for side in (1, -1):
-        p0 = np.array([side * 0.95, 0.0, 4.72])
+        p0 = np.array([side * 0.95, 0.0, 4.58])
         p0[1] = _windshield_fs(p0[0], p0[2]) - 0.02
-        p1 = np.array([side * 0.25, 0.0, 4.68])
+        p1 = np.array([side * 0.25, 0.0, 4.53])
         p1[1] = _windshield_fs(p1[0], p1[2]) - 0.02
         wip.append(M.tube_path([p0, p1], 0.012, 6))
-        wip.append(M.cylinder(p0 + np.array([0, 0.03, -0.02]), p0 + np.array([0, -0.04, 0.02]), 0.03, 10))
+        wip.append(M.cylinder(p0 + np.array([0, 0.03, -0.02]), p0 + np.array([0, -0.03, 0.02]), 0.018, 10))
     v, f = M.merge(wip)
-    parts["Wipers"] = M.make_object("Wipers", v, f, col, mats["plastic_black"], sharp_angle=40)
+    parts["Wipers"] = M.make_object("Wipers", v, f, col, mats["antenna"], sharp_angle=40)
     parts["ApuExhaust"] = tail.apu_exhaust(col, mats)
     return lights(col, mats, parts)
 

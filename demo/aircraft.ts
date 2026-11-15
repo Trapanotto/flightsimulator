@@ -68,6 +68,11 @@ const demoWindow = window as unknown as {
 };
 
 const q = new URLSearchParams(location.search);
+// The A320 has a page of its own (scene and framings for a 37 m aircraft, its own fakes).
+if (q.get('type') === 'a320') {
+  await import('./aircraftA320');
+  await new Promise<void>(() => {});
+}
 const type = q.get('type') === 'pc12' ? 'pc12' : 'c172';
 const pc12 = type === 'pc12';
 const view = q.get('view') ?? 'front-left';

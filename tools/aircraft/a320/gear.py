@@ -67,9 +67,10 @@ def main(col, mats, parts, side, sfx):
                 d1 + np.array([0, -0.26, 0])]
     dv = np.array(door_pts + [p + out * 0.025 for p in door_pts])
     df = [(0, 1, 2, 3), (7, 6, 5, 4), (0, 4, 5, 1), (1, 5, 6, 2), (2, 6, 7, 3), (3, 7, 4, 0)]
-    door = M.make_object(f"MainLegDoor_{sfx}", dv, df, col, mats["paint"], smooth=False, origin=M.P(*pv))
+    # The leg door is painted like the leg: one mesh (one draw) with it.
+    door = M.make_object(f"MainLegDoor_{sfx}", dv, df, col, mats["gear_paint"], smooth=False, origin=M.P(*pv))
     M.parent_keep(door, gear)
-    parts[f"MainLegDoor_{sfx}"] = door
+    M.join([lo, door], f"MainLeg_{sfx}")
     # The oleo: piston, axle beam and wheels slide out of the cylinder when unloaded.
     oleo = M.empty(f"MainOleo_{sfx}", col, M.P(*collar),
                    props={"slide": [c * D.MAIN_STROKE for c in M.model_axis(*down)]})
@@ -81,9 +82,8 @@ def main(col, mats, parts, side, sfx):
             # Torque links.
             M.tube_path([collar + np.array([0, -0.16, 0.0]), 0.5 * (collar + axle) + np.array([0, -0.34, 0]),
                          axle + np.array([0, -0.16, 0.18])], 0.035, 8)]
-    po = M.make_object(f"MainPiston_{sfx}", *piston, col, mats["chrome"], sharp_angle=40, origin=M.P(*collar))
-    bo = M.make_object(f"MainAxle_{sfx}", *M.merge(beam), col, mats["gear_paint"], sharp_angle=40, origin=M.P(*collar))
-    M.parent_keep(po, oleo)
+    bo = M.make_object(f"MainAxle_{sfx}", *M.merge(beam + [piston]), col, mats["gear_paint"], sharp_angle=40,
+                       origin=M.P(*collar))
     M.parent_keep(bo, oleo)
     wp = M.empty(f"Wheel_{sfx}", col, M.P(*axle), props={"axis": [1.0, 0.0, 0.0], "radius": D.MAIN_TYRE_R,
                                                        "contactBelow": D.MAIN_TYRE_R - 0.03})
@@ -145,13 +145,17 @@ def nose(col, mats, parts):
         g = M.empty(f"Glow_{kind}", col, M.P(*(p + 0.04 * np.asarray(axis) / np.linalg.norm(axis))), size=0.05,
                     props={"kind": kind})
         M.parent_keep(g, gear)
+    import bpy
+    M.join([bpy.data.objects["Lamp_Turnoff_L"], bpy.data.objects["Lamp_Turnoff_R"]], "Lamp_Turnoff")
     # Aft leg door, fixed to the leg.
     hw = NOSE_WELL[2]
     dpts = [pv + np.array([-hw + 0.02, 0.20, -0.05]), pv + np.array([hw - 0.02, 0.20, -0.05]),
             pv + down * 0.9 + np.array([hw - 0.02, 0.16, 0]), pv + down * 0.9 + np.array([-hw + 0.02, 0.16, 0])]
     dv = np.array(dpts + [p + np.array([0, 0.02, 0]) for p in dpts])
     df = [(0, 1, 2, 3), (7, 6, 5, 4), (0, 4, 5, 1), (1, 5, 6, 2), (2, 6, 7, 3), (3, 7, 4, 0)]
-    M.parent_keep(M.make_object("NoseLegDoor", dv, df, col, mats["paint"], smooth=False, origin=M.P(*pv)), gear)
+    nd = M.make_object("NoseLegDoor", dv, df, col, mats["gear_paint"], smooth=False, origin=M.P(*pv))
+    M.parent_keep(nd, gear)
+    M.join([u, nd], "NoseLeg")
     s_ax = _rotated_axis(collar, -down, axle + np.array([0, -0.3, 0]), np.array([-1.0, 0, 0]))
     steer = M.empty("NoseSteer", col, M.P(*collar), props={"axis": M.model_axis(*s_ax), "maxDeg": 75.0})
     M.parent_keep(steer, gear)
@@ -162,8 +166,7 @@ def nose(col, mats, parts):
     beam = [M.cylinder(axle - np.array([w - 0.08, 0, 0]), axle + np.array([w - 0.08, 0, 0]), 0.05, 10),
             M.tube_path([collar + np.array([0, -0.1, 0]), 0.5 * (collar + axle) + np.array([0, -0.22, 0]),
                          axle + np.array([0, -0.08, 0.12])], 0.022, 8)]
-    M.parent_keep(M.make_object("NosePiston", *piston, col, mats["chrome"], sharp_angle=40, origin=M.P(*collar)), oleo)
-    M.parent_keep(M.make_object("NoseAxle", *M.merge(beam), col, mats["gear_paint"], sharp_angle=40,
+    M.parent_keep(M.make_object("NoseAxle", *M.merge(beam + [piston]), col, mats["gear_paint"], sharp_angle=40,
                                 origin=M.P(*collar)), oleo)
     wp = M.empty("Wheel_N", col, M.P(*axle), props={"axis": [1.0, 0.0, 0.0], "radius": D.NOSE_TYRE_R,
                                                    "contactBelow": D.NOSE_TYRE_R - 0.02})
