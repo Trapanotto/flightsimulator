@@ -131,6 +131,133 @@ export interface UiActions {
    * `game.failures` up to date. Without it the pause menu offers no failures.
    */
   setFailure?(id: FailureId, failed: boolean): void;
+
+  // ---- phase 5 ----
+  /** Starts a lesson of the flight school (an id of `game.lessons`). */
+  startLesson?(id: string): void;
+  /** Removes one flight from the logbook, or all of them. */
+  deleteLogEntry?(id: string): void;
+  clearLogbook?(): void;
+  /** From the pause menu or the end of a flight: watch the recorded flight. `screen` becomes 'replay'. */
+  openReplay?(): void;
+  /** Back to where the replay was opened from (the pause menu). */
+  closeReplay?(): void;
+  /** Jump to a time of the recording, seconds (within `game.replay.start..end`). */
+  replaySeek?(time: number): void;
+  replayPlay?(playing: boolean): void;
+  /** Playback speed: 0.25, 0.5, 1, 2, 4 or 8. */
+  replaySpeed?(speed: number): void;
+  /** From the pause menu or the replay: the photo mode. `screen` becomes 'photo'. */
+  openPhoto?(): void;
+  /** Back to where the photo mode was opened from. */
+  closePhoto?(): void;
+  /** Changes photo settings (only the given fields). */
+  photoSet?(patch: Partial<PhotoSettings>): void;
+  /** Saves the picture as it is on the screen, without the interface, as a PNG download. */
+  photoSave?(): void;
+}
+
+/** A text in both languages; the interface shows the one of the current language. */
+export interface Bilingual {
+  de: string;
+  en: string;
+}
+
+/** One touchdown of a flight (phase 5, logbook). */
+export interface LandingRecord {
+  /** Seconds since the start of the flight. */
+  time: number;
+  /** ICAO and runway designator when it was on a runway. */
+  airport?: string;
+  runway?: string;
+  /** Sink rate at touchdown, m/s, positive down. */
+  sinkRate: number;
+  /** Indicated airspeed at touchdown, m/s. */
+  speed: number;
+  /** Metres right (+) or left (-) of the runway centre line; undefined off a runway. */
+  centreline?: number;
+  /** Metres past the threshold; undefined off a runway. */
+  pastThreshold?: number;
+  /** Peak load factor of the touchdown, g. */
+  load?: number;
+}
+
+/** One flight in the logbook (phase 5). */
+export interface LogEntry {
+  id: string;
+  /** Start of the flight in real time, ISO 8601. */
+  date: string;
+  aircraft: AircraftId;
+  /** ICAO of where it took off and where it last landed, when known. */
+  from?: string;
+  to?: string;
+  /** Seconds from the start of the flight to its end, and of those in the air. */
+  duration: number;
+  airTime: number;
+  /** Metres over the ground. */
+  distance: number;
+  /** Highest altitude, metres above sea level. */
+  maxAltitude: number;
+  landings: LandingRecord[];
+  /** How it ended. */
+  outcome: 'landed' | 'crashed' | 'ended';
+  /** The lesson flown, if it was one (an id of `game.lessons`), and whether it was passed. */
+  lesson?: string;
+  lessonPassed?: boolean;
+  /** The ground track, thinned to a few hundred points: [lon, lat, altitude m]. */
+  track: [number, number, number][];
+}
+
+/** A lesson of the flight school as the list shows it (phase 5). */
+export interface LessonInfo {
+  id: string;
+  title: Bilingual;
+  /** One or two sentences: what is learnt. */
+  summary: Bilingual;
+  aircraft: AircraftId;
+  /** Rough length in minutes. */
+  minutes: number;
+  /** Passed at least once (kept in the browser). */
+  done: boolean;
+}
+
+/** The lesson being flown (phase 5): what the instructor says now. */
+export interface LessonView {
+  id: string;
+  title: Bilingual;
+  /** The current step, 0-based, of `steps`. */
+  step: number;
+  steps: number;
+  /** What to do now, one or two short sentences. */
+  instruction: Bilingual;
+  /** A correction while the pilot is off (too fast, too low, ...), or undefined. */
+  hint?: Bilingual;
+  /** 0..1 for a step that needs holding something for a while; undefined otherwise. */
+  progress?: number;
+  state: 'running' | 'passed' | 'failed';
+  /** At the end: what went how (touchdown sink rate, centre line, speed held, ...). */
+  debrief?: { label: Bilingual; value: string; ok: boolean }[];
+}
+
+/** The replay as the bar shows it (phase 5). Times in seconds of the flight. */
+export interface ReplayView {
+  time: number;
+  start: number;
+  end: number;
+  playing: boolean;
+  speed: number;
+}
+
+/** The photo mode's settings (phase 5). */
+export interface PhotoSettings {
+  /** Vertical field of view, degrees (10..100). */
+  fov: number;
+  /** Camera roll, degrees (-45..45). */
+  roll: number;
+  /** Local time of day in hours, 0..24: the light can be chosen for the picture. */
+  time: number;
+  /** Show the aircraft. */
+  aircraft: boolean;
 }
 
 /** One line of radio traffic. */
@@ -172,7 +299,11 @@ export interface ChecklistView {
 }
 
 /** Which screen is up. The app writes it; the interface renders it. */
-export type Screen = 'loading' | 'menu' | 'briefing' | 'flight' | 'paused';
+/**
+ * 'replay' and 'photo' (phase 5) are a flight that stands still: the app shows the recorded
+ * flight or the frozen moment, the interface shows only the replay bar or the photo controls.
+ */
+export type Screen = 'loading' | 'menu' | 'briefing' | 'flight' | 'paused' | 'replay' | 'photo';
 
 /** Positions of the pilot's levers (what is commanded, not what the aircraft has reached). */
 export interface Levers {
@@ -246,6 +377,20 @@ export const game = {
    * repaired (planned failures included); empty without failures.
    */
   failures: signal<readonly FailureId[]>([]),
+
+  // ---- phase 5 ----
+  /** The logbook, newest flight first. The app loads it at the start and writes it after each flight. */
+  logbook: signal<readonly LogEntry[]>([]),
+  /** The lessons of the flight school, in teaching order. */
+  lessons: signal<readonly LessonInfo[]>([]),
+  /** The lesson being flown, refreshed a few times a second; null on a free flight. */
+  lesson: signal<LessonView | null>(null),
+  /** The replay while `screen` is 'replay' (refreshed about 20 times a second), else null. */
+  replay: signal<ReplayView | null>(null),
+  /** Whether the flight in progress has a recording to replay (false in the first seconds). */
+  canReplay: signal(false),
+  /** The photo settings while `screen` is 'photo', else null. */
+  photo: signal<PhotoSettings | null>(null),
 };
 
 /** A frequency to expect on the flight (phase 3, briefing). */
