@@ -15,13 +15,10 @@ import { type KeyContext, type KeyInput, flightKeyAction, togglePanel } from '..
 import { DEFAULT_SETTINGS, parseSettings } from '../src/ui/persist';
 import {
   FAILURE_IDS,
-  SCENARIOS,
-  availableScenarios,
   defaultDraft,
   distanceNm,
   draftToPlan,
   sanitizeDraft,
-  scenarioDraft,
   validatePlan,
 } from '../src/ui/plan';
 import {
@@ -73,7 +70,7 @@ const C172: AircraftInfo = {
 describe('flight plan, phase 3', () => {
   const base = defaultDraft(AIRPORTS, [C172]);
 
-  it('builds an approach start, a destination and the phase 3 switches', () => {
+  it('builds an approach start with the fixed defaults: radio on, engine running, no failures', () => {
     const plan = draftToPlan(
       {
         ...base,
@@ -81,86 +78,35 @@ describe('flight plan, phase 3', () => {
         runway: '14',
         start: 'approach',
         approachNm: 10,
-        destination: 'LSZH',
-        destinationRunway: '14',
         weather: 'lowStratus',
-        atc: false,
       },
       AIRPORTS,
       [C172],
     )!;
     expect(plan.start).toEqual({ kind: 'approach', airport: 'LSZH', runway: '14', distanceNm: 10 });
-    expect(plan.destination).toEqual({ airport: 'LSZH', runway: '14' });
+    expect(plan.destination).toBeUndefined();
     expect(plan).toMatchObject({
       weather: 'lowStratus',
-      atc: false,
+      atc: true,
       coldStart: false,
       failures: [],
     });
     expect(validatePlan(plan, AIRPORTS, [C172])).toBeNull();
   });
 
-  it('starts cold only on the runway', () => {
-    expect(draftToPlan({ ...base, coldStart: true }, AIRPORTS, [C172])!.coldStart).toBe(true);
-    expect(
-      draftToPlan({ ...base, coldStart: true, start: 'air' }, AIRPORTS, [C172])!.coldStart,
-    ).toBe(false);
-  });
-
-  it('turns the failure choice into planned failures', () => {
-    const chosen = draftToPlan(
-      { ...base, failureMode: 'chosen', failureId: 'vacuum', failureAfterMin: 10 },
-      AIRPORTS,
-      [C172],
-    )!;
-    expect(chosen.failures).toEqual([{ id: 'vacuum', after: 600 }]);
-    const random = draftToPlan({ ...base, failureMode: 'random', failureSeed: 9 }, AIRPORTS, [
-      C172,
-    ])!;
-    expect(random.failures).toHaveLength(1);
-    expect(random.failures![0]!.after).toBe('random');
-    expect(FAILURE_IDS).toContain(random.failures![0]!.id);
-    // The same draft gives the same plan: the preview does not flicker.
-    expect(
-      draftToPlan({ ...base, failureMode: 'random', failureSeed: 9 }, AIRPORTS, [C172]),
-    ).toEqual(random);
-  });
-
-  it('repairs stored phase 3 fields', () => {
+  it('repairs a stored approach distance and forgets fields no longer offered', () => {
     const d = sanitizeDraft(
-      {
-        start: 'approach',
-        approachNm: 50,
-        destination: 'XXXX',
-        coldStart: 'yes',
-        atc: 0,
-        failureMode: 'often',
-        failureId: 'wings',
-        failureAfterMin: 7,
-        failureSeed: -1,
-      },
+      { start: 'approach', approachNm: 50, destination: 'LSZS', coldStart: true },
       AIRPORTS,
       [C172],
     );
-    expect(d).toMatchObject({
-      start: 'approach',
-      approachNm: 8,
-      destination: '',
-      coldStart: false,
-      atc: true,
-      failureMode: 'none',
-      failureId: 'engine',
-      failureAfterMin: 5,
-      failureSeed: 0,
-    });
-    // A destination runway that does not exist falls back to the first.
-    expect(
-      sanitizeDraft({ destination: 'LSZS', destinationRunway: '99' }, AIRPORTS, [C172]),
-    ).toMatchObject({ destination: 'LSZS', destinationRunway: '03' });
+    expect(d).toMatchObject({ start: 'approach', approachNm: 8 });
+    expect(d).not.toHaveProperty('destination');
+    expect(draftToPlan(d, AIRPORTS, [C172])!.coldStart).toBe(false);
   });
 
   it('round-trips through storage as JSON', () => {
-    const d = { ...base, start: 'approach' as const, destination: 'LSZS', destinationRunway: '21' };
+    const d = { ...base, start: 'approach' as const };
     expect(sanitizeDraft(JSON.parse(JSON.stringify(d)), AIRPORTS, [C172])).toEqual(d);
   });
 
@@ -189,19 +135,6 @@ describe('flight plan, phase 3', () => {
       }),
     ).toMatch(/cold start/);
     expect(v({ ...ok, season: 'monsoon' })).toMatch(/season/);
-  });
-
-  it('offers scenarios only where their airports exist, and they fly', () => {
-    const offered = availableScenarios(AIRPORTS).map((s) => s.id);
-    expect(offered).toEqual(['ilsZurich', 'bernCircuit', 'alpsSamedan']);
-    const ils = SCENARIOS.find((s) => s.id === 'ilsZurich')!;
-    const d = scenarioDraft(ils, base, AIRPORTS, [C172])!;
-    const plan = draftToPlan(d, AIRPORTS, [C172])!;
-    expect(plan.start).toEqual({ kind: 'approach', airport: 'LSZH', runway: '14', distanceNm: 10 });
-    expect(plan.weather).toBe('lowStratus');
-    expect(validatePlan(plan, AIRPORTS, [C172])).toBeNull();
-    const geneva = SCENARIOS.find((s) => s.id === 'nightGeneva')!;
-    expect(scenarioDraft(geneva, base, AIRPORTS, [C172])).toBeNull();
   });
 
   it('measures great-circle distances in nautical miles', () => {

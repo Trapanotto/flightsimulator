@@ -1,0 +1,286 @@
+/*
+ * Out of the aircraft: a small jumper HUD (height above ground first), one line of what to do,
+ * and on touch one big button for the one thing that matters now. Also the button that gets
+ * the pilot out, on the HUD and in the touch tools.
+ */
+
+.hud-leave {
+  width: auto;
+  gap: 6px;
+  padding: 0 10px 0 12px;
+  border-radius: var(--r-pill);
+}
+
+.hud-key {
+  display: grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--c-line-strong);
+  border-radius: 4px;
+  color: var(--c-ink-2);
+  font-family: var(--f-text);
+  font-size: var(--fs-0);
+  font-weight: 600;
+}
+
+.tools-item--leave {
+  border-color: rgb(227 49 58 / 0.45);
+  color: var(--c-ink);
+}
+
+/* Jumper HUD ---------------------------------------------------------------------------- */
+
+.pilot-top {
+  position: absolute;
+  top: var(--safe-t);
+  left: var(--safe-l);
+  right: var(--safe-r);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: var(--s-2);
+}
+
+.pilot-top .hud-btn {
+  pointer-events: auto;
+}
+
+.pilot-card {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-width: 270px;
+  padding: 10px 18px 12px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.3);
+}
+
+.pilot-state {
+  color: var(--c-ink-2);
+}
+
+.pilot-agl {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.pilot-agl-value {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: 3.25rem;
+  line-height: 1;
+  color: var(--c-ink);
+}
+
+.pilot-card.is-low .pilot-agl-value {
+  color: var(--c-caution);
+}
+
+.pilot-agl-unit {
+  color: var(--c-ink-2);
+  font-size: var(--fs-3);
+  font-weight: 600;
+}
+
+.pilot-agl-what {
+  color: var(--c-ink-3);
+  font-weight: 500;
+}
+
+.pilot-figs {
+  display: flex;
+  gap: var(--s-5);
+  margin: 6px 0 0;
+}
+
+.pilot-figs > div {
+  display: grid;
+  justify-items: center;
+}
+
+.pilot-figs dt {
+  color: var(--c-ink-3);
+  font-size: var(--fs-0);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.pilot-figs dd {
+  margin: 0;
+  font-size: var(--fs-4);
+  font-weight: 600;
+}
+
+.pilot-figs small {
+  margin-left: 3px;
+  color: var(--c-ink-3);
+  font-size: 0.7em;
+  font-weight: 500;
+}
+
+.pilot-hud.is-walk .pilot-card {
+  min-width: 220px;
+}
+
+.pilot-foot {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--safe-b) + 22px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-3);
+  width: min(560px, 100% - 2 * var(--s-4));
+  transform: translateX(-50%);
+}
+
+.pilot-hint {
+  max-width: 100%;
+  padding: 8px 16px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-pill);
+  background: var(--c-hud-glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  color: var(--c-ink);
+  font-size: var(--fs-3);
+  text-align: center;
+}
+
+.pilot-hint.is-lost {
+  border-color: rgb(255 181 58 / 0.55);
+  color: var(--c-caution);
+  font-weight: 600;
+}
+
+.pilot-new {
+  pointer-events: auto;
+}
+
+/* Touch: the hint under the readouts (the stick has the bottom left), the action bottom right. */
+.pilot-hud.is-touch .pilot-foot {
+  top: calc(var(--safe-t) + 150px);
+  bottom: auto;
+}
+
+.pilot-hud.is-touch.is-walk .pilot-foot {
+  top: calc(var(--safe-t) + 104px);
+}
+
+.pilot-act {
+  position: absolute;
+  right: var(--safe-r);
+  bottom: calc(var(--safe-b) + 12px);
+  display: grid;
+  place-items: center;
+  width: 132px;
+  height: 132px;
+  padding: 12px;
+  border: 2px solid rgb(255 255 255 / 0.85);
+  border-radius: 50%;
+  background: var(--c-brand);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.4);
+  color: #fff;
+  font-family: var(--f-display);
+  font-size: var(--fs-5);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: var(--tracking-wide);
+  text-align: center;
+  text-transform: uppercase;
+  pointer-events: auto;
+  touch-action: manipulation;
+  cursor: pointer;
+}
+
+.pilot-act:active {
+  transform: scale(0.96);
+}
+
+.pilot-act.is-flare {
+  background: #c27a12;
+}
+
+.pilot-act.is-enter {
+  background: #1f8a55;
+}
+
+/* Short landscape phones: everything a size smaller. */
+@media (max-height: 560px) {
+  .pilot-agl-value {
+    font-size: 2.5rem;
+  }
+  .pilot-card {
+    padding: 6px 14px 8px;
+  }
+  .pilot-figs {
+    margin-top: 2px;
+  }
+  .pilot-hud.is-touch .pilot-foot {
+    top: calc(var(--safe-t) + 126px);
+  }
+  .pilot-hud.is-touch.is-walk .pilot-foot {
+    top: calc(var(--safe-t) + 80px);
+  }
+  .pilot-hint {
+    padding: 6px 14px;
+    font-size: var(--fs-2);
+  }
+  .pilot-act {
+    width: 112px;
+    height: 112px;
+    font-size: var(--fs-4);
+  }
+}
+
+@media (max-width: 420px) {
+  .pilot-card {
+    min-width: 0;
+  }
+  .pilot-figs {
+    gap: var(--s-4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pilot-act:active {
+    transform: none;
+  }
+}
+
+/* Low in free fall: the one thing left to do, loud. Nothing opens the chute by itself. */
+.pilot-hint.is-urgent {
+  border-color: var(--c-caution);
+  background: rgb(60 36 0 / 0.75);
+  font-size: var(--fs-5);
+  font-weight: 700;
+  animation: pilot-urgent 0.9s ease-in-out infinite alternate;
+}
+
+.pilot-act.is-urgent {
+  animation: pilot-urgent-ring 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes pilot-urgent {
+  to {
+    border-color: rgb(255 181 58 / 0.35);
+  }
+}
+
+@keyframes pilot-urgent-ring {
+  to {
+    box-shadow:
+      0 0 0 10px rgb(255 181 58 / 0.35),
+      0 12px 32px rgb(0 0 0 / 0.4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pilot-hint.is-urgent,
+  .pilot-act.is-urgent {
+    animation: none;
+  }
+}

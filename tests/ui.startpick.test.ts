@@ -36,16 +36,20 @@ describe('airport search', () => {
 });
 
 describe('airport order', () => {
-  it('puts recent fields first, then airports with Swiss ones first, the unusable last', () => {
+  it('puts recent fields first, then airports with Swiss ones first, and leaves out the unusable', () => {
     const sections = orderAirports(OPTIONS, 'airliner', ['LSZB', 'LSGG'], '');
-    expect(sections.map((s) => s.key)).toEqual(['recent', 'large', 'other', 'off']);
-    // Bern is too short for the A320: not among the recent ones, but at the end.
+    expect(sections.map((s) => s.key)).toEqual(['recent', 'large', 'other']);
+    // Bern is too short for the A320: not among the recent ones, and not offered at all.
     expect(sections[0]!.airports.map((a) => a.icao)).toEqual(['LSGG']);
     const large = sections[1]!.airports.map((a) => a.icao);
     expect(large[0]).toBe('LSZH');
     expect(large.indexOf('LFSB')).toBeGreaterThan(large.indexOf('LSZH'));
-    expect(sections[3]!.airports.map((a) => a.icao)).toContain('LSZA');
-    expect(sections[3]!.airports.map((a) => a.icao)).toContain('LSZB');
+    const shown = sections.flatMap((x) => x.airports.map((a) => a.icao));
+    expect(shown).not.toContain('LSZB');
+    // A search still finds it, last and set apart, so the list can say why.
+    const found = orderAirports(OPTIONS, 'airliner', [], 'bern');
+    expect(found.at(-1)).toMatchObject({ key: 'off' });
+    expect(found.at(-1)!.airports.map((a) => a.icao)).toContain('LSZB');
   });
 
   it('keeps the last five recent fields, newest first, each once', () => {

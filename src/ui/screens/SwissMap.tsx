@@ -1,5 +1,5 @@
 import { useSignal } from '@preact/signals';
-import { useEffect, useMemo, useRef } from 'preact/hooks';
+import { useEffect, useRef } from 'preact/hooks';
 import type { AirportOption } from '../api';
 import { IconExpand, IconMinus, IconPlus } from '../components/icons';
 
@@ -214,54 +214,6 @@ function pathOf(points: [number, number][]): string {
   );
 }
 
-/** A point of a flown track: [lon, lat], possibly followed by more (the logbook's altitude). */
-export type TrackPoint = readonly [number, number, ...number[]];
-
-function trackPoints(track: readonly TrackPoint[]): string {
-  return track
-    .map(([lon, lat]) => {
-      const [x, y] = project(lon, lat);
-      return `${x.toFixed(2)},${y.toFixed(2)}`;
-    })
-    .join(' ');
-}
-
-/** About 60 km across at the least: a circuit still shows its surroundings and a lake or two. */
-const MIN_VIEW_W = 54;
-
-/**
- * The part of the map a track needs, with a margin, in the whole map's proportions (so the
- * figure keeps its size), and no larger than the whole map.
- */
-export function trackView(track: readonly TrackPoint[]): {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-} {
-  let x0 = Infinity;
-  let y0 = Infinity;
-  let x1 = -Infinity;
-  let y1 = -Infinity;
-  for (const [lon, lat] of track) {
-    const [x, y] = project(lon, lat);
-    x0 = Math.min(x0, x);
-    y0 = Math.min(y0, y);
-    x1 = Math.max(x1, x);
-    y1 = Math.max(y1, y);
-  }
-  if (!Number.isFinite(x0)) return { x: 0, y: 0, w: MAP_W, h: MAP_H };
-  const aspect = MAP_H / MAP_W;
-  const w = Math.min(MAP_W, Math.max(MIN_VIEW_W, (x1 - x0) * 1.3, ((y1 - y0) * 1.3) / aspect));
-  const h = w * aspect;
-  const cx = (x0 + x1) / 2;
-  const cy = (y0 + y1) / 2;
-  // Kept inside the map, so the frame never shows empty space beside the country.
-  const x = Math.max(0, Math.min(MAP_W - w, cx - w / 2));
-  const y = Math.max(0, Math.min(MAP_H - h, cy - h / 2));
-  return { x, y, w, h };
-}
-
 const BORDER_PATH = pathOf(BORDER);
 const LAKE_PATHS = LAKES.map(pathOf);
 
@@ -324,13 +276,6 @@ export function SwissMap(props: {
   label: string;
   /** A flight from one airport to another: a dashed line and a marker at the far end. */
   route?: { from: string; to: string };
-  /** Airports the chosen type may not use: dimmed, and a tap on them does nothing. */
-  isOff?: (a: AirportOption) => boolean;
-  /**
-   * Phase 5 (logbook): a flown ground track as [lon, lat]; drawn instead of the straight route
-   * line, and the map opens zoomed in on it.
-   */
-  track?: readonly TrackPoint[];
   /** Airports that get a label at any zoom (the others only once there is room). */
   isMain?: (a: AirportOption) => boolean;
   /** Which label wins where two would overlap: higher first (e.g. the longest runway). */
@@ -346,12 +291,7 @@ export function SwissMap(props: {
   /** Labels of the zoom buttons. */
   zoomLabels?: { in: string; out: string; reset: string };
 }) {
-  const track = props.track && props.track.length > 1 ? props.track : undefined;
-  const home = useMemo<MapView>(() => {
-    if (!track) return { x: 0, y: 0, w: MAP_W };
-    const v = trackView(track);
-    return { x: v.x, y: v.y, w: v.w };
-  }, [track]);
+  const home: MapView = { x: 0, y: 0, w: MAP_W };
   const view = useSignal<MapView>(home);
   const svgRef = useRef<SVGSVGElement>(null);
   const hoverOwn = useSignal<string | null>(null);
@@ -366,8 +306,6 @@ export function SwissMap(props: {
   const sel = props.airports.find((a) => a.icao === props.selected);
   const from = props.airports.find((a) => a.icao === props.route?.from);
   const to = props.airports.find((a) => a.icao === props.route?.to);
-  const first = track?.[0];
-  const last = track?.[track.length - 1];
 
   // Map units under a point of the screen (the transform covers letterboxing and CSS zoom).
   const toMap = (clientX: number, clientY: number): [number, number] | null => {
@@ -382,13 +320,11 @@ export function SwissMap(props: {
     const m = svgRef.current?.getScreenCTM();
     return m ? 1 / m.a : 1;
   };
-  const pickable = (a: AirportOption) => !props.isOff?.(a);
   const nearestAt = (x: number, y: number): AirportOption | null => {
     const reach = PICK_PX * unitsPerPx();
     let best: AirportOption | null = null;
     let bestD = reach * reach;
     for (const a of props.airports) {
-      if (!pickable(a)) continue;
       const [ax, ay] = project(a.lon, a.lat);
       // A main airport wins a close call: it is the one a pilot most likely aimed at.
       const d = ((ax - x) ** 2 + (ay - y) ** 2) * (props.isMain?.(a) ? 0.5 : 1);
@@ -504,7 +440,6 @@ export function SwissMap(props: {
             : 3;
     const candidates = props.airports
       .filter((a) => rank(a) < 3 || !props.isMain || k <= 0.55)
-      .filter((a) => !props.isOff?.(a) || rank(a) === 0)
       .sort(
         (x, y) =>
           rank(x) - rank(y) || (props.labelPriority?.(y) ?? 0) - (props.labelPriority?.(x) ?? 0),
@@ -575,38 +510,7 @@ export function SwissMap(props: {
           <path class="swissmap-lake" d={d} key={d} />
         ))}
         <path class="swissmap-border" d={BORDER_PATH} />
-        {track && (
-          <>
-            <polyline
-              class="swissmap-track-shadow"
-              points={trackPoints(track)}
-              vector-effect="non-scaling-stroke"
-            />
-            <polyline
-              class="swissmap-track"
-              points={trackPoints(track)}
-              vector-effect="non-scaling-stroke"
-            />
-            {first && (
-              <circle
-                class="swissmap-track-start"
-                cx={project(first[0], first[1])[0]}
-                cy={project(first[0], first[1])[1]}
-                r={3 * k}
-              />
-            )}
-            {last && (
-              <circle
-                class="swissmap-track-end"
-                cx={project(last[0], last[1])[0]}
-                cy={project(last[0], last[1])[1]}
-                r={3.6 * k}
-              />
-            )}
-          </>
-        )}
-        {!track &&
-          from &&
+        {from &&
           to &&
           from !== to &&
           (() => {
@@ -639,12 +543,11 @@ export function SwissMap(props: {
           const end = !on && !!to && (a === to || a === from);
           // Labels go left of dots in the east of the frame so they stay inside it.
           const left = x > v.x + v.w * 0.78;
-          const off = !on && !!props.isOff?.(a);
           const main = !!props.isMain?.(a);
           return (
             <g
               key={a.icao}
-              class={`swissmap-apt${on ? ' is-on' : ''}${hover ? ' is-hover' : ''}${end ? ' is-end' : ''}${off ? ' is-off' : ''}${main ? ' is-main' : ''}`}
+              class={`swissmap-apt${on ? ' is-on' : ''}${hover ? ' is-hover' : ''}${end ? ' is-end' : ''}${main ? ' is-main' : ''}`}
               transform={`translate(${x.toFixed(2)} ${y.toFixed(2)}) scale(${k.toFixed(4)})`}
               aria-hidden="true"
             >

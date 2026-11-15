@@ -25,17 +25,7 @@ import { FLEET_KEYS } from '../src/ui/fleet';
 import { flyingKeyRows, typeKeyRows } from '../src/ui/fleetText';
 import { formatMach, formatSpec } from '../src/ui/format';
 import { ALL_MESSAGES, isMessageKey, setLang } from '../src/ui/i18n';
-import {
-  SCENARIOS,
-  availableScenarios,
-  defaultDraft,
-  draftToPlan,
-  sanitizeDraft,
-  scenarioBlocker,
-  scenarioDraft,
-  validatePlan,
-} from '../src/ui/plan';
-import { sunTimes } from '../src/ui/sun';
+import { defaultDraft, draftToPlan, sanitizeDraft, validatePlan } from '../src/ui/plan';
 import { travelValue } from '../src/ui/touchMath';
 import { autopilotHelpers, selectedSpeedText } from '../src/ui/screens/AvionicsPanels';
 
@@ -198,9 +188,6 @@ describe('plan defaults per type', () => {
     expect(d.airport).toBe('LSZH');
     // The runway it had is one Zurich has too.
     expect(d.runway).toBe('14');
-    // A destination the type may not use is dropped.
-    const e = sanitizeDraft({ ...d, destination: 'LSZB' }, AIRPORTS, FLEET);
-    expect(e.destination).toBe('');
     // An ineligible airport cannot be chosen.
     expect(sanitizeDraft({ ...d, airport: 'LSZB' }, AIRPORTS, FLEET).airport).toBe('LSZH');
   });
@@ -249,37 +236,6 @@ describe('plan defaults per type', () => {
         FLEET,
       ),
     ).toBeNull();
-  });
-});
-
-describe('scenarios by type', () => {
-  it('offers a type-bound scenario only while the type exists', () => {
-    const ids = (list: { id: string }[]) => list.map((s) => s.id);
-    expect(ids(availableScenarios(AIRPORTS, [C172]))).not.toContain('a320Zurich');
-    expect(ids(availableScenarios(AIRPORTS, FLEET))).toEqual(
-      expect.arrayContaining(['a320Zurich', 'fa18Meiringen', 'pc12Samedan', 'ilsZurich']),
-    );
-  });
-
-  it('says when the chosen type cannot fly a scenario', () => {
-    const base = sanitizeDraft({ aircraft: 'a320' }, AIRPORTS, FLEET);
-    const bern = SCENARIOS.find((s) => s.id === 'bernCircuit')!;
-    const ils = SCENARIOS.find((s) => s.id === 'ilsZurich')!;
-    expect(scenarioBlocker(bern, base, AIRPORTS, FLEET)?.icao).toBe('LSZB');
-    expect(scenarioDraft(bern, base, AIRPORTS, FLEET)).toBeNull();
-    // The ILS into Zurich stays flyable with any type.
-    for (const a of FLEET)
-      expect(scenarioDraft(ils, { ...base, aircraft: a.id }, AIRPORTS, FLEET)?.aircraft).toBe(a.id);
-  });
-
-  it('flies the A320 into Zurich at dusk', () => {
-    const s = SCENARIOS.find((x) => x.id === 'a320Zurich')!;
-    const day = new Date('2026-10-15T12:00:00Z');
-    const d = scenarioDraft(s, defaultDraft(AIRPORTS, FLEET), AIRPORTS, FLEET, day)!;
-    expect(d.aircraft).toBe('a320');
-    const sunset = sunTimes(day, LSZH.lat, LSZH.lon)!.sunset;
-    expect(d.time).toBeGreaterThan(sunset);
-    expect(d.time).toBeLessThan(sunset + 0.5);
   });
 });
 

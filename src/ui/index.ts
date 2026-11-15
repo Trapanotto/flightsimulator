@@ -7,9 +7,9 @@
 import { effect } from '@preact/signals';
 import { h, render } from 'preact';
 import { App } from './App';
-import { game, type UiActions } from './api';
+import type { UiActions } from './api';
 import { lang } from './i18n';
-import { debugOn, nav, setActions, touchSeen } from './nav';
+import { debugOn, setActions, touchSeen } from './nav';
 import { browserStorage, persistSettings } from './persist';
 import './styles/tokens.css';
 import './styles/base.css';
@@ -21,10 +21,9 @@ import './styles/hud.css';
 import './styles/touch.css';
 import './styles/panels.css';
 import './styles/dialogs.css';
-import './styles/hangar.css';
-import './styles/school.css';
 import './styles/replay.css';
 import './styles/startpick.css';
+import './styles/pilot.css';
 
 export { status } from './state';
 export {
@@ -42,13 +41,13 @@ export {
   type UiActions,
   type WeatherChoice,
   type WeatherReport,
-  // Phase 5
   type Bilingual,
   type LandingRecord,
   type LessonInfo,
   type LessonView,
   type LogEntry,
   type PhotoSettings,
+  type PilotView,
   type ReplayView,
   game,
   settings,
@@ -61,8 +60,6 @@ export { panels } from './panels';
 export { validatePlan } from './plan';
 /** Phase 4: the key codes the interface shows for speed brake, reverse and gear (the app binds them). */
 export { FLEET_KEYS } from './fleet';
-/** Phase 5: the touchdown in words, as the logbook rates it (the app may use it in debriefs). */
-export { touchdownRating, type TouchdownRating } from './logbook';
 
 /** Mounts the interface into `root` and returns a function that removes it. */
 export function mountUi(root: HTMLElement, actions?: UiActions): () => void {
@@ -71,10 +68,6 @@ export function mountUi(root: HTMLElement, actions?: UiActions): () => void {
   const stopSettings = persistSettings(browserStorage());
   const stopLang = effect(() => {
     document.documentElement.lang = lang.value;
-  });
-  // A new flight always comes back to the main menu, not to the setup it was started from.
-  const stopNav = effect(() => {
-    if (game.screen.value === 'briefing') nav.page.value = 'main';
   });
 
   // The first touch anywhere brings the touch controls, also on a laptop with a touch screen.
@@ -91,7 +84,6 @@ export function mountUi(root: HTMLElement, actions?: UiActions): () => void {
     render(null, root);
     stopSettings();
     stopLang();
-    stopNav();
     window.removeEventListener('pointerdown', onPointer, true);
   };
 }

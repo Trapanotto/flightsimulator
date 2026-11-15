@@ -1,5 +1,5 @@
 import type { AircraftId, AircraftInfo, FailureId } from '@sim';
-import type { AirportOption, FlightPlan, PlannedFailure, SeasonChoice, WeatherChoice } from './api';
+import type { AirportOption, FlightPlan, SeasonChoice, WeatherChoice } from './api';
 import {
   type Category,
   airportEligibility,
@@ -10,7 +10,6 @@ import {
   typeDefaults,
 } from './fleet';
 import { runwayHeading } from './format';
-import { sunTimes } from './sun';
 
 export const SEASON_CHOICES: readonly SeasonChoice[] = [
   'now',
@@ -52,9 +51,6 @@ export const FAILURE_IDS: readonly FailureId[] = [
   'com1',
 ];
 
-/** When a chosen failure strikes, minutes after the start. */
-export const FAILURE_MINUTES = [1, 3, 5, 10, 20] as const;
-
 export type StartKind = 'runway' | 'air' | 'approach';
 
 /** Where on the map an air start may be put: around Switzerland, a margin included. */
@@ -74,12 +70,12 @@ export function airAltitudeRange(category: Category): readonly [number, number] 
   const top = { piston: 14_000, turboprop: 28_000, airliner: 39_000, fighter: 45_000 }[category];
   return [2000 * FT, top * FT];
 }
-export type FailureMode = 'none' | 'random' | 'chosen';
 
 /**
  * What the flight setup holds. Richer than a FlightPlan (an air start keeps its airport and
- * runway, a switched-off failure keeps its choice), so it is what gets remembered between
- * visits.
+ * runway), so it is what gets remembered between visits. Destination, cold start, radio and
+ * failures are no longer chosen: every flight starts with the engine running, air traffic
+ * control on and nothing broken.
  */
 export interface SetupDraft {
   airport: string;
@@ -105,21 +101,6 @@ export interface SetupDraft {
   time: 'now' | number;
   weather: WeatherChoice;
   season: SeasonChoice;
-  /** ICAO of the destination, or '' for none. */
-  destination: string;
-  destinationRunway: string;
-  /** Only with a start on the runway: a parked aircraft has no business in the air. */
-  coldStart: boolean;
-  atc: boolean;
-  failureMode: FailureMode;
-  failureId: FailureId;
-  /** One of FAILURE_MINUTES. */
-  failureAfterMin: number;
-  /**
-   * Picks the failure of the 'random' mode. Rolled anew at every start, so the plan itself
-   * stays a pure function of the draft (the preview must not flicker between failures).
-   */
-  failureSeed: number;
 }
 
 export const DRAFT_KEY = 'tfs.setup';
@@ -158,14 +139,6 @@ export function defaultDraft(
     time: 'now',
     weather: 'live',
     season: 'now',
-    destination: '',
-    destinationRunway: '',
-    coldStart: false,
-    atc: true,
-    failureMode: 'none',
-    failureId: 'engine',
-    failureAfterMin: 5,
-    failureSeed: 0,
   };
 }
 
@@ -179,8 +152,8 @@ function oneOf<T>(v: unknown, options: readonly T[], fallback: T): T {
  * not a sensible value is replaced, so corrupt storage can never block the menu.
  *
  * Phase 4: the draft also fits its aircraft. An airport the type may not use gives way to the
- * type's home (choosing the A320 at Bern moves the setup to Zürich), a runway or destination
- * it may not use is dropped, the approach distance moves to the nearest the type offers.
+ * type's home (choosing the A320 at Bern moves the setup to Zürich), a runway it may not use
+ * is dropped, the approach distance moves to the nearest the type offers.
  */
 export function sanitizeDraft(
   raw: unknown,
@@ -208,13 +181,6 @@ export function sanitizeDraft(
   const runways = airport ? usableEnds(airport, category) : [];
   const runway =
     typeof o.runway === 'string' && runways.includes(o.runway) ? o.runway : (runways[0] ?? '');
-
-  const dest = airports.find((a) => a.icao === o.destination && eligible(a, category));
-  const destRunways = dest ? usableEnds(dest, category) : [];
-  const destRunway =
-    dest && typeof o.destinationRunway === 'string' && destRunways.includes(o.destinationRunway)
-      ? o.destinationRunway
-      : (destRunways[0] ?? '');
 
   const time =
     o.time === 'now'
@@ -262,17 +228,6 @@ export function sanitizeDraft(
     time,
     weather: oneOf(o.weather, WEATHER_CHOICES, d.weather),
     season: oneOf(o.season, SEASON_CHOICES, d.season),
-    destination: dest?.icao ?? '',
-    destinationRunway: destRunway,
-    coldStart: typeof o.coldStart === 'boolean' ? o.coldStart : d.coldStart,
-    atc: typeof o.atc === 'boolean' ? o.atc : d.atc,
-    failureMode: oneOf<FailureMode>(o.failureMode, ['none', 'random', 'chosen'], d.failureMode),
-    failureId: oneOf(o.failureId, FAILURE_IDS, d.failureId),
-    failureAfterMin: oneOf<number>(o.failureAfterMin, FAILURE_MINUTES, d.failureAfterMin),
-    failureSeed:
-      typeof o.failureSeed === 'number' && Number.isInteger(o.failureSeed) && o.failureSeed >= 0
-        ? o.failureSeed
-        : d.failureSeed,
   };
 }
 
@@ -290,15 +245,6 @@ export function planProblem(
   if (!info) return 'noAircraft';
   if (!eligible(airport, categoryOf(info))) return 'runway';
   return null;
-}
-
-/** The failures a draft asks for. */
-export function draftFailures(draft: SetupDraft): PlannedFailure[] {
-  if (draft.failureMode === 'chosen')
-    return [{ id: draft.failureId, after: draft.failureAfterMin * 60 }];
-  if (draft.failureMode === 'random')
-    return [{ id: FAILURE_IDS[draft.failureSeed % FAILURE_IDS.length]!, after: 'random' }];
-  return [];
 }
 
 /** The plan for the app, or null when the draft is not flyable (see planProblem). */
@@ -341,7 +287,6 @@ export function draftToPlan(
       : draft.start === 'approach'
         ? { kind: 'approach', airport: airport.icao, runway, distanceNm: draft.approachNm }
         : { kind: 'runway', airport: airport.icao, runway };
-  const dest = airports.find((a) => a.icao === draft.destination);
   const plan: FlightPlan = {
     aircraft: draft.aircraft as AircraftId,
     start,
@@ -352,14 +297,10 @@ export function draftToPlan(
     airport: placed
       ? (nearestAirport(airports, draft.airLon!, draft.airLat!)?.icao ?? airport.icao)
       : airport.icao,
-    coldStart: start.kind === 'runway' && draft.coldStart,
-    atc: draft.atc,
-    failures: draftFailures(draft),
+    coldStart: false,
+    atc: true,
+    failures: [],
   };
-  if (dest)
-    plan.destination = dest.runways.includes(draft.destinationRunway)
-      ? { airport: dest.icao, runway: draft.destinationRunway }
-      : { airport: dest.icao };
   return plan;
 }
 
@@ -468,236 +409,7 @@ export function validatePlan(
   return null;
 }
 
-// --- Scenarios -----------------------------------------------------------------------------
-
-export type ScenarioId =
-  | 'ilsZurich'
-  | 'bernCircuit'
-  | 'alpsSamedan'
-  | 'nightGeneva'
-  | 'a320Zurich'
-  | 'fa18Meiringen'
-  | 'pc12Samedan';
-
-export interface Scenario {
-  id: ScenarioId;
-  /** The airports it needs; without them it is not offered. */
-  needs: string[];
-  /**
-   * Phase 4: the type it is made for; offered only while that type exists. Without it the
-   * scenario flies the pilot's choice, if that type may use the airports.
-   */
-  aircraft?: AircraftId;
-  /** The time of day is a quarter of an hour after today's sunset at the airport. */
-  dusk?: boolean;
-  draft: Partial<SetupDraft>;
-}
-
-/** Ready-made flights, one click from the setup. The first is the showpiece of phase 3. */
-export const SCENARIOS: readonly Scenario[] = [
-  {
-    // ILS 14 at Zurich under a Hochnebel deck: break out at about 1000 ft above the ground.
-    id: 'ilsZurich',
-    needs: ['LSZH'],
-    draft: {
-      airport: 'LSZH',
-      runway: '14',
-      start: 'approach',
-      approachNm: 10,
-      weather: 'lowStratus',
-      time: 9,
-      season: 'autumn',
-      destination: 'LSZH',
-      destinationRunway: '14',
-      coldStart: false,
-      atc: true,
-      failureMode: 'none',
-    },
-  },
-  {
-    // The A320 on the same runway as the evening wave of arrivals comes in.
-    id: 'a320Zurich',
-    needs: ['LSZH'],
-    aircraft: 'a320',
-    dusk: true,
-    draft: {
-      airport: 'LSZH',
-      runway: '14',
-      start: 'approach',
-      approachNm: 12,
-      weather: 'fair',
-      season: 'autumn',
-      destination: 'LSZH',
-      destinationRunway: '14',
-      coldStart: false,
-      atc: true,
-      failureMode: 'none',
-    },
-  },
-  {
-    // Out of the Haslital and down the valleys, as the Hornets of Meiringen train.
-    id: 'fa18Meiringen',
-    needs: ['LSMM', 'LSMP'],
-    aircraft: 'fa18',
-    draft: {
-      airport: 'LSMM',
-      runway: '28',
-      start: 'runway',
-      weather: 'clear',
-      time: 10,
-      season: 'summer',
-      destination: 'LSMP',
-      destinationRunway: '23',
-      coldStart: false,
-      atc: true,
-      failureMode: 'none',
-    },
-  },
-  {
-    // Samedan, 1707 m: down the Engadine onto runway 21 on a winter morning.
-    id: 'pc12Samedan',
-    needs: ['LSZS'],
-    aircraft: 'pc12',
-    draft: {
-      airport: 'LSZS',
-      runway: '21',
-      start: 'approach',
-      approachNm: 8,
-      weather: 'clear',
-      time: 10,
-      season: 'winter',
-      destination: 'LSZS',
-      destinationRunway: '21',
-      coldStart: false,
-      atc: true,
-      failureMode: 'none',
-    },
-  },
-  {
-    id: 'bernCircuit',
-    needs: ['LSZB'],
-    draft: {
-      airport: 'LSZB',
-      runway: '14',
-      start: 'runway',
-      weather: 'fair',
-      time: 10.5,
-      season: 'summer',
-      destination: 'LSZB',
-      destinationRunway: '14',
-      coldStart: false,
-      atc: true,
-      failureMode: 'none',
-    },
-  },
-  {
-    // Over the Bernese Oberland and Grisons into the Engadine, 1707 m up.
-    id: 'alpsSamedan',
-    needs: ['LSZB', 'LSZS'],
-    draft: {
-      airport: 'LSZB',
-      runway: '14',
-      start: 'runway',
-      weather: 'clear',
-      time: 9,
-      season: 'summer',
-      destination: 'LSZS',
-      destinationRunway: '21',
-      coldStart: false,
-      atc: true,
-      failureMode: 'none',
-    },
-  },
-  {
-    id: 'nightGeneva',
-    needs: ['LSGG'],
-    draft: {
-      airport: 'LSGG',
-      runway: '22',
-      start: 'approach',
-      approachNm: 8,
-      weather: 'clear',
-      time: 21.75,
-      season: 'autumn',
-      destination: 'LSGG',
-      destinationRunway: '22',
-      coldStart: false,
-      atc: true,
-      failureMode: 'none',
-    },
-  },
-];
-
-/**
- * The scenarios this set of airports can fly. The ones made for a type come only while that
- * type is in `aircraft`.
- */
-export function availableScenarios(
-  airports: readonly AirportOption[],
-  aircraft: readonly AircraftInfo[] = [],
-): Scenario[] {
-  return SCENARIOS.filter(
-    (s) =>
-      s.needs.every((icao) => airports.some((a) => a.icao === icao)) &&
-      (!s.aircraft || aircraft.some((a) => a.id === s.aircraft)),
-  );
-}
-
-/** The type a scenario flies: its own, else the pilot's choice. */
-export function scenarioAircraft(
-  scenario: Scenario,
-  base: SetupDraft,
-  aircraft: readonly AircraftInfo[],
-): AircraftInfo | undefined {
-  return aircraft.find((a) => a.id === (scenario.aircraft ?? base.aircraft));
-}
-
-/**
- * Why the pilot's type cannot fly a scenario: the first of its airports it may not use (a
- * circuit at Bern is too short for the A320), or null when it can.
- */
-export function scenarioBlocker(
-  scenario: Scenario,
-  base: SetupDraft,
-  airports: readonly AirportOption[],
-  aircraft: readonly AircraftInfo[],
-): AirportOption | null {
-  const category = categoryOf(scenarioAircraft(scenario, base, aircraft));
-  for (const icao of [scenario.draft.airport, scenario.draft.destination]) {
-    const a = airports.find((x) => x.icao === icao);
-    if (a && !eligible(a, category)) return a;
-  }
-  return null;
-}
-
-/** The setup of a scenario on top of the pilot's aircraft choice; null when it cannot fly. */
-export function scenarioDraft(
-  scenario: Scenario,
-  base: SetupDraft,
-  airports: readonly AirportOption[],
-  aircraft: readonly AircraftInfo[],
-  today = new Date(),
-): SetupDraft | null {
-  if (!availableScenarios(airports, aircraft).includes(scenario)) return null;
-  if (scenarioBlocker(scenario, base, airports, aircraft)) return null;
-  const patch: Partial<SetupDraft> = { ...scenario.draft };
-  if (scenario.aircraft) patch.aircraft = scenario.aircraft;
-  if (scenario.dusk) patch.time = duskHours(airports, scenario.draft.airport, today);
-  const d = sanitizeDraft({ ...base, ...patch }, airports, aircraft);
-  return planProblem(d, airports, aircraft) ? null : d;
-}
-
-/** A quarter of an hour after sunset at the airport, to the quarter hour (18:00 if unknown). */
-export function duskHours(
-  airports: readonly AirportOption[],
-  icao: string | undefined,
-  today: Date,
-): number {
-  const a = airports.find((x) => x.icao === icao);
-  const sun = a ? sunTimes(today, a.lat, a.lon) : null;
-  if (!sun) return 18;
-  return Math.min(24, Math.round((sun.sunset + 0.25) * 4) / 4);
-}
+// --- Distances ---------------------------------------------------------------------------------
 
 /** Great-circle distance in nautical miles (mean earth radius; the briefing rounds it). */
 export function distanceNm(lon1: number, lat1: number, lon2: number, lat2: number): number {

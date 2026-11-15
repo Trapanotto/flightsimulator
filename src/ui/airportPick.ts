@@ -121,8 +121,9 @@ export interface AirportSection {
 /**
  * The list of the setup in sections: without a search, recently used fields, the large
  * airports (longest paved runway first) and the rest by name, Swiss fields before foreign ones
- * in each; with a search, the hits by how well they match. Fields the type cannot use come
- * last in either case, in their own section.
+ * in each; with a search, the hits by how well they match. Fields the type cannot use are
+ * left out, as on the map; only a search shows them, last and with the reason, so that
+ * looking for Bern with the A320 says why it is not on offer.
  */
 export function orderAirports(
   airports: readonly AirportOption[],
@@ -160,7 +161,6 @@ export function orderAirports(
     },
     { key: 'large', airports: rest.filter((a) => f(a).large).sort(bySize) },
     { key: 'other', airports: rest.filter((a) => !f(a).large).sort(byName) },
-    { key: 'off', airports: airports.filter((a) => !eligible(a, category)).sort(byName) },
   ]);
 }
 
@@ -198,4 +198,12 @@ export function rememberAirport(storage: StorageLike | undefined, icao: string) 
 export function labelPriority(a: AirportOption): number {
   const f = airportFacts(a);
   return (f.swiss ? 100_000 : 0) + f.longest;
+}
+
+/** The airports the map draws: only those the chosen kind of aircraft can use. */
+export function mapAirports(
+  airports: readonly AirportOption[],
+  category: Category,
+): AirportOption[] {
+  return airports.filter((a) => eligible(a, category));
 }
