@@ -517,19 +517,22 @@ export class FlightModel implements SimAircraft {
       arr: () => number[] | undefined,
       spec = p.specs.find((s) => s.id === id),
     ) => {
-      if (!spec) return;
-      // A selector's positions spread over 0..1 (cut-off, ground idle, flight idle).
-      const last = spec.kind === 'selector' ? (spec.positions?.length ?? 1) - 1 : 0;
+      // A selector's positions spread over 0..1 (cut-off, ground idle, flight idle). The
+      // per-engine levers are bound even where the type has no common one (the F/A-18).
+      const first = spec ?? p.specs.find((s) => s.id === `${id}1`);
+      if (!first) return;
+      const last = first.kind === 'selector' ? (first.positions?.length ?? 1) - 1 : 0;
       const toLever = (v: number) => (last > 0 ? v / last : v);
       const fromLever = (v: number) => (last > 0 ? Math.round(clamp(v, 0, 1) * last) : v);
-      p.bind(
-        id,
-        () => fromLever(arr()?.[0] ?? 0),
-        (v) => {
-          const a = arr();
-          if (a) for (let i = 0; i < n; i++) a[i] = toLever(v);
-        },
-      );
+      if (spec)
+        p.bind(
+          id,
+          () => fromLever(arr()?.[0] ?? 0),
+          (v) => {
+            const a = arr();
+            if (a) for (let i = 0; i < n; i++) a[i] = toLever(v);
+          },
+        );
       for (let i = 0; i < n; i++) {
         const one = p.specs.find((s) => s.id === `${id}${i + 1}`);
         if (one)

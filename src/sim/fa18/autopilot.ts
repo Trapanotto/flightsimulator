@@ -245,13 +245,13 @@ export class Fa18Autopilot implements AutopilotComputer {
     let ki: number;
     if (this.atcMode === 'speed') {
       err = (this.atcSpeed - input.ias) / KT;
-      kp = 0.012;
-      ki = 0.004;
+      kp = 0.025;
+      ki = 0.008;
     } else {
       // Slow (angle of attack high): more thrust.
       err = ((input.alpha ?? FA18_FCS.onSpeedAlpha) - FA18_FCS.onSpeedAlpha) / DEG;
-      kp = 0.06;
-      ki = 0.03;
+      kp = 0.03;
+      ki = 0.012;
     }
     this.throttle = clamp(this.throttle + ki * err * dt, 0, ATC_MAX);
     this.throttleOut = clamp(this.throttle + kp * err, 0, ATC_MAX);
