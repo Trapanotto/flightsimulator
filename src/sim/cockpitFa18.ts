@@ -29,6 +29,8 @@ export const FA18_CONTROLS: readonly ControlSpec[] = [
   toggle('fuelCutoff1', 0, 1),
   toggle('fuelCutoff2', 0, 1),
   toggle('fuelDump'),
+  /** Bingo fuel setting on the IFEI, kg of total internal fuel (the dump also stops there). */
+  { id: 'bingo', kind: 'knob', min: 0, max: 5000, step: 50, initial: 1500 },
   { id: 'probeAir', kind: 'selector', positions: ['retract', 'extend'], initial: 0 },
   toggle('oxygen', 0, 1),
   // ---- flight controls ----
