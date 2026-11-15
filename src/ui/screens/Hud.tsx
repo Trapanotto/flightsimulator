@@ -28,6 +28,7 @@ import {
   useSpeedState,
 } from './HudFleet';
 import { ChecklistHint } from './ChecklistPanel';
+import { controlLabel, formatControlValue, positionLabel } from '../cockpitMeta';
 import { FlightPanels, RadioCaption, ToolsButton, showChecklistHint } from './FlightPanels';
 
 /** Pixels per degree on the heading tape. */
@@ -294,6 +295,36 @@ function Notice() {
   );
 }
 
+/** Names the cockpit control under the pointer, with its present setting. */
+function ControlHint() {
+  const p = game.pointedControl.value;
+  if (!p || game.view.value !== 'cockpit') return null;
+  const spec = game.controls.value.find((s) => s.id === p.id);
+  const value = game.cockpit.value?.[p.id];
+  let setting = '';
+  if (spec && value !== undefined) {
+    if (spec.kind === 'selector') {
+      const position = spec.positions?.[Math.round(value)];
+      if (position !== undefined)
+        setting = positionLabel(p.id, position, spec.positions ?? [position]);
+    } else if (spec.kind === 'toggle') setting = t(value ? 'pos.on' : 'pos.off');
+    else if (spec.kind !== 'button') setting = formatControlValue(spec, value);
+  }
+  // Beside the pointer, kept on the screen.
+  const left = Math.min(Math.max(p.x, 90), window.innerWidth - 90);
+  const below = p.y < 70;
+  return (
+    <div
+      class={`control-hint${below ? ' control-hint--below' : ''}`}
+      style={{ left: `${left}px`, top: `${p.y}px` }}
+      aria-hidden="true"
+    >
+      <span class="control-hint-name">{controlLabel(p.id)}</span>
+      {setting && <span class="control-hint-value">{setting}</span>}
+    </div>
+  );
+}
+
 function Warnings() {
   const tel = game.telemetry;
   const stall = useComputed(() => !!tel.value?.stallWarning && !tel.value.crashed);
@@ -524,6 +555,7 @@ export function Hud() {
         </div>
       )}
 
+      <ControlHint />
       <div class="hud-alerts">
         <Warnings />
         <Annunciators />

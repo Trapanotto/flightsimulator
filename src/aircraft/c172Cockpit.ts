@@ -171,7 +171,7 @@ export class C172Cockpit extends CockpitCore {
     this.ownTextures.push(this.atlasTexture);
     this.textureBytes += this.atlas.canvas.width * this.atlas.canvas.height * 4 * 1.33;
     this.setupDisplays(cab);
-    this.setupLabels(cab, c172.quality === 'low' ? 64 : 128);
+    this.setupLabels(cab, c172.quality === 'low' ? 96 : 256);
     this.mergeFaces(cab);
     this.finishSetup();
   }

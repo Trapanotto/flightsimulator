@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0-alpha.9 – Cockpit lesbarer, Hochnebel aus dem Live-Wetter (2026-11-15)
+
+- **Schalternamen im Cockpit:** Zeigt die Maus auf einen Schalter, Knopf oder Hebel, erscheint
+  daneben sein Name und seine Stellung; am Handy beim Antippen. In Deutsch und Englisch für
+  alle vier Flugzeuge.
+- **Beschriftungen** im Cockpit sind grösser, heller und schärfer gezeichnet.
+- **Hochnebel aus dem Live-Wetter:** Bei Live-Wetter erkennt das Spiel eine Hochnebeldecke aus
+  den Höhenschichten des Wetterberichts (Inversion über feuchter Luft) und zeigt sie mit
+  echter Ober- und Untergrenze.
+
 ## 1.0.0-alpha.8 – Phase 4, zweiter Teil: Airbus A320 und F/A-18 (2026-11-15)
 
 - **Airbus A320-214:** zwei CFM56-Triebwerke, Fly-by-Wire mit Sidestick-Gesetzen und

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { weatherFromReport } from '../src/app/liveWeather';
+import { reportFromOpenMeteo, weatherFromReport } from '../src/app/liveWeather';
+import { weatherFromOpenMeteo } from '../src/sky/liveStratus';
 import { SNOW_LINE, nightFactor, seasonOf } from '../src/app/season';
 
 describe('weatherFromReport', () => {
@@ -68,5 +69,35 @@ describe('season and night', () => {
     expect(nightFactor(-6)).toBe(1);
     expect(nightFactor(-30)).toBe(1);
     expect(nightFactor(-2)).toBeCloseTo(0.5);
+  });
+});
+
+describe('reportFromOpenMeteo', () => {
+  it('collects the pressure levels the service sent and skips missing ones', () => {
+    const r = reportFromOpenMeteo({
+      temperature_2m: 1,
+      dew_point_2m: 0.5,
+      cloud_cover: 100,
+      cloud_cover_low: 100,
+      cloud_cover_mid: 0,
+      wind_speed_10m: 1,
+      wind_direction_10m: 40,
+      precipitation: 0,
+      visibility: 6000,
+      temperature_950hPa: 0,
+      relative_humidity_950hPa: 98,
+      geopotential_height_950hPa: 560,
+      temperature_900hPa: 6,
+      relative_humidity_900hPa: 30,
+      geopotential_height_900hPa: 1000,
+      temperature_850hPa: null,
+      relative_humidity_850hPa: 20,
+      geopotential_height_850hPa: 1480,
+    });
+    expect(r.levels).toHaveLength(2);
+    // A winter inversion over Zurich: the deck ends between the moist and the dry level.
+    const w = weatherFromOpenMeteo(r, 430);
+    expect(w.stratus?.top).toBeCloseTo(780, 0);
+    expect(w.stratus!.base).toBeLessThan(w.stratus!.top);
   });
 });

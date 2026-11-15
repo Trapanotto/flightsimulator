@@ -324,6 +324,11 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     get: (id) => flight?.aircraft.cockpit.get(id) ?? 0,
     set: (id, value, held) => setControl(id, value, held),
     zoom: (factor) => (cockpitFov = Math.min(Math.max(cockpitFov * factor, 22), 70)),
+    point: (id, x, y) => {
+      const now = game.pointedControl.value;
+      if (id === null ? now !== null : now?.id !== id || now.x !== x || now.y !== y)
+        game.pointedControl.value = id === null ? null : { id, x, y };
+    },
   });
   rig.attach(canvas);
   rig.autoOrbit = !shot;

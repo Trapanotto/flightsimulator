@@ -222,6 +222,12 @@ export const game = {
   controls: signal<readonly ControlSpec[]>([]),
   /** Phase 3: the value of every control by name, refreshed about ten times a second. */
   cockpit: signal<Readonly<Record<string, number>> | null>(null),
+  /**
+   * The control of the 3D cockpit under the pointer (or just touched), with the pointer's place
+   * in CSS pixels: the interface names it there, since the placards are too small to read on
+   * a screen. Null when the pointer is over none.
+   */
+  pointedControl: signal<{ id: string; x: number; y: number } | null>(null),
   /** Phase 3: the radio; null when the flight has no air traffic control. */
   atc: signal<AtcView | null>(null),
   /** Phase 3: the checklists on offer for the aircraft, and the open one. */

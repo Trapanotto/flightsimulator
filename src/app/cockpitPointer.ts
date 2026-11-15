@@ -22,6 +22,8 @@ export interface CockpitPointerHost {
   set(id: string, value: number, held: boolean): void;
   /** Wheel or pinch over nothing: zoom in on the panel. Factor > 1 zooms out. */
   zoom(factor: number): void;
+  /** The control under the pointer (CSS pixels), or null: the interface names it. */
+  point(id: string | null, x: number, y: number): void;
 }
 
 interface Held {
@@ -45,6 +47,7 @@ export function attachCockpitPointer(el: HTMLElement, host: CockpitPointerHost):
   const ndc = new Vector2();
   let held: Held | undefined;
   let lastHover = 0;
+  let touchHint: ReturnType<typeof setTimeout> | undefined;
 
   const pick = (e: { clientX: number; clientY: number }): ControlHit | null => {
     if (!host.active()) return null;
@@ -71,6 +74,9 @@ export function attachCockpitPointer(el: HTMLElement, host: CockpitPointerHost):
     e.preventDefault();
     el.setPointerCapture(e.pointerId);
     held = { pointer: e.pointerId, spec, hit };
+    // A finger has no hover: the name shows while it rests on the control and a moment after.
+    clearTimeout(touchHint);
+    host.point(spec.id, e.clientX, e.clientY);
     if (isDragged(spec)) {
       held.drag = { y: e.clientY, moved: false };
       return;
@@ -105,7 +111,9 @@ export function attachCockpitPointer(el: HTMLElement, host: CockpitPointerHost):
     const now = performance.now();
     if (now - lastHover < 80) return;
     lastHover = now;
-    el.style.cursor = pick(e) ? 'pointer' : '';
+    const over = pick(e);
+    el.style.cursor = over ? 'pointer' : '';
+    host.point(over && host.spec(over.control) ? over.control : null, e.clientX, e.clientY);
   };
 
   const up = (e: PointerEvent) => {
@@ -116,6 +124,7 @@ export function attachCockpitPointer(el: HTMLElement, host: CockpitPointerHost):
     if (held.drag && !held.drag.moved) press(held);
     if (held.release !== undefined) host.set(held.spec.id, held.release, false);
     held = undefined;
+    if (e.pointerType !== 'mouse') touchHint = setTimeout(() => host.point(null, 0, 0), 1500);
   };
 
   const wheel = (e: WheelEvent) => {

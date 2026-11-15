@@ -101,6 +101,56 @@ function pivotOf(o: Object3D) {
   };
 }
 
+/** How much the placards glow by day, on top of the panel lights. */
+const LABEL_DAY_GAIN = 0.32;
+/** The placard height a screen can still show, metres, and the most a placard is enlarged. */
+const LABEL_HEIGHT = 0.0085;
+const LABEL_MAX_SCALE = 1.8;
+
+/**
+ * Enlarges the placards about their own centres. The models carry them at their true size
+ * (3-7 mm), which a pilot reads easily and a screen at cockpit distance cannot show.
+ */
+export function enlargeLabels(mesh: Mesh) {
+  const p = mesh.geometry.getAttribute('position');
+  const uvs = mesh.geometry.getAttribute('uv');
+  const quads = Math.floor(p.count / 4);
+  if (!uvs || quads === 0) return;
+  // Height: the edge of each quad along which only v changes.
+  const heights: number[] = [];
+  for (let q = 0; q < quads; q++) {
+    const a = q * 4;
+    for (let i = 1; i < 4; i++) {
+      const b = a + i;
+      if (Math.abs(uvs.getX(a) - uvs.getX(b)) > 1e-6 || Math.abs(uvs.getY(a) - uvs.getY(b)) < 1e-6)
+        continue;
+      heights.push(Math.hypot(p.getX(a) - p.getX(b), p.getY(a) - p.getY(b), p.getZ(a) - p.getZ(b)));
+      break;
+    }
+  }
+  if (heights.length === 0) return;
+  heights.sort((x, y) => x - y);
+  const median = heights[heights.length >> 1]!;
+  const k = Math.min(LABEL_MAX_SCALE, Math.max(1, LABEL_HEIGHT / median));
+  if (k === 1) return;
+  for (let q = 0; q < quads; q++) {
+    const a = q * 4;
+    let cx = 0;
+    let cy = 0;
+    let cz = 0;
+    for (let i = a; i < a + 4; i++) {
+      cx += p.getX(i) / 4;
+      cy += p.getY(i) / 4;
+      cz += p.getZ(i) / 4;
+    }
+    for (let i = a; i < a + 4; i++)
+      p.setXYZ(i, cx + (p.getX(i) - cx) * k, cy + (p.getY(i) - cy) * k, cz + (p.getZ(i) - cz) * k);
+  }
+  p.needsUpdate = true;
+  mesh.geometry.computeBoundingBox();
+  mesh.geometry.computeBoundingSphere();
+}
+
 export abstract class CockpitCore {
   protected readonly specs: Map<string, ControlSpec>;
   protected readonly rigs = new Map<string, Rig>();
@@ -213,6 +263,7 @@ export abstract class CockpitCore {
       cols?: number;
       rows?: number;
     };
+    enlargeLabels(mesh);
     const canvas = drawLabelAtlas(
       u.labels ?? [],
       u.labelColors ?? [],
@@ -492,8 +543,10 @@ export abstract class CockpitCore {
   /** Panel, label, display and highlight brightness for the exposure and the panel lights. */
   protected lighting(time: number, panelLight: number) {
     this.host.panelLight.value = panelGlow(this.exposure, panelLight);
-    // White paint reads brighter than a dial face in the cabin's shade.
-    this.labelGain.value = this.host.panelLight.value + 0.06 * (1 - darkness(this.exposure));
+    // Placards are engraved white on black and must read at a glance on a screen that shows
+    // far less than a pilot's eye: by day they glow well above the cabin's shade.
+    this.labelGain.value =
+      this.host.panelLight.value + LABEL_DAY_GAIN * (1 - darkness(this.exposure));
     this.displayGain.value = displayGlow(this.exposure);
     this.haloGain.value = this.haloBox && this.inside ? highlightGlow(this.exposure) : 0;
     this.haloTime.value = time;

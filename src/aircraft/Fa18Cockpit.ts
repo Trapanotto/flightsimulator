@@ -134,7 +134,7 @@ export class Fa18Cockpit extends CockpitCore {
       this.textureBytes += c.width * c.height * 4 * 1.33;
     this.hud = this.hudGeometry(cab, eye);
     this.setupDisplays(cab);
-    this.setupLabels(cab, host.quality === 'low' ? 64 : 128);
+    this.setupLabels(cab, host.quality === 'low' ? 96 : 256);
     this.finishSetup();
   }
 

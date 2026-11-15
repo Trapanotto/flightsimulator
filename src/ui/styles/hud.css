@@ -840,3 +840,30 @@
   background: #ff8a3a;
   box-shadow: 0 0 8px rgb(255 138 58 / 0.9);
 }
+
+/* The name of the cockpit control under the pointer. */
+.control-hint {
+  position: fixed;
+  z-index: 5;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 5px 11px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-pill);
+  background: rgb(10 14 20 / 0.86);
+  font-size: var(--fs-2);
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(-50%, calc(-100% - 18px));
+}
+
+.control-hint--below {
+  transform: translate(-50%, 26px);
+}
+
+.control-hint-value {
+  color: var(--c-accent, #7fd1ff);
+  font-variant-numeric: tabular-nums;
+}

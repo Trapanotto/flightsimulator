@@ -598,10 +598,10 @@ export function drawLabelAtlas(
     const x = ((i % cols) + 0.5) * cellW;
     const y = (Math.floor(i / cols) + 0.5) * cellH;
     let size = cellH * 0.78;
-    c.font = `600 ${size}px ${FONT}`;
+    c.font = `700 ${size}px ${FONT}`;
     const w = c.measureText(s).width;
     if (w > cellW * 0.94) size *= (cellW * 0.94) / w;
-    c.font = `600 ${size}px ${FONT}`;
+    c.font = `700 ${size}px ${FONT}`;
     c.fillStyle = colors[i] ?? WHITE;
     c.fillText(s, x, y + size * 0.04);
   });

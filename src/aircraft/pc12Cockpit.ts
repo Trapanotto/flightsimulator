@@ -196,7 +196,7 @@ export class PC12Cockpit extends CockpitCore {
     for (const a of [this.pfd, this.mfd1, this.mfd2, this.panelAtlas])
       this.textureBytes += a.canvas.width * a.canvas.height * 4 * 1.33;
     this.setupDisplays(cab);
-    this.setupLabels(cab, host.quality === 'low' ? 64 : 128);
+    this.setupLabels(cab, host.quality === 'low' ? 96 : 256);
     this.finishSetup();
   }
 

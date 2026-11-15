@@ -204,7 +204,7 @@ export class A320Cockpit extends CockpitCore {
     this.ownTextures.push(this.panelTex);
     this.textureBytes += this.panelAtlas.canvas.width * this.panelAtlas.canvas.height * 4 * 1.33;
     this.setupDisplays(cab, { pfdTex, ndTex, ewdTex, sdTex, mcduTex, isisTex });
-    this.setupLabels(cab, host.quality === 'low' ? 64 : 128);
+    this.setupLabels(cab, host.quality === 'low' ? 96 : 256);
     this.finishSetup();
   }
 
