@@ -68,6 +68,14 @@ export function panelGlow(exposure: number, panelLight: number): number {
 }
 
 /**
+ * Cabin and flood lighting (dome lights, the glareshield's flood lights): like the post
+ * lights a lamp of fixed brightness that only shows in the dark, without the day fill.
+ */
+export function cabinGlow(exposure: number, level: number): number {
+  return Math.min(POST_LIGHT * 0.6 * exposure, 0.3) * Math.min(Math.max(level, 0), 1);
+}
+
+/**
  * Backlit displays and annunciator lamps: bright enough to read by day, dimmed at night (the
  * sets' photocells do the same) so they do not glare.
  */

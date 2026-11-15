@@ -18,11 +18,11 @@
  * Model frame: x left, y up, z forward, metres; origin = the centre of gravity (FS 5.95 m
  * behind the spinner tip, 1.78 m above the ground on the gear).
  */
-import type { Object3D } from 'three/webgpu';
+import { Color, type Material, type MeshStandardMaterial, type Object3D } from 'three/webgpu';
 import type { Cockpit, ControlInput, Telemetry } from '@sim';
 import type { AircraftVisual, AircraftVisualOptions } from './AircraftVisual';
 import { lag } from './instruments';
-import type { AircraftLights } from './lights';
+import { type AircraftLights, cabinGlow } from './lights';
 import {
   AircraftModel,
   type LightLevels,
@@ -130,6 +130,7 @@ export async function loadPC12(options: AircraftVisualOptions = {}): Promise<Air
 
 class PC12 extends AircraftModel {
   protected readonly cockpit: PC12Cockpit;
+  private readonly cabinMaterials: MeshStandardMaterial[] = [];
   private s = {
     steer: 0,
     wheel: 0,
@@ -142,6 +143,16 @@ class PC12 extends AircraftModel {
   constructor(scene: Object3D, quality: 'high' | 'low', options: AircraftVisualOptions) {
     super(scene, quality, options, CONFIG);
     this.wireMaterials();
+    // The interior glows with the cabin lights at night: an emissive term of its own colour
+    // whose intensity changes per frame (no new shader).
+    const lit = /^(Interior|InteriorDark|Fabric|Leather|Carpet|Panel|Glareshield|AvionicsFace)$/;
+    for (const m of this.materials as Set<Material>) {
+      const s = m as MeshStandardMaterial;
+      if (!lit.test(m.name) || !s.isMeshStandardMaterial) continue;
+      s.emissive = new Color().copy(s.color);
+      s.emissiveIntensity = 0;
+      this.cabinMaterials.push(s);
+    }
     this.object.updateMatrixWorld(true);
     this.cockpit = new PC12Cockpit({
       root: this.object,
@@ -293,6 +304,11 @@ class PC12 extends AircraftModel {
     }
     this.slideBy('Pedals_R', c.yaw);
     this.slideBy('Pedals_L', -c.yaw);
+    // Dome and flood lights from the cabin knob, powered by the bus.
+    const powered = t.systems ? t.systems.busVolts > 18 : true;
+    const cabin = powered && cockpit?.has('lightCabin') ? cockpit.get('lightCabin') : 0;
+    const glow = cabinGlow(this.exposure, cabin);
+    for (const m of this.cabinMaterials) m.emissiveIntensity = glow;
     this.cockpit.update(
       dt,
       t,

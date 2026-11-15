@@ -184,6 +184,8 @@ export abstract class AircraftModel implements AircraftVisual {
   private readonly glowScale: number;
   /** 0.2 by day .. 1 at night, see setExposure. */
   private glowVisibility = 1;
+  /** The sky's exposure last given to setExposure. */
+  protected exposure = 4.2;
   protected altOffset = 0;
   private lightsOverride: Partial<AircraftLights> | undefined;
   protected inside = false;
@@ -549,6 +551,7 @@ export abstract class AircraftModel implements AircraftVisual {
 
   setExposure(exposure: number): void {
     this.glowVisibility = glowVisibility(exposure);
+    this.exposure = exposure;
     this.cockpit.setExposure(exposure);
   }
 
