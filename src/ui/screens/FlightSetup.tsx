@@ -1,72 +1,51 @@
 import { useSignal } from '@preact/signals';
-import { AIRCRAFT, type AircraftInfo, type FailureId } from '@sim';
+import { AIRCRAFT, type AircraftInfo } from '@sim';
 import { useEffect, useMemo, useRef } from 'preact/hooks';
 import { type AirportOption, type SeasonChoice, type WeatherChoice, game, settings } from '../api';
-import { Field, Segmented, Slider, Toggle } from '../components/controls';
+import { Brand, LanguageSwitch, Version } from '../components/Brand';
+import { Credits } from '../components/Credits';
+import { Field, Segmented, Slider } from '../components/controls';
 import {
   CategoryIcon,
   IconApproach,
-  IconBack,
-  IconChevronDown,
-  IconClose,
-  IconCircuit,
   IconClimb,
+  IconClose,
   IconCloud,
   IconFair,
   IconLive,
-  IconMountain,
-  IconNight,
   IconOvercast,
   IconPlane,
   IconRunway,
   IconSearch,
+  IconSettings,
   IconStratus,
   IconSun,
 } from '../components/icons';
-import {
-  type Category,
-  airportEligibility,
-  categoryOf,
-  eligible,
-  shortName,
-  typeDefaults,
-} from '../fleet';
+import { airportEligibility, categoryOf, shortName, typeDefaults } from '../fleet';
 import { eligibilityText } from '../fleetText';
-import { arrowNav, useDialog } from '../focus';
+import { arrowNav } from '../focus';
 import {
   altitudeUnit,
   convertAltitude,
   formatClock,
   formatSpec,
-  formatSpeed,
   groupThousands,
   runwayHeading,
-  speedUnit,
 } from '../format';
 import { type MessageKey, lang, t } from '../i18n';
 import { actions, nav } from '../nav';
 import { browserStorage, readJson, writeJson } from '../persist';
 import {
   DRAFT_KEY,
-  FAILURE_IDS,
-  FAILURE_MINUTES,
-  type FailureMode,
-  type Scenario,
-  type ScenarioId,
   type SetupDraft,
   SEASON_CHOICES,
   type StartKind,
   WEATHER_CHOICES,
   airAltitudeRange,
-  availableScenarios,
   draftToPlan,
+  nearestAirport,
   planProblem,
   sanitizeDraft,
-  duskHours,
-  scenarioAircraft,
-  scenarioBlocker,
-  scenarioDraft,
-  nearestAirport,
   usableEnds,
 } from '../plan';
 import { dayGradient, sunTimes, swissNowHours } from '../sun';
@@ -75,11 +54,17 @@ import {
   airportFacts,
   isMainAirport,
   labelPriority,
+  mapAirports,
   orderAirports,
   readRecent,
   rememberAirport,
 } from '../airportPick';
 import { SwissMap } from './SwissMap';
+
+/** The aircraft's name as the picker shows it: the maker's long name gives way to the type. */
+function displayName(info: AircraftInfo): string {
+  return info.name.replace(/^McDonnell Douglas /, '');
+}
 
 const WEATHER_ICON: Record<WeatherChoice, () => preact.JSX.Element> = {
   live: () => <IconLive size={22} />,
@@ -309,47 +294,9 @@ export function pairRunways(ends: string[]): string {
   return out.join('  ');
 }
 
-/** Name, engines, gear and the three numbers that matter most before a flight. */
-function CraftBody({ info, icon }: { info: AircraftInfo; icon?: boolean }) {
-  const units = settings.units.value;
-  const stats: [MessageKey, MessageKey, string, string][] = [
-    ['aircraft.vs0', 'aircraft.vs0.sub', formatSpeed(info.vs0, units), speedUnit(units)],
-    ['aircraft.vne', 'aircraft.vne.sub', formatSpeed(info.vne, units), speedUnit(units)],
-    ['aircraft.mtom', 'aircraft.mtom.sub', groupThousands(info.maxTakeoffMass, lang.value), 'kg'],
-  ];
-  return (
-    <>
-      <span class="craft-head">
-        {icon !== false && <IconPlane size={22} />}
-        <span class="craft-name">{info.name}</span>
-        <span class="craft-meta">
-          {info.engines === 1
-            ? t('aircraft.engine.one')
-            : t('aircraft.engine.many', { n: info.engines })}
-          {' · '}
-          {t(info.retractableGear ? 'aircraft.gear.retract' : 'aircraft.gear.fixed')}
-        </span>
-      </span>
-      <span class="craft-stats">
-        {stats.map(([label, sub, value, unit]) => (
-          <span class="stat" key={label}>
-            <span class="stat-label">{t(label)}</span>
-            <span class="stat-value num">
-              {value}
-              <span class="stat-unit">{unit}</span>
-            </span>
-            <span class="stat-sub">{t(sub)}</span>
-          </span>
-        ))}
-      </span>
-    </>
-  );
-}
-
 /**
- * The aircraft: with one type, its card as the only choice; with several, a row of compact
- * tiles (kind and short name) and the chosen one's card below, so four never crowd and one
- * never looks lost.
+ * The aircraft as a row of choices, each with its icon and its name: nothing else is needed
+ * to choose, and the four always fit (two by two on a phone).
  */
 function AircraftPicker(props: {
   aircraft: AircraftInfo[];
@@ -367,67 +314,33 @@ function AircraftPicker(props: {
         </div>
       </div>
     );
-  const keys = (e: KeyboardEvent) => arrowNav(e, ref.current, '[role="radio"]', 'both')?.click();
-  if (props.aircraft.length === 1) {
-    const info = props.aircraft[0]!;
-    const on = info.id === props.selected;
-    return (
-      <div
-        ref={ref}
-        class="craft-list"
-        role="radiogroup"
-        aria-label={t('setup.aircraft')}
-        onKeyDown={keys}
-      >
-        <button
-          type="button"
-          role="radio"
-          aria-checked={on}
-          tabIndex={on ? 0 : -1}
-          class={`craft${on ? ' is-on' : ''}`}
-          onClick={() => props.onSelect(info.id)}
-        >
-          <CraftBody info={info} />
-        </button>
-      </div>
-    );
-  }
-  const chosen = props.aircraft.find((a) => a.id === props.selected);
+  const chosen = props.aircraft.some((a) => a.id === props.selected);
   return (
-    <div class="craft-chooser">
-      <div
-        ref={ref}
-        class="craft-tiles"
-        role="radiogroup"
-        aria-label={t('setup.aircraft')}
-        onKeyDown={keys}
-      >
-        {props.aircraft.map((a, i) => {
-          const on = a.id === props.selected;
-          const category = categoryOf(a);
-          return (
-            <button
-              type="button"
-              role="radio"
-              key={a.id}
-              aria-checked={on}
-              aria-label={a.name}
-              tabIndex={on || (!chosen && i === 0) ? 0 : -1}
-              class={`craft-tile${on ? ' is-on' : ''}`}
-              onClick={() => props.onSelect(a.id)}
-            >
-              <CategoryIcon category={category} size={24} />
-              <span class="craft-tile-name">{shortName(a)}</span>
-              <span class="craft-tile-kind">{t(`category.${category}`)}</span>
-            </button>
-          );
-        })}
-      </div>
-      {chosen && (
-        <div class="craft craft--detail" aria-live="polite">
-          <CraftBody info={chosen} icon={false} />
-        </div>
-      )}
+    <div
+      ref={ref}
+      class="craft-names"
+      role="radiogroup"
+      aria-label={t('setup.aircraft')}
+      onKeyDown={(e) => arrowNav(e, ref.current, '[role="radio"]', 'both')?.click()}
+    >
+      {props.aircraft.map((a, i) => {
+        const on = a.id === props.selected;
+        return (
+          <button
+            type="button"
+            role="radio"
+            key={a.id}
+            aria-checked={on}
+            title={a.name}
+            tabIndex={on || (!chosen && i === 0) ? 0 : -1}
+            class={`craft-name-tile${on ? ' is-on' : ''}`}
+            onClick={() => props.onSelect(a.id)}
+          >
+            <CategoryIcon category={categoryOf(a)} size={22} />
+            <span class="craft-name-text">{displayName(a)}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -493,245 +406,10 @@ function TimePicker(props: {
   );
 }
 
-const SCENARIO_ICON: Record<ScenarioId, () => preact.JSX.Element> = {
-  ilsZurich: () => <IconStratus size={22} />,
-  bernCircuit: () => <IconCircuit size={22} />,
-  alpsSamedan: () => <IconMountain size={22} />,
-  nightGeneva: () => <IconNight size={22} />,
-  a320Zurich: () => <CategoryIcon category="airliner" size={22} />,
-  fa18Meiringen: () => <CategoryIcon category="fighter" size={22} />,
-  pc12Samedan: () => <CategoryIcon category="turboprop" size={22} />,
-};
-
 /**
- * Ready-made flights: one click and the briefing starts. A scenario made for a type flies
- * that type; the others fly the pilot's choice, and say so when it cannot use their airports.
+ * The home screen: the game opens here and every flight ends here. One sheet under the title:
+ * where (map, search, list), how (start, runway), with what, when and in which weather.
  */
-function ScenarioGrid(props: {
-  draft: SetupDraft;
-  aircraft: readonly AircraftInfo[];
-  onStart: (s: Scenario) => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const airports = game.airports.value;
-  const list = availableScenarios(airports, props.aircraft);
-  const today = new Date();
-  return (
-    <div class="scenarios">
-      <p class="field-hint">
-        {t(list.some((s) => s.aircraft) ? 'setup.scenarios.hint.fleet' : 'setup.scenarios.hint')}
-      </p>
-      <div
-        ref={ref}
-        class="scenario-grid"
-        onKeyDown={(e) => arrowNav(e, ref.current, '.scenario:not([disabled])', 'both')}
-      >
-        {list.map((s, i) => {
-          const d = s.draft;
-          const apt = airports.find((a) => a.icao === d.airport);
-          const dest = d.destination && d.destination !== d.airport ? d.destination : null;
-          const info = scenarioAircraft(s, props.draft, props.aircraft);
-          const blocker = scenarioBlocker(s, props.draft, airports, props.aircraft);
-          const time = s.dusk ? duskHours(airports, d.airport, today) : d.time;
-          return (
-            <button
-              type="button"
-              key={s.id}
-              class={`scenario${i === 0 ? ' is-featured' : ''}${s.aircraft ? ' is-typed' : ''}`}
-              data-autofocus={i === 0 && !blocker ? '' : undefined}
-              disabled={!!blocker}
-              onClick={() => props.onStart(s)}
-            >
-              <span class="scenario-icon">{SCENARIO_ICON[s.id]()}</span>
-              <span class="scenario-text">
-                <span class="scenario-title">{t(`scenario.${s.id}`)}</span>
-                <span class="scenario-sub">{t(`scenario.${s.id}.sub`)}</span>
-              </span>
-              <span class="scenario-meta num">
-                {blocker && info ? (
-                  <span class="scenario-why">
-                    {t('setup.scenario.blocked', { icao: blocker.icao, type: shortName(info) })}
-                  </span>
-                ) : (
-                  <>
-                    <span class="scenario-icao">{apt?.icao}</span>
-                    {dest && <span aria-hidden="true">→</span>}
-                    {dest && <span class="scenario-icao">{dest}</span>}
-                    <span class="scenario-dot" aria-hidden="true">
-                      ·
-                    </span>
-                    {typeof time === 'number' && formatClock(time)}
-                    <span class="scenario-dot" aria-hidden="true">
-                      ·
-                    </span>
-                    {d.weather && t(`weather.${d.weather}`)}
-                    {info && props.aircraft.length > 1 && (
-                      <>
-                        <span class="scenario-dot" aria-hidden="true">
-                          ·
-                        </span>
-                        <span class="scenario-type">{shortName(info)}</span>
-                      </>
-                    )}
-                  </>
-                )}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-/** Destination, ATC, cold start and failures: closed until asked for. */
-function Advanced(props: {
-  draft: SetupDraft;
-  airports: AirportOption[];
-  category: Category;
-  set: (patch: Partial<SetupDraft>) => void;
-}) {
-  const open = useSignal(false);
-  const { draft: d, set, category } = props;
-  // Only where the type may land: an A320 is not sent to a grass strip.
-  const airports = props.airports.filter((a) => eligible(a, category));
-  const dest = airports.find((a) => a.icao === d.destination);
-  const extras = advancedSummary(d);
-  return (
-    <section class={`adv${open.value ? ' is-open' : ''}`}>
-      <button
-        type="button"
-        class="adv-head"
-        aria-expanded={open.value}
-        aria-controls="setup-advanced"
-        onClick={() => (open.value = !open.value)}
-      >
-        <span class="adv-text">
-          <span class="caps adv-title">{t('setup.advanced')}</span>
-          <span class="adv-sub">{extras || t('setup.advanced.sub')}</span>
-        </span>
-        <IconChevronDown size={18} />
-      </button>
-      {open.value && (
-        <div id="setup-advanced" class="adv-body fade-in">
-          <Field label={t('setup.destination')} id="setup-dest">
-            <div class="setup-map-wrap adv-map">
-              <SwissMap
-                airports={props.airports}
-                selected={d.destination}
-                route={dest ? { from: d.airport, to: d.destination } : undefined}
-                onSelect={(icao) => set({ destination: icao, destinationRunway: '' })}
-                isOff={(a) => !eligible(a, category)}
-                isMain={isMainAirport}
-                labelPriority={labelPriority}
-                zoomable
-                zoomLabels={zoomLabels()}
-                label={t('setup.destination.map')}
-              />
-            </div>
-            <Segmented<string>
-              label={t('setup.destination')}
-              class="dest-seg"
-              value={d.destination}
-              onChange={(v) => set({ destination: v, destinationRunway: '' })}
-              options={[
-                { value: '', label: t('setup.destination.none') },
-                ...airports.map((a) => ({ value: a.icao, label: a.icao })),
-              ]}
-            />
-            {dest && usableEnds(dest, category).length > 0 && (
-              <div class="sub-field">
-                <span class="sub-label" id="setup-dest-rwy">
-                  {t('setup.destination.runway')}
-                </span>
-                <Segmented<string>
-                  label={t('setup.destination.runway')}
-                  class="rwy-seg"
-                  value={d.destinationRunway}
-                  onChange={(v) => set({ destinationRunway: v })}
-                  options={usableEnds(dest, category).map((r) => ({
-                    value: r,
-                    label: r,
-                    sub: `${String(runwayHeading(r)).padStart(3, '0')}°`,
-                  }))}
-                />
-              </div>
-            )}
-          </Field>
-          <div class="toggle-list adv-toggles">
-            <Toggle
-              label={t('setup.atc')}
-              hint={t('setup.atc.hint')}
-              checked={d.atc}
-              onChange={(v) => set({ atc: v })}
-            />
-            <Toggle
-              label={t('setup.coldStart')}
-              hint={
-                d.start === 'runway' ? t('setup.coldStart.hint') : t('setup.coldStart.runwayOnly')
-              }
-              checked={d.coldStart && d.start === 'runway'}
-              disabled={d.start !== 'runway'}
-              onChange={(v) => set({ coldStart: v })}
-            />
-          </div>
-          <Field label={t('setup.failures')} id="setup-failures">
-            <Segmented<FailureMode>
-              label={t('setup.failures')}
-              value={d.failureMode}
-              onChange={(v) => set({ failureMode: v })}
-              options={(['none', 'random', 'chosen'] as const).map((m) => ({
-                value: m,
-                label: t(`setup.failures.${m}`),
-              }))}
-            />
-            {d.failureMode === 'random' && (
-              <p class="field-hint">{t('setup.failures.random.hint')}</p>
-            )}
-            {d.failureMode === 'chosen' && (
-              <>
-                <div class="sub-field">
-                  <span class="sub-label">{t('setup.failures.which')}</span>
-                  <Segmented<FailureId>
-                    label={t('setup.failures.which')}
-                    class="seg--wrap failure-seg"
-                    value={d.failureId}
-                    onChange={(v) => set({ failureId: v })}
-                    options={FAILURE_IDS.map((f) => ({ value: f, label: t(`failure.${f}`) }))}
-                  />
-                </div>
-                <div class="sub-field">
-                  <span class="sub-label">{t('setup.failures.when')}</span>
-                  <Segmented<number>
-                    label={t('setup.failures.when')}
-                    value={d.failureAfterMin}
-                    onChange={(v) => set({ failureAfterMin: v })}
-                    options={FAILURE_MINUTES.map((m) => ({
-                      value: m,
-                      label: t('setup.minutes', { n: m }),
-                    }))}
-                  />
-                </div>
-              </>
-            )}
-          </Field>
-        </div>
-      )}
-    </section>
-  );
-}
-
-/** What the advanced part changes from the defaults, as a short line ('' when nothing). */
-function advancedSummary(d: SetupDraft): string {
-  const parts: string[] = [];
-  if (d.destination) parts.push(`${t('setup.destination')} ${d.destination}`);
-  if (!d.atc) parts.push(t('setup.summary.atcOff'));
-  if (d.coldStart && d.start === 'runway') parts.push(t('setup.summary.cold'));
-  if (d.failureMode !== 'none') parts.push(t('setup.summary.failure'));
-  return parts.join(' · ');
-}
-
-/** The flight setup: where, how, with what, when and in which weather, on one page. */
 export function FlightSetup() {
   const ref = useRef<HTMLDivElement>(null);
   const airports = game.airports.value;
@@ -740,12 +418,9 @@ export function FlightSetup() {
   const draft = useSignal<SetupDraft>(
     sanitizeDraft(readJson(storage, DRAFT_KEY), airports, aircraft),
   );
-  const mode = useSignal<'free' | 'scenarios'>('free');
   const hovered = useSignal<string | null>(null);
   // Read once per visit: the list must not reshuffle while the pilot is choosing.
   const recent = useMemo(() => readRecent(storage), []);
-  const back = () => (nav.page.value = 'main');
-  useDialog(ref, back);
 
   // The app may deliver airports after the page opened: fit the remembered choice to them.
   useEffect(() => {
@@ -765,8 +440,11 @@ export function FlightSetup() {
   const category = categoryOf(info);
   const defaults = typeDefaults(info);
   const runways = airport ? usableEnds(airport, category) : [];
+  // Only what the chosen type can use is drawn on the map.
+  const usable = useMemo(() => mapAirports(airports, category), [airports, category]);
 
-  // Let the app show the choice in the menu scene; debounced so a dragged slider is cheap.
+  // The app may show the choice somewhere (it used to in the menu scene); debounced so a
+  // dragged slider is cheap.
   const planKey = JSON.stringify(plan);
   useEffect(() => {
     if (!plan || !actions.preview) return;
@@ -775,22 +453,13 @@ export function FlightSetup() {
   }, [planKey]);
 
   const fly = (from: SetupDraft) => {
-    // A random failure is drawn anew for every flight.
-    const rolled = { ...from, failureSeed: Math.floor(Math.random() * 1_000_000) };
-    const p = draftToPlan(rolled, airports, aircraft);
+    const p = draftToPlan(from, airports, aircraft);
     if (!p) return;
-    draft.value = rolled;
-    writeJson(storage, DRAFT_KEY, rolled);
     if (p.airport) rememberAirport(storage, p.airport);
     game.plan.value = p;
     actions.startFlight(p);
   };
   const start = () => fly(d);
-  const startScenario = (s: Scenario) => {
-    const sd = scenarioDraft(s, d, airports, aircraft);
-    if (sd) fly(sd);
-  };
-
   // An air start put on the map; the map taps place it instead of picking an airport.
   const placing = d.start === 'air' && d.airPlace === 'map';
   const place =
@@ -830,281 +499,244 @@ export function FlightSetup() {
         : d.start === 'approach'
           ? `${t('briefing.runway', { rwy: d.runway })} · ${t('briefing.approach', { d: t('setup.nm', { n: d.approachNm }) })}`
           : t('briefing.runway', { rwy: d.runway });
-  const extras = advancedSummary(d);
-  const scenarios = mode.value === 'scenarios';
 
   return (
-    <div
-      ref={ref}
-      class="setup enter"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="setup-title"
-    >
-      <header class="setup-head">
-        <button
-          type="button"
-          class="btn btn--ghost setup-back"
-          aria-label={t('setup.back')}
-          onClick={back}
-        >
-          <IconBack />
-          <span class="setup-back-text">{t('setup.backShort')}</span>
-        </button>
-        <h1 id="setup-title" class="setup-title">
-          {t('setup.title')}
-        </h1>
-        {availableScenarios(airports, aircraft).length > 0 && (
-          <Segmented<'free' | 'scenarios'>
-            label={t('setup.mode')}
-            class="setup-mode"
-            value={mode.value}
-            onChange={(v) => (mode.value = v)}
-            options={[
-              { value: 'free', label: t('setup.mode.free') },
-              { value: 'scenarios', label: t('setup.mode.scenarios') },
-            ]}
-          />
-        )}
+    <main ref={ref} class="setup setup--home enter" aria-labelledby="home-title">
+      <header class="setup-head home-head">
+        <Brand id="home-title" />
+        <div class="home-tools">
+          <LanguageSwitch />
+          <button
+            type="button"
+            class="btn btn--icon btn--ghost home-settings"
+            aria-label={t('menu.settings')}
+            title={t('menu.settings')}
+            onClick={() => (nav.settingsOpen.value = true)}
+          >
+            <IconSettings />
+          </button>
+        </div>
       </header>
 
-      {scenarios ? (
-        <div class="setup-body setup-body--scenarios">
-          <ScenarioGrid draft={d} aircraft={aircraft} onStart={startScenario} />
-        </div>
-      ) : (
-        <div class="setup-body">
-          <div class="setup-col setup-where">
-            <Field
-              label={d.start === 'approach' ? t('setup.airport') : t('setup.departure')}
-              id="setup-departure"
-            >
-              <div class={`setup-map-wrap setup-map-main${placing ? ' is-placing' : ''}`}>
-                <SwissMap
-                  airports={airports}
-                  selected={d.airport}
-                  route={d.destination ? { from: d.airport, to: d.destination } : undefined}
-                  onSelect={placing ? undefined : selectAirport}
-                  onPlace={placing ? (lon, lat) => set({ airLon: lon, airLat: lat }) : undefined}
-                  place={place}
-                  isOff={(a) => !eligible(a, category)}
-                  isMain={isMainAirport}
-                  labelPriority={labelPriority}
-                  hovered={hovered.value}
-                  onHover={(icao) => (hovered.value = icao)}
-                  zoomable
-                  zoomLabels={zoomLabels()}
-                  label={t(placing ? 'setup.map.place' : 'setup.map')}
-                />
-                {placing ? (
-                  <div class="map-callout" aria-hidden="true">
-                    <span class="map-callout-icao">{t('setup.start.air')}</span>
-                    <span class="map-callout-name">
-                      {near ? t('setup.air.near', { name: near.name }) : t('setup.air.hint')}
-                    </span>
-                  </div>
-                ) : (
-                  airport && (
-                    <div class="map-callout" aria-hidden="true">
-                      <span class="map-callout-icao">{airport.icao}</span>
-                      <span class="map-callout-name">{airport.name}</span>
-                    </div>
-                  )
-                )}
-              </div>
-              {placing && (
-                <div class="air-controls">
-                  <label class="air-control">
-                    <span class="sub-label">{t('setup.altitude')}</span>
-                    <output class="air-value num">{altitudeLabel(d.airAltitude)}</output>
-                    <Slider
-                      label={t('setup.altitude')}
-                      min={altRange[0]}
-                      max={altRange[1]}
-                      step={altitudeStep()}
-                      value={d.airAltitude}
-                      valueText={altitudeLabel(d.airAltitude)}
-                      onInput={(v) => set({ airAltitude: v })}
-                    />
-                  </label>
-                  <label class="air-control">
-                    <span class="sub-label">{t('setup.heading')}</span>
-                    <output class="air-value num">
-                      <span
-                        class="air-arrow"
-                        aria-hidden="true"
-                        style={{ transform: `rotate(${d.airHeading}deg)` }}
-                      >
-                        ↑
-                      </span>
-                      {String(d.airHeading).padStart(3, '0')}°
-                    </output>
-                    <Slider
-                      label={t('setup.heading')}
-                      min={0}
-                      max={355}
-                      step={5}
-                      value={d.airHeading}
-                      valueText={`${d.airHeading}°`}
-                      onInput={(v) => set({ airHeading: v })}
-                    />
-                  </label>
-                </div>
-              )}
-              <AirportList
-                airports={airports}
+      <div class="setup-body">
+        <div class="setup-col setup-where">
+          <Field
+            label={d.start === 'approach' ? t('setup.airport') : t('setup.departure')}
+            id="setup-departure"
+          >
+            <div class={`setup-map-wrap setup-map-main${placing ? ' is-placing' : ''}`}>
+              <SwissMap
+                airports={usable}
                 selected={d.airport}
-                info={info}
-                recent={recent}
+                onSelect={placing ? undefined : selectAirport}
+                onPlace={placing ? (lon, lat) => set({ airLon: lon, airLat: lat }) : undefined}
+                place={place}
+                isMain={isMainAirport}
+                labelPriority={labelPriority}
                 hovered={hovered.value}
                 onHover={(icao) => (hovered.value = icao)}
-                onSelect={selectAirport}
+                zoomable
+                zoomLabels={zoomLabels()}
+                label={t(placing ? 'setup.map.place' : 'setup.map')}
+              />
+              {placing ? (
+                <div class="map-callout" aria-hidden="true">
+                  <span class="map-callout-icao">{t('setup.start.air')}</span>
+                  <span class="map-callout-name">
+                    {near ? t('setup.air.near', { name: near.name }) : t('setup.air.hint')}
+                  </span>
+                </div>
+              ) : (
+                airport && (
+                  <div class="map-callout" aria-hidden="true">
+                    <span class="map-callout-icao">{airport.icao}</span>
+                    <span class="map-callout-name">{airport.name}</span>
+                  </div>
+                )
+              )}
+            </div>
+            {placing && (
+              <div class="air-controls">
+                <label class="air-control">
+                  <span class="sub-label">{t('setup.altitude')}</span>
+                  <output class="air-value num">{altitudeLabel(d.airAltitude)}</output>
+                  <Slider
+                    label={t('setup.altitude')}
+                    min={altRange[0]}
+                    max={altRange[1]}
+                    step={altitudeStep()}
+                    value={d.airAltitude}
+                    valueText={altitudeLabel(d.airAltitude)}
+                    onInput={(v) => set({ airAltitude: v })}
+                  />
+                </label>
+                <label class="air-control">
+                  <span class="sub-label">{t('setup.heading')}</span>
+                  <output class="air-value num">
+                    <span
+                      class="air-arrow"
+                      aria-hidden="true"
+                      style={{ transform: `rotate(${d.airHeading}deg)` }}
+                    >
+                      ↑
+                    </span>
+                    {String(d.airHeading).padStart(3, '0')}°
+                  </output>
+                  <Slider
+                    label={t('setup.heading')}
+                    min={0}
+                    max={355}
+                    step={5}
+                    value={d.airHeading}
+                    valueText={`${d.airHeading}°`}
+                    onInput={(v) => set({ airHeading: v })}
+                  />
+                </label>
+              </div>
+            )}
+            <AirportList
+              airports={airports}
+              selected={d.airport}
+              info={info}
+              recent={recent}
+              hovered={hovered.value}
+              onHover={(icao) => (hovered.value = icao)}
+              onSelect={selectAirport}
+            />
+          </Field>
+        </div>
+
+        <div class="setup-col setup-how">
+          <div class="start-grid">
+            <Field label={t('setup.start')} id="setup-start">
+              <Segmented<StartKind>
+                label={t('setup.start')}
+                class="start-seg"
+                value={d.start}
+                onChange={(v) => set({ start: v })}
+                options={[
+                  {
+                    value: 'runway',
+                    label: t('setup.start.runway'),
+                    icon: <IconRunway size={18} />,
+                  },
+                  { value: 'air', label: t('setup.start.air'), icon: <IconClimb size={18} /> },
+                  {
+                    value: 'approach',
+                    label: t('setup.start.approach'),
+                    icon: <IconApproach size={18} />,
+                  },
+                ]}
               />
             </Field>
-          </div>
-
-          <div class="setup-col setup-how">
-            <div class="start-grid">
-              <Field label={t('setup.start')} id="setup-start">
-                <Segmented<StartKind>
-                  label={t('setup.start')}
-                  class="start-seg"
-                  value={d.start}
-                  onChange={(v) => set({ start: v })}
-                  options={[
-                    {
-                      value: 'runway',
-                      label: t('setup.start.runway'),
-                      icon: <IconRunway size={18} />,
-                    },
-                    { value: 'air', label: t('setup.start.air'), icon: <IconClimb size={18} /> },
-                    {
-                      value: 'approach',
-                      label: t('setup.start.approach'),
-                      icon: <IconApproach size={18} />,
-                    },
-                  ]}
+            {runways.length > 0 && !placing && (
+              <Field label={t('setup.runway')} id="setup-runway">
+                <Segmented<string>
+                  label={t('setup.runway')}
+                  class="rwy-seg"
+                  value={d.runway}
+                  onChange={(v) => set({ runway: v })}
+                  options={runways.map((r) => ({
+                    value: r,
+                    label: r,
+                    sub: `${String(runwayHeading(r)).padStart(3, '0')}°`,
+                  }))}
                 />
               </Field>
-              {runways.length > 0 && !placing && (
-                <Field label={t('setup.runway')} id="setup-runway">
-                  <Segmented<string>
-                    label={t('setup.runway')}
-                    class="rwy-seg"
-                    value={d.runway}
-                    onChange={(v) => set({ runway: v })}
-                    options={runways.map((r) => ({
-                      value: r,
-                      label: r,
-                      sub: `${String(runwayHeading(r)).padStart(3, '0')}°`,
+            )}
+            {d.start === 'air' && (
+              <div class="start-height">
+                <Field label={t('setup.air.place')} id="setup-air-place">
+                  <Segmented<'airport' | 'map'>
+                    label={t('setup.air.place')}
+                    value={d.airPlace}
+                    onChange={setAirPlace}
+                    options={[
+                      { value: 'airport', label: t('setup.air.overAirport') },
+                      { value: 'map', label: t('setup.air.onMap') },
+                    ]}
+                  />
+                  {placing && <p class="field-hint">{t('setup.air.hint')}</p>}
+                </Field>
+              </div>
+            )}
+            {d.start === 'air' && !placing && (
+              <div class="start-height">
+                <Field label={t('setup.height')} id="setup-height">
+                  <Segmented<number>
+                    label={t('setup.height')}
+                    value={d.airHeight}
+                    onChange={(v) => set({ airHeight: v })}
+                    options={defaults.airHeights.map((h, i) => ({
+                      value: i,
+                      label: heightLabel(h),
                     }))}
                   />
                 </Field>
-              )}
-              {d.start === 'air' && (
-                <div class="start-height">
-                  <Field label={t('setup.air.place')} id="setup-air-place">
-                    <Segmented<'airport' | 'map'>
-                      label={t('setup.air.place')}
-                      value={d.airPlace}
-                      onChange={setAirPlace}
-                      options={[
-                        { value: 'airport', label: t('setup.air.overAirport') },
-                        { value: 'map', label: t('setup.air.onMap') },
-                      ]}
-                    />
-                    {placing && <p class="field-hint">{t('setup.air.hint')}</p>}
-                  </Field>
-                </div>
-              )}
-              {d.start === 'air' && !placing && (
-                <div class="start-height">
-                  <Field label={t('setup.height')} id="setup-height">
-                    <Segmented<number>
-                      label={t('setup.height')}
-                      value={d.airHeight}
-                      onChange={(v) => set({ airHeight: v })}
-                      options={defaults.airHeights.map((h, i) => ({
-                        value: i,
-                        label: heightLabel(h),
-                      }))}
-                    />
-                  </Field>
-                </div>
-              )}
-              {d.start === 'approach' && (
-                <div class="start-height">
-                  <Field label={t('setup.approachDistance')} id="setup-approach">
-                    <Segmented<number>
-                      label={t('setup.approachDistance')}
-                      value={d.approachNm}
-                      onChange={(v) => set({ approachNm: v })}
-                      options={defaults.approachDistances.map((n) => ({
-                        value: n,
-                        label: t('setup.nm', { n }),
-                      }))}
-                    />
-                  </Field>
-                </div>
-              )}
-            </div>
-
-            <Field label={t('setup.aircraft')} id="setup-aircraft">
-              <AircraftPicker
-                aircraft={aircraft}
-                selected={d.aircraft}
-                onSelect={(id) => set({ aircraft: id })}
-              />
-            </Field>
-
-            <TimePicker draft={d} airport={airport} onChange={(time) => set({ time })} />
-
-            <Field label={t('setup.weather')} id="setup-weather">
-              <Segmented<WeatherChoice>
-                label={t('setup.weather')}
-                variant="tiles"
-                value={d.weather}
-                onChange={(v) => set({ weather: v })}
-                options={WEATHER_CHOICES.map((w) => ({
-                  value: w,
-                  label: t(`weather.${w}`),
-                  icon: WEATHER_ICON[w](),
-                }))}
-              />
-            </Field>
-
-            <Field label={t('setup.season')} id="setup-season">
-              <Segmented<SeasonChoice>
-                label={t('setup.season')}
-                value={d.season}
-                onChange={(v) => set({ season: v })}
-                options={SEASON_CHOICES.map((v) => ({ value: v, label: t(`season.${v}`) }))}
-              />
-            </Field>
-
-            <Advanced draft={d} airports={airports} category={category} set={set} />
+              </div>
+            )}
+            {d.start === 'approach' && (
+              <div class="start-height">
+                <Field label={t('setup.approachDistance')} id="setup-approach">
+                  <Segmented<number>
+                    label={t('setup.approachDistance')}
+                    value={d.approachNm}
+                    onChange={(v) => set({ approachNm: v })}
+                    options={defaults.approachDistances.map((n) => ({
+                      value: n,
+                      label: t('setup.nm', { n }),
+                    }))}
+                  />
+                </Field>
+              </div>
+            )}
           </div>
-        </div>
-      )}
 
-      <footer class="setup-foot" hidden={scenarios}>
+          <Field label={t('setup.aircraft')} id="setup-aircraft">
+            <AircraftPicker
+              aircraft={aircraft}
+              selected={d.aircraft}
+              onSelect={(id) => set({ aircraft: id })}
+            />
+          </Field>
+
+          <TimePicker draft={d} airport={airport} onChange={(time) => set({ time })} />
+
+          <Field label={t('setup.weather')} id="setup-weather">
+            <Segmented<WeatherChoice>
+              label={t('setup.weather')}
+              variant="tiles"
+              value={d.weather}
+              onChange={(v) => set({ weather: v })}
+              options={WEATHER_CHOICES.map((w) => ({
+                value: w,
+                label: t(`weather.${w}`),
+                icon: WEATHER_ICON[w](),
+              }))}
+            />
+          </Field>
+
+          <Field label={t('setup.season')} id="setup-season">
+            <Segmented<SeasonChoice>
+              label={t('setup.season')}
+              value={d.season}
+              onChange={(v) => set({ season: v })}
+              options={SEASON_CHOICES.map((v) => ({ value: v, label: t(`season.${v}`) }))}
+            />
+          </Field>
+        </div>
+      </div>
+
+      <footer class="setup-foot">
         <div class="setup-summary" aria-live="polite">
           {airport ? (
             <>
               <span class="summary-main">
                 <span class="summary-icao">{(near ?? airport).icao}</span>
-                {d.destination && d.destination !== airport.icao && (
-                  <span class="summary-dest">
-                    <span aria-hidden="true">→ </span>
-                    <span class="visually-hidden">{t('setup.destination')} </span>
-                    {d.destination}
-                  </span>
-                )}
                 <span class="summary-name">{(near ?? airport).name}</span>
               </span>
               <span class="summary-sub">
                 {startText} · {timeText} · {t(`weather.${d.weather}`)}
-                {extras && ` · ${extras}`}
               </span>
             </>
           ) : (
@@ -1132,7 +764,11 @@ export function FlightSetup() {
             )}
           </span>
         )}
+        <p class="home-credits home-credits--inner">
+          <Credits />
+          <Version />
+        </p>
       </footer>
-    </div>
+    </main>
   );
 }

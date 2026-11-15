@@ -27,6 +27,7 @@ import {
 import { hintFrequency } from '../radio';
 import { AutopilotPanel, StackPanel, SwitchesPanel } from './AvionicsPanels';
 import { ChecklistHint, ChecklistPanel } from './ChecklistPanel';
+import { LeaveButton } from './PilotHud';
 import { RadioPanel, tuneHinted } from './RadioPanel';
 
 const PANEL_ICON: Record<PanelId, () => VNode> = {
@@ -153,7 +154,8 @@ function Toolbar({ list }: { list: PanelId[] }) {
 /** Touch: the button in the top bar and the menu it opens. */
 export function ToolsButton() {
   const list = availablePanels.value;
-  if (!list.length) return null;
+  // Getting out of the aircraft lives here too on touch, so the menu is there even without panels.
+  if (!list.length && !actions.leaveAircraft) return null;
   const isOpen = panels.toolsOpen.value;
   const anyPanel = panels.open.value.length > 0;
   const replies = (game.atc.value?.options.length ?? 0) > 0 && !panels.open.value.includes('radio');
@@ -186,7 +188,9 @@ function ToolsMenu({ list }: { list: PanelId[] }) {
         class="tools-menu glass enter"
         role="menu"
         aria-label={t('tools.open')}
-        onKeyDown={(e) => arrowNav(e, ref.current, '[role="menuitemcheckbox"]', 'both')}
+        onKeyDown={(e) =>
+          arrowNav(e, ref.current, '[role="menuitemcheckbox"], [role="menuitem"]', 'both')
+        }
       >
         {list.map((id) => (
           <button
@@ -202,6 +206,7 @@ function ToolsMenu({ list }: { list: PanelId[] }) {
             <span>{t(PANEL_LABEL[id])}</span>
           </button>
         ))}
+        <LeaveButton variant="menu" />
       </div>
     </>
   );
@@ -264,7 +269,7 @@ export function FlightPanels() {
     hadAtc.current = atc;
   });
 
-  if (!list.length) return null;
+  if (!list.length && !(touch && actions.leaveAircraft)) return null;
   const panel = (id: PanelId) => {
     const onClose = () => close(id);
     switch (id) {

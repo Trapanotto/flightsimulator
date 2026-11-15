@@ -47,11 +47,6 @@ export const IconBack = (p: P) => (
     <path d="M14.5 6 8.5 12l6 6" />
   </Icon>
 );
-export const IconArrowRight = (p: P) => (
-  <Icon {...p}>
-    <path d="M5 12h14M13 6l6 6-6 6" />
-  </Icon>
-);
 export const IconClose = (p: P) => (
   <Icon {...p}>
     <path d="M6 6l12 12M18 6 6 18" />
@@ -83,23 +78,6 @@ export const IconRunway = (p: P) => (
 export const IconClimb = (p: P) => (
   <Icon {...p}>
     <path d="M3 19h18M5 15.5 19 6M14 6h5v5" />
-  </Icon>
-);
-export const IconHangar = (p: P) => (
-  <Icon {...p}>
-    <path d="M3 20V10.5C3 8 7 5 12 5s9 3 9 5.5V20M7 20v-6h10v6" />
-  </Icon>
-);
-export const IconSchool = (p: P) => (
-  <Icon {...p}>
-    <path d="M2.5 9.5 12 5l9.5 4.5L12 14z" />
-    <path d="M6.5 11.6V16c1.5 1.4 3.5 2 5.5 2s4-.6 5.5-2v-4.4M21.5 9.5V15" />
-  </Icon>
-);
-export const IconLogbook = (p: P) => (
-  <Icon {...p}>
-    <path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3" />
-    <path d="M9 7.5h6M9 11h4" />
   </Icon>
 );
 export const IconRestart = (p: P) => (
@@ -287,23 +265,6 @@ export const IconSide = (p: P) => (
     <path d="M8 7 3.5 12 8 17M16 7l4.5 5-4.5 5M3.5 12h17" />
   </Icon>
 );
-export const IconNight = (p: P) => (
-  <Icon {...p}>
-    <path d="M19.5 14.5A8 8 0 0 1 9.5 4.5a8 8 0 1 0 10 10z" />
-  </Icon>
-);
-export const IconMountain = (p: P) => (
-  <Icon {...p}>
-    <path d="M2.5 19.5 9 8l4 6.5 2.5-3.5 6 8.5z" />
-    <path d="M7.4 10.8 9 12.5l1.6-1.6" />
-  </Icon>
-);
-export const IconCircuit = (p: P) => (
-  <Icon {...p}>
-    <rect x="4" y="6" width="16" height="12" rx="5" />
-    <path d="M9 12h6" stroke-width="2.5" />
-  </Icon>
-);
 /** Two chevrons: a coarse step (flipped by CSS for the other way). */
 export const IconFast = (p: P) => (
   <Icon {...p}>
@@ -355,7 +316,7 @@ export const IconReverse = (p: P) => (
   </Icon>
 );
 
-// Phase 5: replay, photo mode, logbook.
+// Replay and photo mode.
 export const IconReplay = (p: P) => (
   <Icon {...p}>
     <path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5" />
@@ -369,16 +330,20 @@ export const IconCamera = (p: P) => (
     <circle cx="12" cy="12.8" r="3.4" />
   </Icon>
 );
-export const IconTrash = (p: P) => (
-  <Icon {...p}>
-    <path d="M4.5 7h15M9.5 7V4.8h5V7M6.5 7l.9 12.2h9.2L17.5 7M10.2 10.5v5.5M13.8 10.5v5.5" />
-  </Icon>
-);
 export const IconHide = (p: P) => (
   <Icon {...p}>
     <path d="M3 12s3.3-6 9-6 9 6 9 6-3.3 6-9 6-9-6-9-6z" />
     <circle cx="12" cy="12" r="2.6" />
     <path d="M4.5 19.5 19.5 4.5" />
+  </Icon>
+);
+
+/** A parachute canopy over a jumper: leaving the aircraft. */
+export const IconParachute = (p: P) => (
+  <Icon {...p}>
+    <path d="M3.5 10a8.5 6 0 0 1 17 0c-1.4-1-2.8-1-4.2 0-1.4-1-2.9-1-4.3 0-1.4-1-2.9-1-4.3 0-1.4-1-2.8-1-4.2 0z" />
+    <path d="M3.5 10 11 17M20.5 10 13 17M12 10v7" />
+    <circle cx="12" cy="19" r="1.6" />
   </Icon>
 );
 

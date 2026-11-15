@@ -3,7 +3,7 @@
  * a fake flight and fake actions that move `game.screen` the way the app will.
  *
  * URL switches:
- *   screen=loading|menu|setup|briefing|flight|paused|settings|crash
+ *   screen=loading|menu|briefing|flight|paused|settings|crash   (menu: the flight planning)
  *   device=mobile   lang=de|en   bg=day|snow|night   view=cockpit   warn=stall|overspeed
  *   progress=0..1 (frozen loading/briefing progress)   still (frozen telemetry)
  *   noairports   noaircraft   live (briefing with a live weather report)   debug   msg=<text>
@@ -17,12 +17,11 @@
  *
  * Phase 4 (several types; see uiFleet.ts):
  *   fleet                    PC-12, A320 and F/A-18 join the Cessna (and all airports load)
- *   aircraft=pc12|a320|fa18  the type of the flight or briefing     screen=hangar  the hangar
+ *   aircraft=pc12|a320|fa18  the type of the flight or briefing
  *   speedbrake=0..1  rev  sb and reverse levers     g=<n> alpha=<deg>  fighter readouts
  *
- * Phase 5 (flight school, logbook, replay, photo mode; see uiPhase5.ts):
- *   screen=school|logbook|replay|photo   lesson=running|hint|hold|passed|failed (in flight)
- *   emptylog   noreplay
+ * Replay, photo mode and the pilot outside the aircraft (see uiExtras.ts):
+ *   screen=replay|photo   noreplay   pilot=freefall|low|canopy|walk|enter|lost
  */
 import { AIRPORTS as GEO_AIRPORTS, isPaved } from '@geo';
 import {
@@ -50,7 +49,7 @@ import {
   touchInput,
 } from '@ui';
 import { CONTROLS, FLYING, engines, installFleet } from './uiFleet';
-import { installPhase5, openPhase5Screen } from './uiPhase5';
+import { installExtras, openExtras } from './uiExtras';
 
 const q = new URLSearchParams(location.search);
 const screenParam = q.get('screen') ?? 'loading';
@@ -272,16 +271,10 @@ function paint() {
     }
   }
 
-  // A light aircraft on the apron, roughly where the app's menu camera shows it. In the
-  // hangar the shown type flies in the free middle of the screen instead.
-  const hangar = shownType !== null;
-  const px = hangar ? w * 0.5 : w * 0.68;
-  const py = hangar ? h * (w < h ? 0.34 : 0.46) : h * 0.74;
-  const s = (Math.min(w, h) / 600) * (shownType === 'a320' ? 1.05 : shownType === 'c172' ? 0.8 : 1);
-  if (shownType && shownType !== 'c172') {
-    drawType(g, px, py, s, shownType, bg === 'night');
-    return;
-  }
+  // A light aircraft ahead, where the flight's outside view has it.
+  const px = w * 0.68;
+  const py = h * 0.74;
+  const s = (Math.min(w, h) / 600) * 0.8;
   g.fillStyle = 'rgba(0,0,0,0.25)';
   g.beginPath();
   g.ellipse(px, py + 34 * s, 150 * s, 16 * s, 0, 0, Math.PI * 2);
@@ -300,71 +293,6 @@ function paint() {
   g.lineTo(px + 120 * s, py - 6 * s);
   g.fill();
 }
-/** A side view of a type, painted crudely enough to tell the four apart. */
-function drawType(
-  g: CanvasRenderingContext2D,
-  px: number,
-  py: number,
-  s: number,
-  type: AircraftId,
-  night: boolean,
-) {
-  const body = night ? '#30363f' : type === 'fa18' ? '#8d969f' : '#f5f6f8';
-  g.fillStyle = body;
-  if (type === 'pc12') {
-    g.beginPath();
-    g.ellipse(px, py, 120 * s, 15 * s, 0, 0, Math.PI * 2);
-    g.fill();
-    g.fillRect(px - 10 * s, py + 4 * s, 120 * s, 7 * s);
-    g.beginPath();
-    g.moveTo(px - 100 * s, py - 8 * s);
-    g.lineTo(px - 128 * s, py - 62 * s);
-    g.lineTo(px - 112 * s, py - 62 * s);
-    g.lineTo(px - 80 * s, py - 8 * s);
-    g.fill();
-    g.fillRect(px - 150 * s, py - 66 * s, 50 * s, 6 * s);
-    g.fillStyle = '#c8202a';
-    g.fillRect(px - 90 * s, py - 2 * s, 190 * s, 3 * s);
-  } else if (type === 'a320') {
-    g.beginPath();
-    g.ellipse(px, py, 150 * s, 17 * s, 0, 0, Math.PI * 2);
-    g.fill();
-    g.beginPath();
-    g.moveTo(px - 120 * s, py - 6 * s);
-    g.lineTo(px - 150 * s, py - 66 * s);
-    g.lineTo(px - 132 * s, py - 66 * s);
-    g.lineTo(px - 90 * s, py - 6 * s);
-    g.fill();
-    g.fillStyle = night ? '#252a31' : '#d9dde3';
-    g.beginPath();
-    g.ellipse(px + 10 * s, py + 22 * s, 26 * s, 9 * s, 0, 0, Math.PI * 2);
-    g.fill();
-    g.fillStyle = '#c8202a';
-    g.fillRect(px - 150 * s, py - 64 * s, 22 * s, 30 * s);
-  } else {
-    g.beginPath();
-    g.moveTo(px + 120 * s, py);
-    g.lineTo(px - 90 * s, py - 12 * s);
-    g.lineTo(px - 120 * s, py - 4 * s);
-    g.lineTo(px - 90 * s, py + 10 * s);
-    g.closePath();
-    g.fill();
-    g.beginPath();
-    g.moveTo(px - 70 * s, py - 10 * s);
-    g.lineTo(px - 104 * s, py - 56 * s);
-    g.lineTo(px - 92 * s, py - 56 * s);
-    g.lineTo(px - 40 * s, py - 10 * s);
-    g.fill();
-    g.beginPath();
-    g.moveTo(px + 30 * s, py + 2 * s);
-    g.lineTo(px - 60 * s, py + 26 * s);
-    g.lineTo(px - 40 * s, py + 4 * s);
-    g.fill();
-  }
-}
-
-/** The type the hangar shows (`actions.showAircraft`), or null outside the hangar. */
-let shownType: AircraftId | null = null;
 paint();
 window.addEventListener('resize', paint);
 
@@ -1034,11 +962,6 @@ const actions: UiActions = {
   preview(plan) {
     console.info('preview', plan);
   },
-  showAircraft(id) {
-    console.info('showAircraft', id);
-    shownType = id;
-    paint();
-  },
 };
 
 // The app's keyboard: Esc and P pause and resume, C changes the view, and flight keys.
@@ -1061,10 +984,7 @@ window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 
 // --- Mount and open the requested screen -------------------------------------------------------
 
-installPhase5(actions, q, (plan) => {
-  game.plan.value = plan;
-  actions.startFlight(plan);
-});
+installExtras(actions, q);
 mountUi(document.getElementById('ui')!, actions);
 
 const flying: Partial<typeof sim> = {
@@ -1138,11 +1058,8 @@ switch (screenParam) {
     break;
   case 'menu':
   case 'setup':
-  case 'hangar':
   case 'settings':
     game.screen.value = 'menu';
-    if (screenParam === 'setup') nav.page.value = 'setup';
-    if (screenParam === 'hangar') nav.page.value = 'hangar';
     if (screenParam === 'settings') nav.settingsOpen.value = true;
     break;
   case 'briefing':
@@ -1183,7 +1100,8 @@ switch (screenParam) {
     if (q.get('msg')) message(q.get('msg')!);
     break;
 }
-openPhase5Screen(q, actions);
+if (q.get('pilot') === 'lost') sim.crashed = 'terrain';
+openExtras(q, actions);
 
 // No global declaration: every demo page has its own shape of __demo.
 (window as unknown as { __demo: unknown }).__demo = {

@@ -13,7 +13,7 @@ import { typeFeatures } from '../fleet';
 import { throttleLabel } from '../fleetText';
 import { formatPercent } from '../format';
 import { t } from '../i18n';
-import { flownAircraft } from '../nav';
+import { flownAircraft, pilotOut } from '../nav';
 import {
   clampToCircle,
   leverValue,
@@ -483,6 +483,18 @@ export function TouchControls() {
   }, []);
   // Speed brake and reverse only for the types that have them: the Cessna's layout stays.
   const f = typeFeatures(flownAircraft.value);
+  // Outside the aircraft only the stick is left: it steers the canopy and walks the pilot.
+  if (pilotOut.value)
+    return (
+      <div
+        class="touch is-pilot"
+        aria-label={t('touch.controls')}
+        role="group"
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        <Stick />
+      </div>
+    );
   return (
     <div
       class={`touch${game.view.value === 'cockpit' ? ' is-cockpit' : ''}${f.speedbrake ? ' has-sb' : ''}${f.reverse ? ' has-rev' : ''}`}

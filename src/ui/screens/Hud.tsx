@@ -15,9 +15,8 @@ import {
 import { categoryOf, overspeedLimit, showsMach } from '../fleet';
 import { throttleLabel } from '../fleetText';
 import { type MessageKey, isMessageKey, lang, t } from '../i18n';
-import { actions, flownAircraft, inLesson, lessonEnded, showTouch } from '../nav';
-import { panels } from '../panels';
-import { LessonDebrief, LessonPanel } from './Lesson';
+import { actions, flownAircraft, pilotOut, showTouch } from '../nav';
+import { LeaveButton, PilotHud } from './PilotHud';
 import { autopilotModes } from './AvionicsPanels';
 import {
   EngineBlock,
@@ -503,6 +502,11 @@ function CrashDialog({ reason }: { reason: string }) {
  * telemetry updates a second never re-render the tree.
  */
 export function Hud() {
+  // Out of the aircraft the aircraft's displays give way to the jumper's.
+  return pilotOut.value ? <PilotHud /> : <AircraftHud />;
+}
+
+function AircraftHud() {
   const paused = game.screen.value === 'paused';
   const cockpit = game.view.value === 'cockpit';
   const touch = showTouch.value;
@@ -510,9 +514,6 @@ export function Hud() {
   const hasAvionics = useComputed(() => !!game.telemetry.value?.avionics);
   const nav = hasAvionics.value && settings.navStrip.value;
   const viewLabel = t(cockpit ? 'hud.view.cockpit' : 'hud.view.outside');
-  const lesson = inLesson.value;
-  // A touch panel sheet under the instructor: the card makes itself small (see school.css).
-  const sheet = lesson && touch && panels.open.value.length > 0;
 
   // Keep focus off the flight buttons, also when the pause dialog hands focus back: Space or
   // Enter on a focused button would trigger it while the pilot flies with the keyboard.
@@ -524,7 +525,7 @@ export function Hud() {
 
   return (
     <div
-      class={`hud${cockpit ? ' is-cockpit' : ''}${touch ? ' is-touch' : ''}${paused ? ' is-paused' : ''}${nav ? ' has-nav' : ''}${lesson ? ' has-lesson' : ''}${sheet ? ' has-sheet' : ''}${crashed.value ? ' is-crashed' : ''}`}
+      class={`hud${cockpit ? ' is-cockpit' : ''}${touch ? ' is-touch' : ''}${paused ? ' is-paused' : ''}${nav ? ' has-nav' : ''}${crashed.value ? ' is-crashed' : ''}`}
       inert={paused}
     >
       <div class="hud-top">
@@ -550,7 +551,7 @@ export function Hud() {
         >
           <IconPause />
         </button>
-        {touch && <ToolsButton />}
+        {touch ? <ToolsButton /> : <LeaveButton variant="hud" />}
       </div>
       {nav && <NavStrip />}
 
@@ -569,8 +570,6 @@ export function Hud() {
 
       <ControlHint />
       <div class="hud-alerts">
-        {/* First, so it stays put while warnings and notices come and go below it. */}
-        {lesson && !lessonEnded.value && <LessonPanel />}
         <Warnings />
         <Annunciators />
         <Notice />
@@ -579,8 +578,7 @@ export function Hud() {
       </div>
 
       {!crashed.value && <FlightPanels />}
-      {crashed.value && !paused && !lessonEnded.value && <CrashPanel reason={crashed.value} />}
-      {lessonEnded.value && !paused && <LessonDebrief />}
+      {crashed.value && !paused && <CrashPanel reason={crashed.value} />}
     </div>
   );
 }

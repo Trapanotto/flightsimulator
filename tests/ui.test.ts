@@ -367,7 +367,7 @@ describe('texts', () => {
 
   it('fills placeholders and knows its keys', () => {
     lang.value = 'en';
-    expect(t('aircraft.engine.many', { n: 2 })).toBe('2 engines');
+    expect(t('menu.version', { v: '1.2' })).toBe('Version 1.2');
     expect(t('briefing.runway', { rwy: '14' })).toBe('Runway 14');
     lang.value = 'de';
     expect(t('briefing.runway', { rwy: '14' })).toBe('Piste 14');

@@ -4,7 +4,7 @@ import { game } from '../api';
 import { IconCamera, IconClose, IconPause, IconPlay } from '../components/icons';
 import { arrowNav, useEscape } from '../focus';
 import { t } from '../i18n';
-import { REPLAY_SPEEDS, formatReplayTime, formatSpeedFactor } from '../logbook';
+import { REPLAY_SPEEDS, formatReplayTime, formatSpeedFactor } from '../replayTime';
 import { actions, showTouch } from '../nav';
 
 /** How far the arrow keys jump, seconds. */
@@ -164,8 +164,8 @@ export function ReplayBar() {
             <button
               type="button"
               class="btn btn--icon"
-              aria-label={t('replay.photo')}
-              title={t('replay.photo')}
+              aria-label={t('pause.photo')}
+              title={t('pause.photo')}
               onClick={() => actions.openPhoto?.()}
             >
               <IconCamera />
