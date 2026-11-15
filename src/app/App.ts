@@ -67,6 +67,17 @@ const HOME = { icao: 'LSZB', runway: '32' };
 /** The render origin follows the aircraft; it is moved when it is this far away (metres). */
 const REBASE_DISTANCE = 3000;
 const KT = 0.514444;
+/**
+ * Yoke travel the keys get. A key is all or nothing: on a light aircraft full travel is fine at
+ * low speed; a heavier, faster one over-rotates into its stall warning with it, so it gets
+ * less, measured from its landing stall speed (it takes off below the clean one).
+ */
+function keyAuthority(aircraft: SimAircraft): number {
+  const { info, telemetry } = aircraft;
+  if (!info.category || info.category === 'piston') return keyAuthorityAt(telemetry.ias, info.vs);
+  return 0.6 * keyAuthorityAt(telemetry.ias, info.vs0);
+}
+
 const UP = new Vector3(0, 1, 0);
 /** Shaders built at the same time behind a loading screen. */
 const COMPILE_LANES = 4;
@@ -862,7 +873,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
         : noTouch;
       const options = {
         invertPitch: settings.invertPitch.value,
-        keyAuthority: keyAuthorityAt(aircraft.telemetry.ias, aircraft.info.vs),
+        keyAuthority: keyAuthority(aircraft),
       };
       const alpha = flight.advance(dt, (stepDt) => {
         // Finer (or coarser) terrain arrived under the aircraft: its height changed without
