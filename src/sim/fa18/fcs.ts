@@ -47,7 +47,7 @@ export const FA18_FCS = {
   onSpeedAlpha: 8.1 * DEG,
   trimAlpha: 6 * DEG,
   /** Angle of attack limits: up and away, and with the flaps down. */
-  alphaMax: 45 * DEG,
+  alphaMax: 40 * DEG,
   alphaMaxPa: 15 * DEG,
   alphaMin: -12 * DEG,
   /** Above this the stick commands angle of attack instead of load factor. */
@@ -100,7 +100,6 @@ export class Fa18Fcs implements ControlLaw {
   private rollIntegral = 0;
   private yawIntegral = 0;
   private nzIntegral = 0;
-  debug: number[] = [];
   /** The pilot's load factor command through the command model (a first-order lag). */
   private nzModel = 1;
   /** Filtered rates of load factor and angle of attack: the limiters look ahead with them. */
@@ -111,6 +110,10 @@ export class Fa18Fcs implements ControlLaw {
   private speedbrakeInhibit = false;
   private spinTimer = 0;
   private paLatched = false;
+  /** Crossed controls held at low speed and high angle of attack, s. */
+  private crossed = 0;
+  /** The pilot has forced full rudder and aileron through the protections (a provoked departure). */
+  provoked = false;
   private readonly machOut = { lift: 1, drag: 0, cpShift: 0, control: 1 };
 
   constructor(readonly def: AircraftDefinition) {
@@ -160,6 +163,8 @@ export class Fa18Fcs implements ControlLaw {
     this.spinTimer = 0;
     this.mode = 'ground';
     this.paLatched = false;
+    this.crossed = 0;
+    this.provoked = false;
   }
 
   private mass(ctx: ControlLawContext) {
@@ -257,6 +262,29 @@ export class Fa18Fcs implements ControlLaw {
       return;
     }
 
+    // ---- provoked departure ----
+    // Full pedal against full lateral stick, held at very low speed with the stick aft: the
+    // FCS cannot coordinate that and the pilot gets the surfaces (how a falling leaf or a spin
+    // is entered). Released controls give the protections back.
+    const crossedNow =
+      Math.abs(yawIn) > 0.8 &&
+      Math.abs(r) > 0.8 &&
+      Math.sign(yawIn) !== Math.sign(r) &&
+      ias < 140 * KT &&
+      alpha > 25 * DEG;
+    this.crossed = crossedNow ? this.crossed + dt : 0;
+    if (this.crossed > 1) this.provoked = true;
+    if (Math.abs(yawIn) < 0.3 || Math.abs(r) < 0.3 || ias > 160 * KT) this.provoked = false;
+    if (this.provoked) {
+      const stick = p >= 0 ? p * c.elevatorUp : p * c.elevatorDown;
+      out.elevator = clamp(stick, -c.elevatorDown, c.elevatorUp);
+      out.aileron = r;
+      out.differentialTail = r;
+      out.rudder = yawIn;
+      this.fresh = true;
+      return;
+    }
+
     const theta = t.pitch;
     const phi = t.bank;
     const cosT = Math.cos(theta);
@@ -321,7 +349,6 @@ export class Fa18Fcs implements ControlLaw {
       this.nzIntegral = 0;
     }
     qDes = clamp(qDes, -0.9, 0.9);
-    this.debug = [qDes, this.nzIntegral, this.nzModel];
     const pitchScale = I.y / (this.pitchPower * q * mf);
     const qErr = qDes - w.y;
     if (this.fresh || wasDirect) {
@@ -344,23 +371,29 @@ export class Fa18Fcs implements ControlLaw {
       pMax =
         FA18_FCS.rollRate *
         (0.35 + 0.65 * smoothstep(2500, 9000, ctx.q)) *
-        (1 - 0.8 * smoothstep(15 * DEG, 35 * DEG, alpha)) *
+        (1 - 0.85 * smoothstep(10 * DEG, 30 * DEG, alpha)) *
         (1 - 0.45 * smoothstep(1.0, 1.6, ctx.mach));
     } else pMax = FA18_FCS.rollRatePa * (1 - 0.5 * smoothstep(10 * DEG, 15 * DEG, alpha));
     const rollShaped = r * (0.3 + 0.7 * Math.abs(r));
-    const pStab = rollShaped * pMax;
+    // Sideslip building up in the roll's direction eases the roll (the rudders cannot hold it).
+    const pStab = rollShaped * pMax - 2 * t.beta * smoothstep(10 * DEG, 25 * DEG, alpha);
     const ca = Math.cos(alpha);
     const sa = Math.sin(alpha);
     const pCmd = pStab * ca;
     // Aileron-rudder interconnect: the nose yaws with the roll at angle of attack.
     const turnYaw = (G * Math.sin(phi) * cosT) / V;
-    const rCmd = pStab * sa + turnYaw * (1 - smoothstep(60 * DEG, 90 * DEG, Math.abs(phi)));
+    // Gravity's sideways share turns the velocity vector; the nose follows it, and a sideslip
+    // the yaw rate has not caught asks for more (at high angle of attack the rudders alone
+    // cannot hold it).
+    const rCmd = pStab * sa + turnYaw + 0.8 * t.beta;
     const rollScale = I.x / (this.rollPower * q * mf);
     const pErr = pCmd - w.x;
-    this.rollIntegral = clamp(this.rollIntegral + rollScale * 3 * pErr * dt, -0.3, 0.3);
+    this.rollIntegral = clamp(this.rollIntegral + rollScale * 6 * pErr * dt, -0.3, 0.3);
     const rollFf = (this.rollDamping * pCmd) / (this.rollPower * 2 * V);
     const u = clamp(rollScale * 9 * pErr + rollFf + this.rollIntegral, -1, 1);
-    out.aileron = u;
+    // The ailerons' adverse yaw grows with angle of attack: above 15° they fade out and the
+    // differential stabilators roll the aircraft.
+    out.aileron = u * (1 - 0.7 * smoothstep(15 * DEG, 30 * DEG, alpha));
     out.differentialTail = u;
 
     // ---- yaw ----
