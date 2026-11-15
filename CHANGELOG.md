@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.0-alpha.8 – Phase 4, zweiter Teil: Airbus A320 und F/A-18 (2026-11-15)
+
+- **Airbus A320-214:** zwei CFM56-Triebwerke, Fly-by-Wire mit Sidestick-Gesetzen und
+  Schutzfunktionen, Schubhebel mit Rasten (CLB, FLX/MCT, TOGA), Autothrust, Autopilot mit
+  automatischer Landung (CAT 3), Bodenstörklappen und Autobremse. Glascockpit mit PFD, ND und
+  ECAM, eigene Checklisten und eigener Klang.
+- **McDonnell Douglas F/A-18C Hornet** der Schweizer Luftwaffe: zwei F404-Triebwerke mit
+  Nachbrenner, Flugsteuerung mit g-Begrenzer, Head-up-Display, drei Bildschirme, Autopilot und
+  Schubautomatik. Unbewaffnet.
+- **Hangar und Flugplanung** zeigen jetzt alle vier Flugzeuge.
+- **Anflugstart:** Der A320 beginnt mit Schubhebeln in der CLB-Raste und aktivem Autothrust,
+  die F/A-18 mit eingeschaltetem ILS.
+- Die Seitenruderhilfe greift bei Jets nur noch sanft am Boden ein.
+- Hinweis zur automatischen Landung im A320: bei «RETARD» die Schubhebel auf Leerlauf ziehen,
+  sonst fahren Störklappen und Autobremse nicht aus.
+
 ## 1.0.0-alpha.7 – Phase 4, erster Teil: Pilatus PC-12 und Hangar (2026-11-15)
 
 - **Pilatus PC-12 NG:** einmotoriger Turboprop mit Einziehfahrwerk und Druckkabine. Flugmodell

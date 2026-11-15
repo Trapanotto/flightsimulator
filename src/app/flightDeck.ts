@@ -19,6 +19,8 @@ const QNH = 1013;
 const BUTTON_HOLD = 0.12;
 /** Seconds the starter may crank after a tap on START from a panel without a key to hold. */
 const START_HOLD = 8;
+/** The CLIMB gate on the travel of the A320's thrust levers. */
+const A320_CLIMB_GATE = 0.62;
 const MAGNETOS_BOTH = 3;
 const MAGNETOS_START = 4;
 
@@ -121,6 +123,14 @@ export class FlightDeck {
     const c = aircraft.cockpit;
     aircraft.avionics.setDatabase(navDatabase());
     c.set('altimeterSetting', QNH);
+    // An airliner in the air flies with its thrust levers in the climb gate and autothrust
+    // holding the speed; started there, it must not sit at whatever thrust trimmed it.
+    if (aircraft.info.id === 'a320' && plan.start.kind !== 'runway') {
+      c.set('throttle1', A320_CLIMB_GATE);
+      c.set('throttle2', A320_CLIMB_GATE);
+      c.set('athr', 1);
+      this.pressed.set('athr', BUTTON_HOLD);
+    }
 
     const home = this.homeOf(plan);
     const start = plan.start;
@@ -144,6 +154,11 @@ export class FlightDeck {
           c.set(arriving ? 'nav1Active' : 'nav1Standby', ils.frequency);
           if (ils.course !== undefined)
             c.set('obs1', Math.round(ils.course - magneticDeclination(ils.lon, ils.lat)));
+          // The Hornet steers by its inertial system until the pilot selects the ILS.
+          if (arriving && this.specs.has('ilsOn')) {
+            c.set('navSource', 0);
+            c.set('ilsOn', 1);
+          }
         }
       }
     }

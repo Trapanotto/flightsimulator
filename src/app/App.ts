@@ -78,6 +78,15 @@ function keyAuthority(aircraft: SimAircraft): number {
   return 0.6 * keyAuthorityAt(telemetry.ias, info.vs0);
 }
 
+/**
+ * Where the throttle falls into a detent: the A320's CLIMB and FLX/MCT gates (TOGA and idle
+ * are the ends of the travel), the stop at military power before the F/A-18's afterburner.
+ */
+const THROTTLE_DETENTS: Partial<Record<AircraftId, readonly number[]>> = {
+  a320: [0.62, 0.82],
+  fa18: [0.75],
+};
+
 const UP = new Vector3(0, 1, 0);
 /** Shaders built at the same time behind a loading screen. */
 const COMPILE_LANES = 4;
@@ -423,7 +432,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   const setControl = (id: string, value: number, held = false) => {
     if (!deck || !flight) return;
     deck.setControl(id, value, held);
-    if (id === 'throttle' || id === 'flaps') input.adopt(flight.aircraft.controls);
+    if (id.startsWith('throttle') || id === 'flaps' || id === 'gear' || id === 'speedbrake')
+      input.adopt(flight.aircraft.controls);
   };
 
   /**
@@ -614,6 +624,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     const jet = aircraft.info.category === 'airliner' || aircraft.info.category === 'fighter';
     assist.coordinate = !jet;
     assist.groundGain = jet ? 0.15 : 1;
+    input.detents = THROTTLE_DETENTS[aircraft.info.id] ?? [];
     input.setFlapNotches(
       aircraft.cockpit.specs.find((s) => s.id === 'flaps')?.positions?.length ?? 4,
     );

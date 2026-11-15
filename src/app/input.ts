@@ -68,6 +68,8 @@ export const KEYS = {
   pause: ['KeyP', 'Escape'],
 } as const;
 
+/** How close to a detent the throttle is caught, share of its travel. */
+const DETENT_CATCH = 0.035;
 /** Share of the speed brake's travel per key press. */
 const SPEEDBRAKE_STEP = 0.25;
 
@@ -90,6 +92,9 @@ export class PilotInput {
   private speedbrake = 0;
   private lastTouchThrottle: number | null = null;
   private lastTouchSpeedbrake: number | null = null;
+
+  /** Positions of the throttle's travel the lever falls into (none on most aircraft). */
+  detents: readonly number[] = [];
 
   /** The aircraft's flap lever has `count` positions, evenly spread over its travel. */
   setFlapNotches(count: number) {
@@ -173,6 +178,11 @@ export class PilotInput {
       0,
       1,
     );
+    // Left near a detent, the lever falls into it (the gates of an airliner's thrust levers,
+    // the stop before a fighter's afterburner).
+    if (throttleDelta === 0)
+      for (const d of this.detents)
+        if (Math.abs(this.throttle - d) < DETENT_CATCH) this.throttle = d;
     if (touch) {
       // On-screen sticks add to the other devices (their pitch is already inverted if the
       // player asked for that).

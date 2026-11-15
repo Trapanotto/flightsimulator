@@ -426,7 +426,7 @@ export const FA18: AircraftDefinition = {
     vRotate: 130 * KT,
     specs: {
       maker: 'McDonnell Douglas, St. Louis (Swiss final assembly RUAG, Emmen)',
-      powerplant: '2 × General Electric F404-GE-402, 48.9 kN dry, 79.0 kN with afterburner',
+      powerplant: '2 × General Electric F404-GE-402, 2 × 48.9 kN / 79.0 kN',
       span: 11.43,
       length: 17.07,
       height: 4.66,

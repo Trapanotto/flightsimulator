@@ -444,7 +444,7 @@ export const A320: AircraftDefinition = {
     vRotate: 145 * KT,
     specs: {
       maker: 'Airbus, Toulouse',
-      powerplant: 'Two CFM International CFM56-5B4, 27 000 lbf (120 kN) each',
+      powerplant: '2 × CFM International CFM56-5B4, 2 × 120 kN',
       span: 34.1,
       length: 37.57,
       height: 11.76,
