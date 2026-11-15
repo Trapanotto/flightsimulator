@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AIRPORTS, isPaved } from '../src/geo/airports';
-import { airportMatch, orderAirports, pushRecent } from '../src/ui/airportPick';
+import { airportMatch, orderAirports, placeLabel, pushRecent } from '../src/ui/airportPick';
 import type { AirportOption } from '../src/ui/api';
 
 /** Every airport as the app offers them, with its runways. */
@@ -56,5 +56,24 @@ describe('airport order', () => {
     let r: string[] = [];
     for (const icao of ['A', 'B', 'C', 'B', 'D', 'E', 'F']) r = pushRecent(r, icao);
     expect(r).toEqual(['F', 'E', 'D', 'B', 'C']);
+  });
+});
+
+describe('place names on the map', () => {
+  it('shows the short town name, not the field or the code', () => {
+    const name = (icao: string) => placeLabel(apt(icao));
+    expect(name('LSZB')).toBe('Bern');
+    expect(name('LSZH')).toBe('Zürich');
+    expect(name('LSGG')).toBe('Genève');
+    expect(name('LFSB')).toBe('Basel');
+    expect(name('EDNY')).toBe('Friedrichshafen');
+    expect(name('LSZR')).toBe('St. Gallen');
+    expect(name('LSGC')).toBe('La Chaux-de-Fonds');
+    expect(name('LSYQ')).toBe('Verbier');
+    // Every field has a name that is not its code and not overly long.
+    for (const a of OPTIONS) {
+      expect(placeLabel(a), a.icao).not.toBe(a.icao);
+      expect(placeLabel(a).length, a.icao).toBeLessThanOrEqual(18);
+    }
   });
 });

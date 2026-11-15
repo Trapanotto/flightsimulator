@@ -9,7 +9,6 @@ import {
   IconRadio,
   IconStack,
   IconSwitches,
-  IconTools,
 } from '../components/icons';
 import { arrowNav, useEscape } from '../focus';
 import { type MessageKey, t } from '../i18n';
@@ -17,20 +16,17 @@ import { actions, crashed, showTouch } from '../nav';
 import {
   AVIONICS_PANELS,
   PANELS,
-  PANEL_KEYS,
   type PanelId,
   flightKeyAction,
-  keyLabel,
   panels,
   togglePanel,
 } from '../panels';
 import { hintFrequency } from '../radio';
 import { AutopilotPanel, StackPanel, SwitchesPanel } from './AvionicsPanels';
 import { ChecklistHint, ChecklistPanel } from './ChecklistPanel';
-import { LeaveButton } from './PilotHud';
 import { RadioPanel, tuneHinted } from './RadioPanel';
 
-const PANEL_ICON: Record<PanelId, () => VNode> = {
+export const PANEL_ICON: Record<PanelId, () => VNode> = {
   radio: () => <IconRadio />,
   checklist: () => <IconChecklist />,
   stack: () => <IconStack />,
@@ -38,7 +34,7 @@ const PANEL_ICON: Record<PanelId, () => VNode> = {
   switches: () => <IconSwitches />,
 };
 
-const PANEL_LABEL: Record<PanelId, MessageKey> = {
+export const PANEL_LABEL: Record<PanelId, MessageKey> = {
   radio: 'panel.radio',
   checklist: 'panel.checklist',
   stack: 'panel.stack',
@@ -118,62 +114,6 @@ function useFlightKeys() {
 }
 
 /** Desktop: a row of buttons at the bottom right, one per panel, with its key. */
-function Toolbar({ list }: { list: PanelId[] }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const open = panels.open.value;
-  return (
-    <div
-      ref={ref}
-      class="tools"
-      role="toolbar"
-      aria-label={t('tools.open')}
-      onKeyDown={(e) => arrowNav(e, ref.current, '.tool', 'horizontal')}
-      onMouseDown={(e) => e.preventDefault()}
-    >
-      {list.map((id) => (
-        <button
-          type="button"
-          key={id}
-          data-tool={id}
-          class={`tool${open.includes(id) ? ' is-on' : ''}`}
-          aria-pressed={open.includes(id)}
-          aria-label={`${t(PANEL_LABEL[id])} (${keyLabel(PANEL_KEYS[id])})`}
-          title={`${t(PANEL_LABEL[id])} (${keyLabel(PANEL_KEYS[id])})`}
-          onClick={() => toggle(id)}
-        >
-          {PANEL_ICON[id]()}
-          <span class="tool-key" aria-hidden="true">
-            {keyLabel(PANEL_KEYS[id])}
-          </span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** Touch: the button in the top bar and the menu it opens. */
-export function ToolsButton() {
-  const list = availablePanels.value;
-  // Getting out of the aircraft lives here too on touch, so the menu is there even without panels.
-  if (!list.length && !actions.leaveAircraft) return null;
-  const isOpen = panels.toolsOpen.value;
-  const anyPanel = panels.open.value.length > 0;
-  const replies = (game.atc.value?.options.length ?? 0) > 0 && !panels.open.value.includes('radio');
-  return (
-    <button
-      type="button"
-      class={`btn btn--icon btn--glass hud-btn hud-tools${isOpen || anyPanel ? ' is-on' : ''}`}
-      aria-label={t('tools.open')}
-      aria-expanded={isOpen}
-      aria-controls="tools-menu"
-      onClick={() => (panels.toolsOpen.value = !isOpen)}
-    >
-      <IconTools />
-      {replies && <span class="tool-dot" aria-hidden="true" />}
-    </button>
-  );
-}
-
 function ToolsMenu({ list }: { list: PanelId[] }) {
   const ref = useRef<HTMLDivElement>(null);
   const shut = () => (panels.toolsOpen.value = false);
@@ -206,7 +146,6 @@ function ToolsMenu({ list }: { list: PanelId[] }) {
             <span>{t(PANEL_LABEL[id])}</span>
           </button>
         ))}
-        <LeaveButton variant="menu" />
       </div>
     </>
   );
@@ -269,7 +208,7 @@ export function FlightPanels() {
     hadAtc.current = atc;
   });
 
-  if (!list.length && !(touch && actions.leaveAircraft)) return null;
+  if (!list.length) return null;
   const panel = (id: PanelId) => {
     const onClose = () => close(id);
     switch (id) {
@@ -305,9 +244,9 @@ export function FlightPanels() {
       <div class="dock dock--right">
         {right.map(panel)}
         {hint}
-        <Toolbar list={list} />
       </div>
       {bottom && <div class="dock dock--bottom">{panel(bottom)}</div>}
+      {panels.toolsOpen.value && !paused && <ToolsMenu list={list} />}
     </div>
   );
 }

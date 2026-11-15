@@ -1,0 +1,325 @@
+/*
+ * The flight, simple on every screen: one slim bar at the top (speed · heading · altitude),
+ * pause and "more" beside it, warnings in one line under it, a quiet lever line for the keyboard
+ * pilot, and the "more" sheet with everything else as large buttons.
+ */
+
+.tbar-row {
+  position: absolute;
+  top: var(--hud-top);
+  left: var(--safe-l);
+  right: var(--safe-r);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.tbar-row .hud-btn {
+  position: relative;
+  flex: none;
+  pointer-events: auto;
+}
+
+.tbar-row .hud-btn.is-on {
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+}
+
+.tbar {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 44px;
+  padding: 0 6px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-pill);
+  background: var(--c-hud-glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  white-space: nowrap;
+}
+
+.tbar-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 0 14px;
+}
+
+.tbar-item + .tbar-item {
+  border-left: 1px solid var(--c-line);
+}
+
+.tbar-item b {
+  font-size: var(--fs-5);
+  font-weight: 700;
+  color: var(--c-ink);
+  min-width: 3ch;
+  text-align: right;
+}
+
+.tbar-hdg b {
+  min-width: 3ch;
+}
+
+.tbar-alt b {
+  min-width: 5ch;
+}
+
+.tbar-item small {
+  color: var(--c-ink-3);
+  font-size: var(--fs-0);
+  font-weight: 600;
+}
+
+.tbar-alt .hud-vs-arrow {
+  align-self: center;
+  margin-left: 4px;
+}
+
+/* The speed warns in its own colour: amber near the stall or the limit, red beyond. */
+.tbar-speed.is-slow b,
+.tbar-speed.is-near b {
+  color: var(--c-caution);
+}
+
+.tbar-speed.is-over b {
+  color: var(--c-warning);
+}
+
+/* Warnings and notices in one column under the bar. */
+.hud--simple .hud-alerts {
+  top: calc(var(--hud-top) + 56px);
+}
+
+.hud--simple.is-cockpit .tbar {
+  opacity: 0.6;
+}
+
+/* Where the levers are, for the keyboard pilot: one quiet line in the bottom left corner. */
+.lever-line {
+  position: absolute;
+  left: var(--safe-l);
+  bottom: var(--safe-b);
+  display: flex;
+  gap: 14px;
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: var(--r-pill);
+  background: rgb(9 13 20 / 0.5);
+  color: var(--c-ink-2);
+  font-size: var(--fs-1);
+}
+
+.lever-line > div {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.lever-line dt {
+  color: var(--c-ink-3);
+  font-size: var(--fs-0);
+  font-weight: 600;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.lever-line dd {
+  margin: 0;
+  color: var(--c-ink);
+  font-weight: 600;
+}
+
+.lever-line small {
+  color: var(--c-ink-3);
+  font-weight: 500;
+}
+
+.lever-line .is-brake dd {
+  color: var(--c-caution);
+}
+
+/* The panels without the cards: the docks start under the bar and above the lever line. */
+.hud--simple .flight-panels:not(.is-touch) {
+  inset: calc(var(--hud-top) + 110px) var(--safe-r) calc(var(--safe-b) + 40px) var(--safe-l);
+}
+
+.hud--simple .dock--left {
+  padding-bottom: 0;
+}
+
+.hud--simple .dock--right {
+  padding-top: 0;
+}
+
+/* The "more" sheet ------------------------------------------------------------------------- */
+
+.more-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgb(4 7 12 / 0.35);
+  pointer-events: auto;
+}
+
+.more-sheet {
+  position: absolute;
+  top: calc(var(--hud-top) + 56px);
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  width: min(520px, 100% - 2 * var(--s-4));
+  max-height: calc(100% - var(--hud-top) - 56px - var(--safe-b));
+  overflow-y: auto;
+  padding: 8px 8px 12px 16px;
+  transform: translateX(-50%);
+  background: var(--c-glass-strong);
+  pointer-events: auto;
+}
+
+.more-sheet.enter {
+  animation-name: ui-fade;
+}
+
+.more-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--c-ink-3);
+}
+
+.more-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  padding-right: 8px;
+}
+
+.more-btn {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    'icon label'
+    'icon state';
+  align-items: center;
+  column-gap: 12px;
+  min-height: 64px;
+  padding: 10px 14px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  background: var(--c-fill);
+  color: var(--c-ink);
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.more-btn .icon {
+  grid-area: icon;
+  color: var(--c-ink-2);
+}
+
+.more-btn:hover {
+  background: var(--c-fill-hover);
+}
+
+.more-btn:active {
+  background: var(--c-fill-active);
+}
+
+.more-btn.is-on {
+  border-color: var(--c-accent);
+  background: var(--c-accent-dim);
+}
+
+.more-btn.is-on .icon {
+  color: var(--c-accent);
+}
+
+.more-label {
+  grid-area: label;
+  font-size: var(--fs-2);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.more-state {
+  grid-area: state;
+  color: var(--c-ink-3);
+  font-size: var(--fs-1);
+}
+
+.more-key {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  color: var(--c-ink-4);
+  font-family: var(--f-text);
+  font-size: var(--fs-0);
+  font-weight: 600;
+}
+
+.more-btn--leave {
+  border-color: rgb(227 49 58 / 0.45);
+}
+
+.more-btn--leave .icon {
+  color: var(--c-brand-hi);
+}
+
+/* Touch: the brake beside the throttle, where the right thumb already is. */
+.touch-right .pad-brake {
+  position: absolute;
+  right: calc(var(--safe-r) + var(--lever-w) + 12px);
+  bottom: var(--safe-b);
+  pointer-events: auto;
+}
+
+/* Narrow phones: the bar shrinks to fit beside its two buttons. */
+@media (max-width: 480px) {
+  .tbar-item {
+    padding: 0 8px;
+  }
+  .tbar-item b {
+    font-size: var(--fs-4);
+  }
+  .tbar-item small {
+    font-size: 9px;
+  }
+  .more-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-height: 560px) {
+  .tbar {
+    height: 40px;
+  }
+  .tbar-row .hud-btn {
+    width: 40px;
+    min-height: 40px;
+  }
+  .hud--simple .hud-alerts {
+    top: calc(var(--hud-top) + 50px);
+  }
+  .more-sheet {
+    top: calc(var(--hud-top) + 50px);
+    width: min(640px, 100% - 2 * var(--s-4));
+    max-height: calc(100% - var(--hud-top) - 50px - var(--safe-b));
+  }
+  .more-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+  .more-btn {
+    min-height: 54px;
+  }
+}
+
+/* Touch: the thumbs have the bottom edge; the source line goes to the top edge. */
+.ui[data-touch] .flight-credits {
+  top: 2px;
+  bottom: auto;
+}

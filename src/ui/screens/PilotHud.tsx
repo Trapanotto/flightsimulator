@@ -14,47 +14,29 @@ import {
 } from '../format';
 import { lang, t } from '../i18n';
 import { actions, flownAircraft, showTouch } from '../nav';
-import { panels } from '../panels';
 import { leaveKey, pilotAction, pilotHint, pullUrgent } from '../pilot';
 
 /**
- * The button that gets the pilot out: on the ground out of the door, in flight a jump, in the
- * fighter the ejection seat. Shown only when the app offers it; the key is X.
+ * The button of the "more" sheet that gets the pilot out: on the ground out of the door, in
+ * flight a jump, in the fighter the ejection seat. Shown only when the app offers it; the key
+ * is X.
  */
-export function LeaveButton({ variant }: { variant: 'hud' | 'menu' }) {
+export function LeaveButton({ onDone }: { onDone?: () => void }) {
   const onGround = useComputed(() => !!game.telemetry.value?.onGround);
   if (!actions.leaveAircraft) return null;
   const label = t(leaveKey(onGround.value, categoryOf(flownAircraft.value) === 'fighter'));
-  if (variant === 'menu')
-    return (
-      <button
-        type="button"
-        role="menuitem"
-        class="tools-item tools-item--leave"
-        onClick={() => {
-          panels.toolsOpen.value = false;
-          actions.leaveAircraft?.();
-        }}
-      >
-        <IconParachute />
-        <span>{label}</span>
-      </button>
-    );
   return (
     <button
       type="button"
-      class="btn btn--glass hud-btn hud-leave"
-      aria-label={`${label} (X)`}
-      title={`${label} (X)`}
-      onClick={(e) => {
+      class="more-btn more-btn--leave"
+      onClick={() => {
+        onDone?.();
         actions.leaveAircraft?.();
-        (e.currentTarget as HTMLElement).blur();
       }}
     >
-      <IconParachute />
-      <kbd class="hud-key" aria-hidden="true">
-        X
-      </kbd>
+      <IconParachute size={24} />
+      <span class="more-label">{label}</span>
+      <kbd class="more-key">X</kbd>
     </button>
   );
 }

@@ -1,6 +1,5 @@
 import { game } from '../api';
-import { Brand, Version } from '../components/Brand';
-import { Credits } from '../components/Credits';
+import { Brand } from '../components/Brand';
 import { t } from '../i18n';
 import { FlightSetup } from './FlightSetup';
 
@@ -46,13 +45,7 @@ export function MenuStage() {
           <LoadingBlock />
         </div>
       ) : (
-        <>
-          <FlightSetup />
-          <footer class="home-credits home-credits--outer fade-in">
-            <Credits />
-            <Version />
-          </footer>
-        </>
+        <FlightSetup />
       )}
     </div>
   );

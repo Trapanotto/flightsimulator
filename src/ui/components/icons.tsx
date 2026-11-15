@@ -347,6 +347,15 @@ export const IconParachute = (p: P) => (
   </Icon>
 );
 
+/** Three dots: more of the same kind, behind one button. */
+export const IconMore = (p: P) => (
+  <Icon {...p}>
+    <circle cx="5.5" cy="12" r="1.6" fill="currentColor" />
+    <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+    <circle cx="18.5" cy="12" r="1.6" fill="currentColor" />
+  </Icon>
+);
+
 /** The icon of a kind of aircraft. */
 export function CategoryIcon({ category, size }: { category: string; size?: number }) {
   switch (category) {
