@@ -5,6 +5,7 @@ import math
 import numpy as np
 
 from lib import mesh as M
+from lib.parts import blade_antenna, ellipsoid
 from . import dims as D
 from . import wing as W
 
@@ -40,33 +41,6 @@ def streamline_bar(a, b, chord, thick, n=16, taper=0.8):
     last = steps * n
     f += M.fan_cap(list(range(last, last + n)), c + 1)
     return v, f
-
-
-def ellipsoid(c, rx, ry, rz, nu=16, nv=10):
-    verts, faces = [], []
-    for i in range(1, nv):
-        th = math.pi * i / nv
-        for k in range(nu):
-            ph = 2 * math.pi * k / nu
-            verts.append((c[0] + rx * math.sin(th) * math.cos(ph), c[1] + ry * math.sin(th) * math.sin(ph),
-                          c[2] + rz * math.cos(th)))
-    faces = M.grid_faces(nv - 1, nu, wrap_cols=True)
-    top, bot = len(verts), len(verts) + 1
-    verts += [(c[0], c[1], c[2] + rz), (c[0], c[1], c[2] - rz)]
-    faces += M.fan_cap(list(range(nu)), top, reverse=True)
-    last = (nv - 2) * nu
-    faces += M.fan_cap(list(range(last, last + nu)), bot)
-    return np.array(verts), faces
-
-
-def blade_antenna(base, height, chord, sweep, thick=0.012):
-    """Swept blade antenna standing on `base` (design frame)."""
-    b = np.asarray(base, float)
-    pts = [b + (0, -chord / 2, 0), b + (0, chord / 2, 0), b + (0, chord / 2 + sweep, height),
-           b + (0, sweep + chord * 0.1, height)]
-    poly = [(p[1], p[2]) for p in pts]
-    poly = M.rounded_polygon(poly, 0.015, 3)
-    return M.prism(poly, 0, b[0] - thick / 2, b[0] + thick / 2, (1, 2))
 
 
 def build(col, mats, parts):

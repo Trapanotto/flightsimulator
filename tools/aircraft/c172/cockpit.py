@@ -10,6 +10,7 @@ import math
 
 import numpy as np
 
+from lib import cockpit_kit as K
 from lib import mesh as M
 from . import dims as D
 from . import fuselage as F
@@ -82,34 +83,7 @@ def _needle_poly(length, width, tail, tip="taper"):
     return [(-w, -tail), (w, -tail), (w * 0.55, length * 0.9), (0, length), (-w * 0.55, length * 0.9)]
 
 
-class Builder:
-    def __init__(self, col, mats, root):
-        self.col, self.mats, self.root = col, mats, root
-        self.static = {}   # material key -> list of (verts, faces)
-        self.parts = {}
-
-    def add(self, key, vf):
-        self.static.setdefault(key, []).append(vf)
-
-    def obj(self, name, vf, mat, parent=None, origin=None, uvs=None, sharp=40, smooth=True):
-        v, f = vf
-        o = M.make_object(name, v, f, self.col, self.mats[mat], smooth=smooth, sharp_angle=sharp,
-                          origin=origin, uvs=uvs, recalc=uvs is None)
-        M.parent_keep(o, parent or self.root)
-        return o
-
-    def pivot(self, name, at, axis_design, props=None, parent=None):
-        pr = {"axis": M.model_axis(*axis_design)}
-        pr.update(props or {})
-        e = M.empty(name, self.col, M.P(*at), size=0.02, props=pr)
-        M.parent_keep(e, parent or self.root)
-        return e
-
-    def flush(self):
-        for key, items in self.static.items():
-            v, f = M.merge(items)
-            o = M.make_object(f"Cabin_{key}", v, f, self.col, self.mats[key], sharp_angle=40)
-            M.parent_keep(o, self.root)
+Builder = K.Builder
 
 
 # ---------------------------------------------------------------------------

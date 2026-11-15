@@ -7,38 +7,8 @@ import numpy as np
 from mathutils import Vector
 
 from lib import mesh as M
+from lib.parts import hub, tyre
 from . import dims as D
-
-
-def tyre(axle_center, axis, r_out, width, rim_r, n=40):
-    """Tyre as a lathe of a rounded section around the axle."""
-    hw = width / 2
-    prof = []
-    for t in np.linspace(0, 1, 19):
-        a = math.pi * t        # around the section, from one bead to the other
-        # Superellipse section, flattened tread.
-        ca, sa = math.cos(a), math.sin(a)
-        x = -hw * np.sign(ca) * abs(ca) ** 0.55
-        rr = rim_r + (r_out - rim_r) * (abs(sa) ** 0.45)
-        prof.append((x, rr))
-    prof = [(-hw * 0.82, rim_r * 0.98)] + prof + [(hw * 0.82, rim_r * 0.98)]
-    prof = sorted(prof, key=lambda p: p[0])
-    return M.lathe(prof, axle_center, axis, n=n, close_start=False, close_end=False)
-
-
-def hub(axle_center, axis, rim_r, width, bolts=6):
-    a = np.asarray(axis, float) / np.linalg.norm(axis)
-    hw = width / 2
-    prof = [(-hw * 0.82, 0.0), (-hw * 0.82, rim_r * 0.55), (-hw * 0.9, rim_r * 0.98),
-            (hw * 0.9, rim_r * 0.98), (hw * 0.82, rim_r * 0.55), (hw * 0.82 + 0.012, rim_r * 0.35),
-            (hw * 0.82 + 0.02, 0.0)]
-    parts = [M.lathe(prof, axle_center, axis, n=28, close_start=False, close_end=False)]
-    _, u, w = M.frame_from_axis(a)
-    for k in range(bolts):
-        ang = 2 * math.pi * k / bolts
-        p = np.asarray(axle_center) + a * (hw * 0.82 + 0.004) + rim_r * 0.42 * (math.cos(ang) * u + math.sin(ang) * w)
-        parts.append(M.cylinder(p, p + a * 0.012, 0.0065, 8))
-    return M.merge(parts)
 
 
 def fairing(nose_fs, length, center_bl, top_wl, half_w, axle_wl, n_sec=30, n_ring=36):
