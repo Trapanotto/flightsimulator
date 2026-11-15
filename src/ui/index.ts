@@ -26,6 +26,7 @@ import './styles/hangar.css';
 export { status } from './state';
 export {
   type AirportOption,
+  type RunwayStrip,
   type AtcView,
   type ChecklistView,
   type FrequencyInfo,
@@ -47,6 +48,8 @@ export { nav } from './nav';
 /** Which in-flight panels are open (interface state; the demo and tests open them directly). */
 export { panels } from './panels';
 export { validatePlan } from './plan';
+/** Phase 4: the key codes the interface shows for speed brake, reverse and gear (the app binds them). */
+export { FLEET_KEYS } from './fleet';
 
 /** Mounts the interface into `root` and returns a function that removes it. */
 export function mountUi(root: HTMLElement, actions?: UiActions): () => void {
