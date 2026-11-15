@@ -101,3 +101,10 @@ export {
   windLevel,
   type EngineMode,
 } from './levels';
+export {
+  CrashSound,
+  EXPLOSION_DELAY,
+  synthCrash,
+  synthExplosion,
+  type CrashSoundOptions,
+} from './CrashSound';
