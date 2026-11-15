@@ -1,0 +1,44 @@
+{
+  "c172-bern-outside": {
+    "mean": 6.86,
+    "p95": 10.2,
+    "p99": 12.3,
+    "worst": 30.3,
+    "frames": 2916
+  },
+  "c172-bern-cockpit": {
+    "mean": 6.49,
+    "p95": 8.7,
+    "p99": 10.7,
+    "worst": 28.6,
+    "frames": 3082
+  },
+  "a320-zurich-stratus": {
+    "mean": 6,
+    "p95": 8.2,
+    "p99": 10.4,
+    "worst": 25.1,
+    "frames": 3337
+  },
+  "fa18-alps-cloudy": {
+    "mean": 4.61,
+    "p95": 6.4,
+    "p99": 8.5,
+    "worst": 26.6,
+    "frames": 4342
+  },
+  "c172-bern-dusk": {
+    "mean": 6.06,
+    "p95": 8,
+    "p99": 10.9,
+    "worst": 26.9,
+    "frames": 3300
+  },
+  "phone-c172-bern": {
+    "mean": 2.74,
+    "p95": 3.8,
+    "p99": 4.6,
+    "worst": 19.6,
+    "frames": 7304
+  }
+}
