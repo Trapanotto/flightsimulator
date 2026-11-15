@@ -103,6 +103,17 @@ export function spell(s: string): string {
  * the short form, the pilot follows.
  */
 export function callsign(reg: string, abbreviated: boolean): Line {
+  // An airline's or a military callsign ('Alpine 482', 'Hornet 11'): the telephony word as
+  // it is, the number digit by digit, and never abbreviated (ICAO Annex 10, 5.2.1.7.2.2).
+  if (/\s/.test(reg.trim()))
+    return line(
+      reg,
+      reg
+        .trim()
+        .split(/\s+/)
+        .map((w) => (/^\d+$/.test(w) ? digits(w) : w))
+        .join(' '),
+    );
   if (!abbreviated) return line(reg, spell(reg));
   const letters = reg.replace(/[- ]/g, '');
   const short = letters.length > 3 ? letters[0]! + letters.slice(-2) : letters;
@@ -154,6 +165,33 @@ export const feet = (ft: number) => line(`${Math.round(ft)} ft`, `${feetWords(ft
 /** 'altitude 4500 ft' (above sea level, on QNH). */
 export const altitude = (ft: number) =>
   line(`altitude ${Math.round(ft)} ft`, `altitude ${feetWords(ft)} feet`);
+
+/** Flight level: 'FL 120' / 'flight level one two zero'. */
+export const flightLevel = (fl: number) =>
+  line(`FL ${Math.round(fl)}`, `flight level ${digits(Math.round(fl))}`);
+
+/** Switzerland: altitudes on QNH up to 7000 ft, flight levels above. */
+export const TRANSITION_ALTITUDE_FT = 7000;
+
+/**
+ * The lowest flight level at least 1000 ft above the transition altitude for this QNH (a
+ * low QNH puts the levels lower in the sky, so the transition level goes up).
+ */
+export function transitionLevel(qnhHpa: number): number {
+  const ft = TRANSITION_ALTITUDE_FT + 1000 + (1013.25 - qnhHpa) * 27.3;
+  // A few feet short of the thousand at standard pressure still counts as FL 80.
+  return Math.ceil((ft - 50) / 1000) * 10;
+}
+
+/** An altitude below the transition level, a flight level from it up. */
+export function level(ft: number, qnhHpa: number): Line {
+  const fl = Math.round(ft / 100);
+  return fl >= transitionLevel(qnhHpa) ? flightLevel(fl) : altitude(fl * 100);
+}
+
+/** Speed in knots: '250 knots' / 'two five zero knots'. */
+export const knots = (kt: number) =>
+  line(`${Math.round(kt)} knots`, `${digits(Math.round(kt))} knots`);
 
 /** Three digits: 80 -> '080' / 'zero eight zero'. 0 is 360. */
 export function headingText(deg: number): string {

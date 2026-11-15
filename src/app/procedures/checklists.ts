@@ -7,6 +7,9 @@
  *
  * Items with a `check` tick themselves when the cockpit or the telemetry shows them done;
  * the others the pilot ticks by hand. Control names are those of C172_CONTROLS.
+ *
+ * The types here are shared by the checklists of every type (checklistsPc12.ts,
+ * checklistsA320.ts, checklistsFa18.ts; `checklistsFor` in fleet.ts picks them by aircraft).
  */
 
 export type TelemetryKey =
@@ -22,15 +25,55 @@ export type TelemetryKey =
   | 'oilPressure'
   | 'vacuum'
   | 'lowVolts'
-  | 'lowVacuum';
+  | 'lowVacuum'
+  // ---- phase 4: turbines, retractable gear, jets ----
+  /** How many engines run. */
+  | 'enginesRunning'
+  /** The starter turns the engine (1) or not (0). */
+  | 'engineStarting'
+  /** Per cent: a jet's N2 or a turboprop's Ng; a turbofan's N1. */
+  | 'n2'
+  | 'n1'
+  /** °C: ITT of a turboprop, EGT of a jet. */
+  | 'itt'
+  /** Torque as a share of its limit, 0..1. */
+  | 'torque'
+  | 'propRpm'
+  /** 0 idle .. 1 full afterburner. */
+  | 'afterburner'
+  | 'reversing'
+  /** Positions actually reached: gear 0 up .. 1 down, flaps 0..1, speed brake 0..1. */
+  | 'gear'
+  | 'flaps'
+  | 'speedbrake'
+  | 'mach'
+  /** Degrees. */
+  | 'alphaDeg'
+  | 'pitchDeg'
+  | 'bankDeg'
+  /** Feet above sea level (by the altimeter where there is one). */
+  | 'altitudeFt'
+  | 'cabinAltitudeFt'
+  /** Annunciators as 0/1, and the number of generators off line. */
+  | 'cabinAltitudeWarning'
+  | 'gearUnsafe'
+  | 'hydraulicsLow'
+  | 'generatorsOff'
+  | 'baroStd'
+  | 'stallWarning'
+  | 'airframeIce'
+  | 'carbIce'
+  | 'pitotBlocked';
 
 export type Check =
   /** A toggle (0/1) or a selector by its position name, or one of several positions. */
   | { control: string; is: number | string | readonly string[] }
   /** A lever or knob within a range. */
   | { control: string; min?: number; max?: number }
-  | { telemetry: TelemetryKey; min?: number; max?: number }
-  | { all: readonly Check[] };
+  /** `engine` (0-based) for the per-engine values; the first engine without it. */
+  | { telemetry: TelemetryKey; engine?: number; min?: number; max?: number }
+  | { all: readonly Check[] }
+  | { any: readonly Check[] };
 
 export interface Text {
   de: string;
@@ -44,25 +87,96 @@ export interface ChecklistItemDef {
   check?: Check;
 }
 
+/**
+ * The phase of flight a normal checklist belongs to; `suggest()` offers it then. Lists
+ * whose id is one of these need not say it.
+ */
+export type Phase =
+  | 'preflight'
+  | 'cockpitPreparation'
+  | 'beforeStart'
+  | 'engineStart'
+  | 'afterStart'
+  | 'beforeTaxi'
+  | 'taxi'
+  | 'beforeTakeoff'
+  | 'takeoff'
+  | 'climb'
+  | 'cruise'
+  | 'descent'
+  | 'approach'
+  | 'beforeLanding'
+  | 'landing'
+  | 'afterLanding'
+  | 'parking'
+  | 'shutdown'
+  | 'securing';
+
 export interface ChecklistDef {
   id: string;
   title: Text;
   kind: 'normal' | 'emergency';
   items: readonly ChecklistItemDef[];
+  /** Normal lists: when it is due (default: the id, if it names a phase). */
+  phase?: Phase;
+  /**
+   * Normal lists of the descent: due only below this height above ground, feet (so that the
+   * approach list comes after the descent list, the landing list after the approach list).
+   */
+  belowFt?: number;
+  /** Emergency lists: what makes it due (the telemetry and the cockpit as for an item). */
+  trigger?: Check;
+  /** Where the trigger counts: in the air (default), or on the ground before take-off. */
+  when?: 'air' | 'departure';
+  /** Of several due emergencies the highest comes first (default 0). */
+  priority?: number;
+  /** The trigger counts only once this list has been completed in the flight. */
+  requires?: string;
 }
 
-const t = (de: string, en: string): Text => ({ de, en });
-const item = (id: string, label: Text, expect: Text, check?: Check): ChecklistItemDef =>
+export const t = (de: string, en: string): Text => ({ de, en });
+export const item = (id: string, label: Text, expect: Text, check?: Check): ChecklistItemDef =>
   check ? { id, label, expect, check } : { id, label, expect };
 
-const ON = t('EIN', 'ON');
-const OFF = t('AUS', 'OFF');
-const CHECK = t('PRÜFEN', 'CHECK');
-const SET = t('GESETZT', 'SET');
+export const ON = t('EIN', 'ON');
+export const OFF = t('AUS', 'OFF');
+export const CHECK = t('PRÜFEN', 'CHECK');
+export const SET = t('GESETZT', 'SET');
 const RICH = t('REICH', 'RICH');
 const BOTH = t('BEIDE', 'BOTH');
-const UP = t('EINGEFAHREN', 'UP');
-const COMPLETE = t('ERLEDIGT', 'COMPLETE');
+export const UP = t('EINGEFAHREN', 'UP');
+export const COMPLETE = t('ERLEDIGT', 'COMPLETE');
+export const AS_REQUIRED = t('NACH BEDARF', 'AS REQUIRED');
+
+/** Building blocks for checks, so the lists read as the handbook does. */
+export const is = (control: string, v: number | string | readonly string[]): Check => ({
+  control,
+  is: v,
+});
+export const range = (control: string, min?: number, max?: number): Check => {
+  const c: { control: string; min?: number; max?: number } = { control };
+  if (min !== undefined) c.min = min;
+  if (max !== undefined) c.max = max;
+  return c;
+};
+export const tel = (
+  telemetry: TelemetryKey,
+  min?: number,
+  max?: number,
+  engine?: number,
+): Check => {
+  const c: { telemetry: TelemetryKey; engine?: number; min?: number; max?: number } = {
+    telemetry,
+  };
+  if (engine !== undefined) c.engine = engine;
+  if (min !== undefined) c.min = min;
+  if (max !== undefined) c.max = max;
+  return c;
+};
+export const all = (...checks: Check[]): Check => ({ all: checks });
+export const any = (...checks: Check[]): Check => ({ any: checks });
+/** In the air. */
+export const AIRBORNE = tel('onGround', undefined, 0);
 
 // Reused items: the same switch in several lists says the same thing.
 const parkingBrakeSet = item('parkingBrake', t('Parkbremse', 'Parking brake'), SET, {
@@ -464,6 +578,7 @@ export const C172_CHECKLISTS: readonly ChecklistDef[] = [
     id: 'engineFailure',
     title: t('Motorausfall im Flug: Notlandung', 'Engine failure in flight: emergency landing'),
     kind: 'emergency',
+    trigger: tel('engineRunning', undefined, 0),
     items: [
       item('glide', t('Fahrt', 'Airspeed'), t('68 KIAS (bestes Gleiten)', '68 KIAS (best glide)'), {
         telemetry: 'iasKt',
@@ -513,6 +628,9 @@ export const C172_CHECKLISTS: readonly ChecklistDef[] = [
     id: 'engineRestart',
     title: t('Motorausfall im Flug: Wiederanlassen', 'Engine failure during flight: restart'),
     kind: 'emergency',
+    // With height to spare a restart comes before the forced landing.
+    trigger: all(tel('engineRunning', undefined, 0), tel('aglFt', 1500)),
+    priority: 1,
     items: [
       item('glide', t('Fahrt', 'Airspeed'), t('68 KIAS (bestes Gleiten)', '68 KIAS (best glide)'), {
         telemetry: 'iasKt',
@@ -555,6 +673,7 @@ export const C172_CHECKLISTS: readonly ChecklistDef[] = [
     id: 'lowVoltage',
     title: t('Stromversorgung: Warnung LOW VOLTS', 'Electrical: low voltage annunciator'),
     kind: 'emergency',
+    trigger: tel('lowVolts', 1),
     items: [
       item('avionicsOff', t('Avionik-Schalter', 'Avionics switch'), OFF, {
         control: 'avionics',
@@ -596,6 +715,7 @@ export const C172_CHECKLISTS: readonly ChecklistDef[] = [
     id: 'vacuumFailure',
     title: t('Ausfall der Unterdruckpumpe', 'Vacuum system failure'),
     kind: 'emergency',
+    trigger: tel('lowVacuum', 1),
     items: [
       item('gauge', t('Unterdruckanzeige', 'Vacuum gauge'), CHECK),
       item(
@@ -615,6 +735,7 @@ export const C172_CHECKLISTS: readonly ChecklistDef[] = [
     id: 'icing',
     title: t('Unbeabsichtigte Vereisung', 'Inadvertent icing encounter'),
     kind: 'emergency',
+    trigger: any(tel('airframeIce', 0.1), tel('pitotBlocked', 1), tel('carbIce', 0.2)),
     items: [
       item('pitotHeat', t('Staurohrheizung', 'Pitot heat'), ON, { control: 'pitotHeat', is: 1 }),
       item(
