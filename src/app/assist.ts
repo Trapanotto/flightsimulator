@@ -14,6 +14,11 @@ const headingDiff = (a: number, b: number) => ((a - b + 540) % 360) - 180;
  */
 export class RudderAssist {
   enabled = true;
+  /**
+   * Centre the ball in the air. Off for aircraft whose flight controls do that themselves
+   * (fly-by-wire with turn coordination): two helpers on one rudder fight each other.
+   */
+  coordinate = true;
   private holdHeading: number | undefined;
   private lastHeading = 0;
   private command = 0;
@@ -52,13 +57,16 @@ export class RudderAssist {
         // offset, otherwise the nose would settle a few degrees off.
         const error = headingDiff(this.holdHeading, heading);
         this.bias = clamp(this.bias + 0.5 * error * dt, -0.7, 0.7);
-        want = clamp(0.35 * error - 0.08 * rate + this.bias, -1, 1);
+        // Rudder and nose wheel bite harder the faster the aircraft rolls: what steers a
+        // Cessna at 50 knots swings an airliner from side to side at 150.
+        const k = clamp(20 / telemetry.groundSpeed, 0.2, 1);
+        want = clamp(k * (0.35 * error - 0.08 * rate) + this.bias, -1, 1);
       }
     } else {
       this.holdHeading = undefined;
       this.bias = 0;
       // Centre the ball: rudder towards the side the air comes from.
-      want = clamp(4 * telemetry.beta, -0.6, 0.6);
+      if (this.coordinate) want = clamp(4 * telemetry.beta, -0.6, 0.6);
     }
     // Feet move quickly but not instantly.
     this.command += clamp(want - this.command, -4 * dt, 4 * dt);

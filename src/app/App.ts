@@ -609,6 +609,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     openDeck();
     sound.setAircraft(aircraft.info);
     cockpitSound.setAircraft(aircraft.info);
+    assist.coordinate =
+      aircraft.info.category !== 'airliner' && aircraft.info.category !== 'fighter';
     input.setFlapNotches(
       aircraft.cockpit.specs.find((s) => s.id === 'flaps')?.positions?.length ?? 4,
     );

@@ -1,11 +1,16 @@
 import { createAvionics } from './avionics/avionics';
 import { C172 } from './c172';
 import { PC12 } from './pc12';
+import { A320 } from './a320';
+import { FA18 } from './fa18';
 import { FlightModel } from './flightModel';
 import type { AvionicsUnit } from './avionicsTypes';
 import type { AircraftId, AircraftInfo, ControlInput, SimAircraft } from './types';
 
-/** Every flyable type, for menus. */
+/**
+ * Every type the menus offer. The A320 and the F/A-18 can be created already but join the
+ * list with their 3D models.
+ */
 export const AIRCRAFT: AircraftInfo[] = [C172.info, PC12.info];
 
 /**
@@ -21,6 +26,10 @@ export function createAircraft(
       return new FlightModel(C172, options.avionics ?? createAvionics(C172.avionics));
     case 'pc12':
       return new FlightModel(PC12, options.avionics ?? createAvionics(PC12.avionics));
+    case 'a320':
+      return new FlightModel(A320, options.avionics ?? createAvionics(A320.avionics));
+    case 'fa18':
+      return new FlightModel(FA18, options.avionics ?? createAvionics(FA18.avionics));
   }
   throw new Error(`createAircraft('${String(id)}'): unknown type`);
 }
