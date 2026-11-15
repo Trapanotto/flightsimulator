@@ -58,13 +58,17 @@ const WING_FOIL: AirfoilData = {
   reattachMargin: 3 * DEG,
   lagChords: 3,
   cd0: 0.0055,
-  cdLift: 0.008,
+  // Profile drag growing with lift stands in for the drag due to lift at high subsonic Mach
+  // (reconstructed against the ceiling, the sea-level sustained turn and the cruise fuel flow).
+  cdLift: 0.04,
   cm0: -0.005,
   plateLift: 1.35,
   plateDrag: 1.3,
   // Effective thickness and divergence chosen with the body's drag rise so the transonic drag
-  // peak and the supersonic drag meet the published maximum speeds (reconstructed).
-  mach: { divergence: 0.85, thickness: 0.055 },
+  // peak and the supersonic drag meet the published maximum speeds, and the drag rise from
+  // Mach 0.8 the cruise and the ceiling (reconstructed; the core's divergence does not fall
+  // with lift, so it stands for the section at its cruise lift).
+  mach: { divergence: 0.77, thickness: 0.055 },
 };
 
 /** The leading-edge extension: a slender strake whose lift is mostly its vortex (Polhamus). */
@@ -272,7 +276,9 @@ const F404: TurbofanDef['engine'] = {
     [1.0, 1.0],
     [1.06, 1.16],
   ],
-  tsfc: [2.1e-5, 0.7e-5],
+  // The consumption rises with Mach as Mattingly's low-bypass form, (0.9 + 0.3 M) √θ at
+  // military power, scaled to the task's sea-level figure: about 1.06 lb/lbf/h in cruise.
+  tsfc: [2.1e-5, 1.6e-5],
   idleFuel: 0.03,
   egt: [
     [0.15, 470],

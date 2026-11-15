@@ -348,7 +348,7 @@ describe('F/A-18 flight control system: flaps, approach, ground, backup', () => 
   });
 
   it('retracts the speed brake above 6 g or 28° angle of attack', () => {
-    const f = fa18Airborne(4500, 450);
+    const f = fa18Airborne(4500, 500);
     const t = f.ac.telemetry;
     f.ac.controls.speedbrake = 1;
     fly(f, 3);
