@@ -7,6 +7,7 @@
  * extras (`userData.axis`); a positive angle about it is the positive direction named here.
  */
 import { C172_CONTROLS } from '@sim';
+import { type V3, designBox } from './picking';
 
 /** Movable parts in LOD0 (LOD1 has the same ones with the suffix `_lod1`). */
 export const EXTERIOR_PIVOTS = [
@@ -177,3 +178,23 @@ export function allExpectedNodes(): string[] {
     ...C172_CONTROLS.map((c) => `Hit_${c.id}`),
   ];
 }
+
+/**
+ * Reference point of the design frame in the model frame: model = (BL, WL - 1.22, 1.041 - FS)
+ * (tools/aircraft/c172/dims.py).
+ */
+const boxFromDesign = (lo: [number, number, number], hi: [number, number, number]) =>
+  designBox(lo, hi, { fs: 1.041, wl: 1.22 });
+
+/** Where a camera counts as sitting in the cabin (front and rear seats), model frame. */
+export const CABIN = boxFromDesign([-0.62, 0.3, 0.82], [0.62, 2.6, 1.98]);
+
+/** Seats (cushions and backs) and the glareshield: nothing is reached through them. */
+export const OCCLUDERS: readonly { center: V3; half: V3 }[] = [
+  ...[0.27, -0.27].flatMap((bl) => [
+    // Inset by the cushions' rounded edges.
+    boxFromDesign([bl - 0.2, 0.89, 0.97], [bl + 0.2, 1.34, 1.08]),
+    boxFromDesign([bl - 0.23, 1.34, 1.1], [bl + 0.23, 1.52, 1.76]),
+  ]),
+  boxFromDesign([-0.6, 0.0, 1.508], [0.6, 0.39, 1.6]),
+];

@@ -2,7 +2,8 @@
  * Which cockpit control a ray hits, in the model's own frame (x left, y up, z forward): a
  * few dozen boxes against one ray, no raycast against the model. Plain TypeScript, tested in
  * Node. Hit boxes come from the model (Hit_<id> nodes, a little larger than the controls so
- * a finger finds them); occluders are coarse boxes for the seats and the glareshield.
+ * a finger finds them); occluders are coarse boxes for the seats and the glareshield, given
+ * by each type (`boxFromDesign` turns a type's design-frame corners into model-frame boxes).
  */
 
 export type V3 = readonly [number, number, number];
@@ -121,18 +122,20 @@ export function sideOf(point: V3, center: V3, axis: V3): -1 | 0 | 1 {
   return s < 0 ? -1 : 1;
 }
 
-/**
- * Reference point of the design frame in the model frame: model = (BL, WL - 1.22, 1.041 - FS)
- * (tools/aircraft/c172/dims.py).
- */
-function design(bl: number, fs: number, wl: number): [number, number, number] {
-  return [bl, wl - 1.22, 1.041 - fs];
-}
+// The Cessna's cabin and occluders, here for the code that imported them from this file.
+export { CABIN, OCCLUDERS } from './c172Parts';
 
-function boxFromDesign(
+/**
+ * A box between two corners in a type's design frame (BL left, FS aft, WL up, metres) in the
+ * model frame: model = (BL, WL - ref.wl, ref.fs - FS) with the reference point (the CG) at
+ * FS ref.fs, WL ref.wl (tools/aircraft/<type>/dims.py).
+ */
+export function designBox(
   lo: [number, number, number],
   hi: [number, number, number],
+  ref: { fs: number; wl: number },
 ): { center: V3; half: V3 } {
+  const design = (bl: number, fs: number, wl: number) => [bl, wl - ref.wl, ref.fs - fs] as const;
   const a = design(...lo);
   const b = design(...hi);
   return {
@@ -140,16 +143,3 @@ function boxFromDesign(
     half: [Math.abs(a[0] - b[0]) / 2, Math.abs(a[1] - b[1]) / 2, Math.abs(a[2] - b[2]) / 2],
   };
 }
-
-/** Where a camera counts as sitting in the cabin (front and rear seats), model frame. */
-export const CABIN = boxFromDesign([-0.62, 0.3, 0.82], [0.62, 2.6, 1.98]);
-
-/** Seats (cushions and backs) and the glareshield: nothing is reached through them. */
-export const OCCLUDERS: readonly { center: V3; half: V3 }[] = [
-  ...[0.27, -0.27].flatMap((bl) => [
-    // Inset by the cushions' rounded edges.
-    boxFromDesign([bl - 0.2, 0.89, 0.97], [bl + 0.2, 1.34, 1.08]),
-    boxFromDesign([bl - 0.23, 1.34, 1.1], [bl + 0.23, 1.52, 1.76]),
-  ]),
-  boxFromDesign([-0.6, 0.0, 1.508], [0.6, 0.39, 1.6]),
-];
