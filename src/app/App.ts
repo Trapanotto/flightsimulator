@@ -65,6 +65,7 @@ import { FreeCamera } from './freeCamera';
 import { FlightLogger, GeoRunwayFinder, Logbook, worthKeeping } from './logbook';
 import { type RenderPose, stateToRenderPose } from './pose';
 import { FlightRecording, ReplayPlayer, pictureName, savePicture } from './replay';
+import { LessonRunner, SchoolProgress, findLesson, lessonInfos, lessonPlan } from './school';
 
 /** Where the menu scene is set and where the first flight starts. */
 const HOME = { icao: 'LSZB', runway: '32' };
@@ -489,6 +490,16 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     photoDate = undefined;
     visual.object.visible = true;
   };
+  // ---- flight school ----
+  const school = new SchoolProgress(storage ?? null);
+  game.lessons.value = lessonInfos(school);
+  let lesson: LessonRunner | undefined;
+  let lessonTime = 0;
+  const openLesson = (aircraft: SimAircraft) => {
+    const def = lessonId ? findLesson(lessonId) : undefined;
+    lesson = def ? new LessonRunner(def, aircraft.cockpit.specs) : undefined;
+    game.lesson.value = lesson ? lesson.view() : null;
+  };
   // A closed tab is the end of the flight too.
   window.addEventListener('pagehide', closeLog);
 
@@ -520,6 +531,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     leaveStill();
     recording.clear();
     game.canReplay.value = false;
+    lesson = undefined;
+    game.lesson.value = null;
     flight = undefined;
     visual.object.visible = false;
     game.telemetry.value = null;
@@ -717,7 +730,10 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     );
     assist.reset();
     visual.object.visible = true;
-    if (p.plan) openLog(aircraft.info.id);
+    if (p.plan) {
+      openLog(aircraft.info.id);
+      openLesson(aircraft);
+    }
     // A few frames behind the loading screen: the aircraft settles on its wheels.
     reveal = { screen: p.plan ? 'flight' : 'menu', frames: 10 };
   };
@@ -748,6 +764,15 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   };
   const actions: UiActions = {
     startFlight(p) {
+      lessonId = undefined;
+      game.plan.value = p;
+      prepare(p);
+      game.screen.value = 'briefing';
+    },
+    startLesson(id) {
+      const p = lessonPlan(id);
+      if (!p) return;
+      lessonId = id;
       game.plan.value = p;
       prepare(p);
       game.screen.value = 'briefing';
@@ -761,6 +786,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       flight.restart();
       recording.clear();
       openLog(flight.aircraft.info.id);
+      openLesson(flight.aircraft);
       flight.paused = false;
       openDeck();
       input.reset(
@@ -773,6 +799,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       game.screen.value = 'flight';
     },
     exitToMenu() {
+      lessonId = undefined;
       game.plan.value = null;
       prepare(null);
     },
@@ -1129,6 +1156,25 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
         deck.update(dt, deckPosition);
         const mark = deck.highlighted;
         if (mark !== highlighted) visual.highlightControl((highlighted = mark));
+      }
+      if (lesson && flying) {
+        ecefToGeodetic(aircraft.state.position, geo);
+        deckPosition.lon = geo.lon;
+        deckPosition.lat = geo.lat;
+        deckPosition.msl = ellipsoidToSeaLevel(geo.lon, geo.lat, geo.h);
+        const before = lesson.state;
+        lesson.update(dt, aircraft.telemetry, aircraft.cockpit, deckPosition);
+        lessonTime += dt;
+        const ended = before === 'running' && lesson.state !== 'running';
+        if (ended) {
+          lessonPassed = lesson.state === 'passed';
+          if (lessonPassed && lessonId && school.markPassed(lessonId))
+            game.lessons.value = lessonInfos(school);
+        }
+        if (ended || lessonTime >= 0.25) {
+          lessonTime = 0;
+          game.lesson.value = lesson.view();
+        }
       }
       if (!tour && !still) {
         // Zoomed in on the panel in the cockpit, the usual angle outside.
