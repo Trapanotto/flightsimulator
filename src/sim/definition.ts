@@ -68,6 +68,11 @@ export interface StripDef {
   /** Dynamic pressure ratio from the fuselage wake (tail surfaces). */
   qFactor?: number;
   control?: StripControl;
+  /**
+   * Phase 4: every device of a strip that has more than one (an airliner's slat ahead of a
+   * flap with a spoiler on top). Replaces `control` where given.
+   */
+  controls?: StripControl[];
   /** The strip sits behind the wing and feels its downwash. */
   downwash?: boolean;
   /** How far the slipstream has developed where the strip sits (0 at the disk .. 1). */
@@ -134,6 +139,11 @@ export interface WheelDef {
   brakeForce?: number;
   /** Strut force (N) that breaks the gear. */
   breakingForce: number;
+  /**
+   * Phase 4: the tyres' bristle stiffness (N/m) and damping (N s/m) where they differ from a
+   * light aircraft's: an airliner's twin wheels corner and brake far stiffer.
+   */
+  tyre?: { stiffness: number; damping: number };
 }
 
 /** A retractable gear (Phase 4). Without one the gear is fixed and always down. */

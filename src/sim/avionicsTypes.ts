@@ -3,6 +3,7 @@
  * autopilot. The simulation knows no map: the app hands it the stations and the flight plan
  * (from the `geo` package) through these types.
  */
+import type { Telemetry } from './types';
 
 /** A ground station a receiver can tune. All bearings and courses in degrees TRUE. */
 export interface NavStation {
@@ -95,6 +96,213 @@ export interface AutopilotTelemetry {
   goAround?: boolean;
   /** F/A-18 block: the modes as the HUD annunciates them ('ATT', 'HSEL', 'BALT', 'RALT', 'CPL WYPT', 'CPL TCN', 'CPL ILS', 'ATC'). */
   annunciations?: string[];
+  /** Phase 4: the Airbus A320's flight guidance, flight controls and ECAM (see below). */
+  airbus?: AirbusTelemetry;
+}
+
+// ---- Airbus A320 (Phase 4) ---------------------------------------------------------------
+// What the A320's primary flight display, navigation display, ECAM, FCU, the sound and the
+// interface read. The flight guidance computer (src/sim/a320/fmgc.ts) writes `fma`, `speeds`,
+// `fcu` and `guidance`; the flight control and system computers (src/sim/a320/computers.ts)
+// write `controls`, `systems` and `ecam`. Strings are what the real display shows, in its
+// own (English) words; the interface translates around them if it wants to.
+
+/** The five columns of the flight mode annunciator. '' shows nothing. */
+export interface AirbusFma {
+  /**
+   * Column 1, autothrust: 'MAN TOGA', 'MAN FLX', 'MAN MCT', 'MAN THR', 'THR CLB', 'THR MCT',
+   * 'THR IDLE', 'THR LVR', 'SPEED', 'MACH', 'A.FLOOR', 'TOGA LK'. Blue armed: 'A/THR' style
+   * text goes to column 5; `thrustCaution` is the amber 'LVR CLB' / 'LVR MCT' / 'LVR ASYM' request.
+   */
+  thrust: string;
+  thrustCaution: string;
+  /** Column 2, vertical: 'SRS', 'CLB', 'OP CLB', 'DES', 'OP DES', 'ALT*', 'ALT', 'ALT CST', 'V/S +1500', 'EXP CLB', 'EXP DES', 'G/S*', 'G/S', 'LAND', 'FLARE', 'ROLL OUT'. */
+  vertical: string;
+  /** Armed vertical modes in blue: 'ALT', 'G/S', 'CLB', 'DES', 'ALT G/S', 'FINAL' (several separated by a space). */
+  verticalArmed: string;
+  /** Column 3, lateral: 'RWY', 'RWY TRK', 'HDG', 'NAV', 'LOC*', 'LOC', 'GA TRK', 'LAND', 'FLARE', 'ROLL OUT'. */
+  lateral: string;
+  lateralArmed: string;
+  /** LAND, FLARE and ROLL OUT span columns 2 and 3: `vertical` and `lateral` then hold the same text. */
+  combined: boolean;
+  /** Column 4: approach capability 'CAT 1', 'CAT 2', 'CAT 3 SINGLE', 'CAT 3 DUAL' and the minimum ('DH 100', 'NO DH', ''). */
+  capability: string;
+  minimum: string;
+  /** Column 5: 'AP1', 'AP2', 'AP1+2' or ''; '1 FD 2', '1 FD -', '- FD 2' or ''; autothrust 'A/THR' white (active) or blue (armed). */
+  autopilot: string;
+  flightDirectors: string;
+  autothrust: 'active' | 'armed' | 'off';
+  /** A mode has just changed in each column (a white box is drawn around it for ten seconds). */
+  changed: [boolean, boolean, boolean, boolean, boolean];
+}
+
+/** Characteristic speeds of the speed tape, knots IAS (NaN where the display hides them). */
+export interface AirbusSpeeds {
+  /** Lowest selectable speed (top of the amber strip), stall warning (VSW) and the red and black VMAX barber pole. */
+  vls: number;
+  vsw: number;
+  vmax: number;
+  /** Alpha protection and alpha max (tops of the amber-black and red strips) in normal law. */
+  alphaProt: number;
+  alphaMax: number;
+  /** Flap and slat retraction speeds and green dot (best lift-to-drag clean); only in the configuration that uses each. */
+  f: number;
+  s: number;
+  greenDot: number;
+  /** Approach speed for the landing configuration (VLS + 5 kt) from the mass. */
+  vapp: number;
+  /** Take-off speeds (the computer's V1, VR, V2 for the mass and CONF 1+F), shown on the ground. */
+  v1: number;
+  vr: number;
+  v2: number;
+  /** Next flap speed maximum (VFE of the next lever position), amber '=' on the tape. */
+  vfeNext: number;
+  /** Speed target: magenta when managed, blue when selected; Mach target when `mach`. */
+  target: number;
+  targetMach: number;
+  managed: boolean;
+  mach: boolean;
+  /** Speed trend arrow: the speed in ten seconds, knots. */
+  trend: number;
+  /** Gross mass the speeds are computed for, kg. */
+  mass: number;
+}
+
+/** What the flight control unit's windows show. NaN shows dashes (a managed value). */
+export interface AirbusFcu {
+  speed: number;
+  mach: boolean;
+  heading: number;
+  altitude: number;
+  verticalSpeed: number;
+  /** The dots beside a window: that axis is managed. */
+  speedDot: boolean;
+  headingDot: boolean;
+  altitudeDot: boolean;
+  /** LOC, APPR, EXPED, AP1, AP2, A/THR buttons lit. */
+  loc: boolean;
+  appr: boolean;
+  exped: boolean;
+  ap1: boolean;
+  ap2: boolean;
+  athr: boolean;
+}
+
+/** The flight guidance's own targets, for the flight director and the navigation display. */
+export interface AirbusGuidance {
+  /** Altitude target of the vertical mode, feet (the FCU's, or a constraint's), and whether it is a constraint. */
+  altitudeTarget: number;
+  altitudeConstraint: boolean;
+  /** Track (degrees magnetic) or heading being flown, and the target vertical speed, ft/min. */
+  lateralTarget: number;
+  verticalSpeedTarget: number;
+  /** Flight phase of the computer: 'preflight', 'takeoff', 'climb', 'cruise', 'descent', 'approach', 'goAround', 'done'. */
+  phase: string;
+  /** Callouts the sound plays once each (the 'RETARD' at 10 ft, the radio altitude calls). */
+  callout: string;
+}
+
+/** The flight controls as the flight control computers report them. */
+export interface AirbusControls {
+  /** The law in force: pitch and roll ('normal', 'alternate', 'direct'), and the flare mode of the pitch law. */
+  law: 'normal' | 'alternate' | 'direct';
+  flareMode: boolean;
+  /** The law flies the ground mode (direct stick on the ground, blended in after lift-off). */
+  groundMode: boolean;
+  /** Protections acting now. */
+  alphaProtection: boolean;
+  alphaFloor: boolean;
+  highSpeedProtection: boolean;
+  /** Bank and pitch attitude limits reached. */
+  bankLimit: boolean;
+  pitchLimit: boolean;
+  /** Slat and flap configuration: '0', '1', '1+F', '2', '3', 'FULL'; positions in degrees. */
+  config: string;
+  slats: number;
+  flaps: number;
+  /** Trimmable horizontal stabiliser, degrees (positive nose up), and the rudder trim, degrees. */
+  stabiliser: number;
+  rudderTrim: number;
+  /** Ground spoilers armed, deployed; speed brake extended share. */
+  spoilersArmed: boolean;
+  groundSpoilers: boolean;
+  speedbrake: number;
+  /** Autobrake selected (off, low, medium, max), armed, decelerating (the DECEL light). */
+  autobrake: 'off' | 'low' | 'medium' | 'max';
+  autobrakeArmed: boolean;
+  autobrakeDecel: boolean;
+  /** Nose wheel steering angle, degrees (positive right). */
+  steering: number;
+}
+
+/** What the system pages of the lower ECAM show. Pressures psi, temperatures °C. */
+export interface AirbusSystems {
+  apu: {
+    master: boolean;
+    /** Speed and exhaust gas temperature, per cent and °C; AVAIL; bleed and generator on line. */
+    n: number;
+    egt: number;
+    available: boolean;
+    bleed: boolean;
+    generator: boolean;
+  };
+  /** Bleed pressure in the left and right ducts. */
+  bleed: [number, number];
+  /** Engine start: valve open, igniters A/B firing, and the phase of the automatic start. */
+  start: { valve: [boolean, boolean]; ignition: [boolean, boolean]; phase: [string, string] };
+  /** Air data and inertial reference: aligned, seconds still to align (0 aligned). */
+  adirs: { aligned: boolean; remaining: number };
+  electrical: {
+    ac1: boolean;
+    ac2: boolean;
+    acEss: boolean;
+    dcEss: boolean;
+    dcBat: boolean;
+    /** Which source feeds the AC buses: 'gen1', 'gen2', 'apu', 'ext', 'none'. */
+    source: [string, string];
+    batteryVolts: [number, number];
+  };
+  hydraulics: { green: number; blue: number; yellow: number; ptu: boolean; rat: boolean };
+  fuel: {
+    /** Left wing, centre, right wing, kg, and the pumps running. */
+    tanks: [number, number, number];
+    pumps: { left: boolean; centre: boolean; right: boolean };
+    crossfeed: boolean;
+    /** Total fuel used since the engines started, kg. */
+    used: number;
+  };
+  /** Packs on and flowing, cabin altitude ft, rate ft/min, differential psi. */
+  air: {
+    packs: [boolean, boolean];
+    cabinAltitude: number;
+    cabinRate: number;
+    differential: number;
+  };
+  antiIce: { wing: boolean; engine: [boolean, boolean] };
+  brakes: { pressure: number; antiSkid: boolean; parking: boolean };
+  /** Gross mass, kg (the weight and balance the computers use). */
+  grossMass: number;
+}
+
+/** ECAM: the upper display's warnings and memo, as plain lines. */
+export interface AirbusEcam {
+  /** Red warnings then amber cautions, most important first ('ENG 1 FAIL', 'HYD G SYS LO PR'). */
+  warnings: string[];
+  /** Memo lines: 'T.O MEMO', 'LDG MEMO' items, 'SPEED BRK', 'PARK BRK', 'APU AVAIL', 'SEAT BELTS'... */
+  memo: string[];
+  /** Master warning and master caution lights. */
+  masterWarning: boolean;
+  masterCaution: boolean;
+}
+
+export interface AirbusTelemetry {
+  fma: AirbusFma;
+  speeds: AirbusSpeeds;
+  fcu: AirbusFcu;
+  guidance: AirbusGuidance;
+  controls: AirbusControls;
+  systems: AirbusSystems;
+  ecam: AirbusEcam;
 }
 
 export interface GpsTelemetry {
@@ -275,6 +483,11 @@ export interface AvionicsInput {
   loadFactor?: number;
   radarAltitude?: number;
   tas?: number;
+  /**
+   * Phase 4: the aircraft's whole telemetry of the last step (radio altitude, Mach, angle of
+   * attack, flaps, engines, fuel), for flight guidance that needs more than the sensors above.
+   */
+  telemetry?: Telemetry;
 }
 
 /** What the autopilot does with the controls while engaged, in ControlInput's units. */

@@ -16,13 +16,14 @@
  * Euler, which keeps the phugoid and the gear oscillation from gaining energy.
  */
 import type { Avionics, AvionicsInput, AvionicsUnit } from './avionicsTypes';
-import { C172_CONTROLS, CockpitPanel } from './cockpit';
+import { C172_CONTROLS, CockpitPanel, type ControlSpec } from './cockpit';
 import {
   createControlLaw,
   newSurfaceCommand,
   trimAngle,
   type ControlLaw,
   type ControlLawContext,
+  type TypeSystemsContext,
 } from './controlLaw';
 import { AircraftSystems } from './systems/systems';
 import { ALL_FAILURES, FailureSet } from './systems/failures';
@@ -35,7 +36,13 @@ import {
   type MachEffects,
   type SectionCoefficients,
 } from './airfoil';
-import type { AircraftDefinition, ContactPoint, TypeSystems, WheelDef } from './definition';
+import type {
+  AircraftDefinition,
+  ContactPoint,
+  StripControl,
+  TypeSystems,
+  WheelDef,
+} from './definition';
 import {
   bladeForces,
   createPowerplant,
@@ -234,6 +241,9 @@ export class FlightModel implements SimAircraft {
     stallProtection: boolean;
     dt: number;
   };
+  private readonly systemsContext: TypeSystemsContext & { dt: number };
+  /** Every device of each strip (its `controls`, or its one `control`). */
+  private readonly stripControls: StripControl[][];
 
   // Aerodynamic state.
   private readonly separation: Float64Array;
@@ -409,7 +419,10 @@ export class FlightModel implements SimAircraft {
       this.controls.condition = Array.from({ length: n }, () => 1);
       this.controls.reverse = false;
     }
-    if (def.speedbrake || def.strips.some((s) => s.control?.kind === 'spoiler'))
+    if (
+      def.speedbrake ||
+      def.strips.some((s) => (s.controls ?? [s.control]).some((c) => c?.kind === 'spoiler'))
+    )
       this.controls.speedbrake = 0;
     if (def.controls.rollTrim) this.controls.rollTrim = 0;
     if (def.controls.yawTrim) this.controls.yawTrim = 0;
@@ -427,7 +440,9 @@ export class FlightModel implements SimAircraft {
       yawDamper: false,
       stallProtection: false,
       dt: 0,
+      cockpit: this.cockpit,
     };
+    this.stripControls = def.strips.map((s) => s.controls ?? (s.control ? [s.control] : []));
     this.telemetry = {
       time: 0,
       ias: 0,
@@ -466,6 +481,17 @@ export class FlightModel implements SimAircraft {
     if (def.controls.trim === 'stabiliser') t.stabiliser = 0;
     if (def.limits) t.exceedances = this.exceedances;
     this.lawContext.telemetry = t;
+    this.avionicsInput.telemetry = t;
+    this.systemsContext = {
+      controls: this.controls,
+      cockpit: this.cockpit,
+      telemetry: t,
+      systems: this.systems,
+      engines: this.engines,
+      engineInputs: this.engineInputs,
+      failures: this.failures,
+      dt: 0,
+    };
     this.bindCockpit();
   }
 
@@ -512,43 +538,45 @@ export class FlightModel implements SimAircraft {
     const c = this.controls;
     const n = this.engines.length;
     const detents = this.def.controls.flapDetents.length - 1;
-    const bindLever = (
-      id: string,
-      arr: () => number[] | undefined,
-      spec = p.specs.find((s) => s.id === id),
-    ) => {
-      // A selector's positions spread over 0..1 (cut-off, ground idle, flight idle). The
-      // per-engine levers are bound even where the type has no common one (the F/A-18).
-      const first = spec ?? p.specs.find((s) => s.id === `${id}1`);
-      if (!first) return;
-      const last = first.kind === 'selector' ? (first.positions?.length ?? 1) - 1 : 0;
-      const toLever = (v: number) => (last > 0 ? v / last : v);
-      const fromLever = (v: number) => (last > 0 ? Math.round(clamp(v, 0, 1) * last) : v);
-      if (spec)
+    // A selector's positions spread over 0..1 (cut-off, ground idle, flight idle).
+    const positions = (spec: ControlSpec) =>
+      spec.kind === 'selector' ? (spec.positions?.length ?? 1) - 1 : 0;
+    const toLever = (last: number, v: number) => (last > 0 ? v / last : v);
+    const fromLever = (last: number, v: number) =>
+      last > 0 ? Math.round(clamp(v, 0, 1) * last) : v;
+    const bindLever = (id: string, arr: () => number[] | undefined) => {
+      const spec = p.specs.find((s) => s.id === id);
+      if (spec) {
+        const last = positions(spec);
         p.bind(
           id,
-          () => fromLever(arr()?.[0] ?? 0),
+          () => fromLever(last, arr()?.[0] ?? 0),
           (v) => {
             const a = arr();
-            if (a) for (let i = 0; i < n; i++) a[i] = toLever(v);
+            if (a) for (let i = 0; i < n; i++) a[i] = toLever(last, v);
           },
         );
+      }
+      // One lever per engine (`throttle1`, `throttle2`...), also where there is no common one.
       for (let i = 0; i < n; i++) {
         const one = p.specs.find((s) => s.id === `${id}${i + 1}`);
-        if (one)
-          p.bind(
-            one.id,
-            () => fromLever(arr()?.[i] ?? 0),
-            (v) => {
-              const a = arr();
-              if (a) a[i] = toLever(v);
-            },
-          );
+        if (!one) continue;
+        const last = positions(one);
+        p.bind(
+          one.id,
+          () => fromLever(last, arr()?.[i] ?? 0),
+          (v) => {
+            const a = arr();
+            if (a) a[i] = toLever(last, v);
+          },
+        );
       }
     };
     bindLever('throttle', () => c.throttle);
     bindLever('mixture', () => c.mixture);
     bindLever('condition', () => c.condition);
+    // A jet's engine masters are its condition levers.
+    if (!p.has('condition1')) bindLever('engineMaster', () => c.condition);
     // The selector's positions are the flap detents; ControlInput spreads them over 0..1.
     if (p.has('flaps'))
       p.bind(
@@ -955,26 +983,32 @@ export class FlightModel implements SimAircraft {
       const v2 = uc * uc + un * un;
       const alphaGeo = Math.atan2(-un, uc);
       const foil = strip.foil;
-      const control = strip.control;
+      const devices = this.stripControls[i]!;
       let alpha = alphaGeo - this.groupInduced[strip.group]!;
-      // A movable stabiliser turns the whole tailplane: nose-up trim is leading edge down.
-      if (control?.kind === 'elevator' && def.controls.trim === 'stabiliser')
-        alpha -= this.stabiliser;
       let ctrl = 0;
       let sepShift = 0;
       let spoiled = 0;
-      if (control) {
-        if (control.kind === 'slat') sepShift = control.effectiveness * this.slat;
+      let hinged = false;
+      let flap: StripControl | undefined;
+      for (let k = 0; k < devices.length; k++) {
+        const control = devices[k]!;
+        // A movable stabiliser turns the whole tailplane: nose-up trim is leading edge down.
+        if (control.kind === 'elevator' && def.controls.trim === 'stabiliser')
+          alpha -= this.stabiliser;
+        if (control.kind === 'slat') sepShift += control.effectiveness * this.slat;
         else if (control.kind === 'spoiler')
-          spoiled = this.spoilerShare(control.side, control.roll);
-        else
-          ctrl = this.controlAlpha(
+          spoiled = Math.max(spoiled, this.spoilerShare(control.side, control.roll));
+        else {
+          ctrl += this.controlAlpha(
             control.kind,
             control.effectiveness,
             control.side,
             control.roll,
             control.droop,
           );
+          if (control.effectiveness < 0.95) hinged = true;
+          if (control.kind === 'flap') flap = control;
+        }
       }
       if (strip.leadingEdge) sepShift += strip.leadingEdge * this.slat;
       // Compressibility on the flow normal to the sweep.
@@ -989,13 +1023,7 @@ export class FlightModel implements SimAircraft {
         extraDrag = mo.drag;
         cpShift = mo.cpShift;
         // An all-moving tail keeps its power; a hinged surface loses it behind the shock.
-        if (
-          control &&
-          control.kind !== 'slat' &&
-          control.kind !== 'spoiler' &&
-          control.effectiveness < 0.95
-        )
-          ctrl *= mo.control;
+        if (hinged) ctrl *= mo.control;
       }
       // A raised spoiler destroys most of the lift behind it.
       if (spoiled > 0) ctrl -= 0.6 * spoiled * (alpha - foil.alpha0) + 4 * DEG * spoiled;
@@ -1015,15 +1043,16 @@ export class FlightModel implements SimAircraft {
       let cd = c.cd + extraDrag;
       if (ice > 0) cd += ICE_DRAG * ice;
       let area = strip.area;
-      if (control?.kind === 'flap') {
+      if (flap) {
         const sf = Math.sin(this.flap);
         cd += def.controls.flapDrag * sf * sf;
         // A Fowler flap runs out behind the wing: more area as it extends.
-        if (control.extension) {
+        if (flap.extension) {
           const travel = def.controls.flapDetents[def.controls.flapDetents.length - 1]!;
-          area *= 1 + control.extension * clamp(this.flap / travel, 0, 1);
+          area *= 1 + flap.extension * clamp(this.flap / travel, 0, 1);
         }
-      } else if (spoiled > 0) cd += (def.controls.spoilerDrag ?? 0.1) * spoiled;
+      }
+      if (spoiled > 0) cd += (def.controls.spoilerDrag ?? 0.1) * spoiled;
       this.stripCl[i] = cl;
       this.stripAlpha[i] = alphaControl;
       const qS = 0.5 * rho * v2 * area * (strip.qFactor ?? 1);
@@ -1265,7 +1294,8 @@ export class FlightModel implements SimAircraft {
     if (normal > 0) this.wheelsLoaded++;
 
     // Rolling direction: body x turned by the steering angle, laid into the ground plane.
-    const steer = (wheel.steering ?? 0) * this.steeringScale * clamp(this.controls.yaw, -1, 1);
+    const steering = this.surfaceCommand.steering ?? this.controls.yaw;
+    const steer = (wheel.steering ?? 0) * this.steeringScale * clamp(steering, -1, 1);
     const fwd = this.t2;
     set(fwd, Math.cos(steer), Math.sin(steer), 0);
     rotate(fwd, this.state.orientation, fwd);
@@ -1279,7 +1309,9 @@ export class FlightModel implements SimAircraft {
     const mu = surf.dry + (surf.wet - surf.dry) * plane.wetness;
     const rolling = surf.rolling * (1 + plane.wetness);
     const c = this.controls;
-    const pedal = wheel.brake === 'left' ? c.brakeLeft : wheel.brake === 'right' ? c.brakeRight : 0;
+    let pedal = wheel.brake === 'left' ? c.brakeLeft : wheel.brake === 'right' ? c.brakeRight : 0;
+    const auto = this.surfaceCommand.brake;
+    if (auto !== undefined && wheel.brake) pedal = Math.max(pedal, auto);
     // Brake pads hold a standing wheel harder than they slow a turning one (static friction
     // of the pads): the brakes hold a full-power run-up but still let a landing roll out.
     const stiction = 1 + 0.5 * (1 - smoothstep(0.05, 0.5, Math.abs(vLong)));
@@ -1287,21 +1319,23 @@ export class FlightModel implements SimAircraft {
 
     // Tyre as a bristle: a spring that holds the aircraft still on a slope or against idle
     // thrust, and that relaxes over a rolling length so a rolling tyre grips by slip angle.
+    const stiffness = wheel.tyre?.stiffness ?? TYRE_STIFFNESS;
+    const damping = wheel.tyre?.damping ?? TYRE_DAMPING;
     let lat =
       this.bristleLat[i]! + (vLat - (Math.abs(vLong) * this.bristleLat[i]!) / TYRE_RELAXATION) * dt;
-    const latDamping = TYRE_DAMPING / (1 + Math.abs(vLong) / 0.5);
-    let fLat = -(TYRE_STIFFNESS * lat + latDamping * vLat);
+    const latDamping = damping / (1 + Math.abs(vLong) / 0.5);
+    let fLat = -(stiffness * lat + latDamping * vLat);
     const capLat = mu * normal;
     if (Math.abs(fLat) > capLat) {
       fLat = Math.sign(fLat) * capLat;
-      lat = clamp(lat, -capLat / TYRE_STIFFNESS, capLat / TYRE_STIFFNESS);
+      lat = clamp(lat, -capLat / stiffness, capLat / stiffness);
     }
     let lon = this.bristleLong[i]! + vLong * dt;
-    let fLon = -(TYRE_STIFFNESS * lon + TYRE_DAMPING * vLong);
+    let fLon = -(stiffness * lon + damping * vLong);
     const capLon = Math.min(mu * normal, rolling * normal + brake);
     if (Math.abs(fLon) > capLon) {
       fLon = Math.sign(fLon) * capLon;
-      lon = clamp(lon, -capLon / TYRE_STIFFNESS, capLon / TYRE_STIFFNESS);
+      lon = clamp(lon, -capLon / stiffness, capLon / stiffness);
     }
     // Friction circle: braking and cornering share the grip.
     const total = Math.hypot(fLon, fLat);
@@ -1399,6 +1433,10 @@ export class FlightModel implements SimAircraft {
     this.stepAvionics(dt, env);
     this.typeSystems?.beforeEngines(dt, this);
     this.systems.beforeEngines(dt, this.engineInputs, this.controls.starter, this.time);
+    if (this.controlLaw.systems) {
+      this.systemsContext.dt = dt;
+      this.controlLaw.systems(this.systemsContext);
+    }
     this.moveSurfaces(dt, q);
     this.moveGear(dt);
 
@@ -1804,6 +1842,8 @@ export class FlightModel implements SimAircraft {
     this.spoiler = 0;
     this.speedbrake = 0;
     this.differentialTail = 0;
+    this.surfaceCommand.brake = undefined;
+    this.surfaceCommand.steering = undefined;
     // Bus, ignition and fuel supply as the switches now stand, before anything is trimmed.
     this.systems.beforeEngines(0, this.engineInputs, undefined, 0);
     this.flap = this.flapTarget();
@@ -1993,6 +2033,8 @@ export class FlightModel implements SimAircraft {
     const x = [4 * DEG, 0, 0.6];
     const r = [0, 0, 0];
     const r2 = [0, 0, 0];
+    const limit = [3 * DEG, 3 * DEG, 0.3];
+    const last = [0, 0, 0];
     for (let iter = 0; iter < 30; iter++) {
       residual(x, r);
       if (Math.abs(r[0]!) + Math.abs(r[1]!) + Math.abs(r[2]!) < 1e-7) break;
@@ -2005,8 +2047,14 @@ export class FlightModel implements SimAircraft {
         for (let i = 0; i < 3; i++) J[i]![j] = (r2[i]! - r[i]!) / steps[j]!;
       }
       const dx = solve3(J, r);
-      const limit = [3 * DEG, 3 * DEG, 0.3];
-      for (let j = 0; j < 3; j++) x[j]! -= clamp(dx[j]!, -limit[j]!, limit[j]!);
+      for (let j = 0; j < 3; j++) {
+        const step = clamp(dx[j]!, -limit[j]!, limit[j]!);
+        // A kinked response (an engine control's lever detent) makes Newton jump to and fro
+        // across the kink: each reversal halves the step allowed from then on.
+        if (step * last[j]! < 0) limit[j] = Math.min(limit[j]!, Math.abs(last[j]!) / 2);
+        last[j] = step;
+        x[j]! -= step;
+      }
       x[0] = clamp(x[0]!, -10 * DEG, 25 * DEG);
       x[1] = clamp(x[1]!, trimLo, trimHi);
     }

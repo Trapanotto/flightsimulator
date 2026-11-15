@@ -8,7 +8,12 @@
  * director and yaw damper (flightDirector.ts). An airliner's or a fighter's flight guidance,
  * with autothrottle, plugs in through `autopilot` as a factory.
  */
-import type { AutopilotCommand, AutopilotTelemetry, AvionicsInput } from '../avionicsTypes';
+import type {
+  AutopilotCommand,
+  AutopilotTelemetry,
+  AvionicsInput,
+  GpsTelemetry,
+} from '../avionicsTypes';
 import type { Cockpit } from '../cockpit';
 import type { AutopilotConfig, LateralGuidance, VerticalGuidance } from './autopilot';
 import type { FlightDirectorConfig } from './flightDirector';
@@ -26,6 +31,18 @@ export interface AutopilotContext {
   readonly lateral: LateralGuidance;
   readonly vertical: VerticalGuidance;
   readonly source: NavSource;
+  /**
+   * Phase 4: the guidance of every source at once, for flight guidance that flies the GPS
+   * plan while it waits to capture the ILS on NAV 1; and the GPS with its plan.
+   */
+  readonly sources: Readonly<Record<NavSource, SourceGuidance>>;
+  readonly gps: GpsTelemetry;
+}
+
+/** Course and glide slope of one navigation source. */
+export interface SourceGuidance {
+  readonly lateral: LateralGuidance;
+  readonly vertical: VerticalGuidance;
 }
 
 export interface AutopilotComputer {
