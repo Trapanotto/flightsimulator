@@ -9,6 +9,7 @@
  */
 import type { AirfoilData } from './airfoil';
 import type { AircraftDefinition, StripDef } from './definition';
+import type { PistonEngineData } from './engine';
 import type { SystemsData } from './systems/data';
 import { DEG, FT, KT } from './math';
 import type { Vec3 } from './types';
@@ -193,31 +194,46 @@ const GAL = 6 * LB;
  */
 const C172_SYSTEMS: SystemsData = {
   electrical: {
-    batteryAmpHours: 12.75,
-    batteryResistance: 0.05,
-    batteryFullVolts: 24.8,
-    batteryLowVolts: 23.84,
-    alternatorVolts: 28,
-    alternatorAmps: 60,
-    alternatorCutInRpm: 400,
-    alternatorFullRpm: 1500,
+    batteries: [
+      {
+        switch: 'battery',
+        ampHours: 12.75,
+        resistance: 0.05,
+        fullVolts: 24.8,
+        lowVolts: 23.84,
+      },
+    ],
+    generators: [
+      {
+        switch: 'alternator',
+        engine: 0,
+        volts: 28,
+        amps: 60,
+        cutIn: 400,
+        full: 1500,
+        failure: 'alternator',
+      },
+    ],
     lowVolts: 24.5,
     // Radios want about 22 V; the rest of the bus keeps working much lower.
     avionicsMinVolts: 20,
     busMinVolts: 16,
+    avionicsSwitch: 'avionics',
     loads: {
       base: 3,
-      panelLights: 1.5,
-      beacon: 1.5,
-      strobe: 3,
-      nav: 1.5,
-      landing: 4,
-      taxi: 3,
-      pitotHeat: 5.5,
       avionics: 7,
       flapsMotor: 10,
       starter: 150,
-      fuelPump: 3,
+      switched: [
+        { control: 'lightPanel', amps: 1.5 },
+        { control: 'lightBeacon', amps: 1.5 },
+        { control: 'lightStrobe', amps: 3 },
+        { control: 'lightNav', amps: 1.5 },
+        { control: 'lightLanding', amps: 4 },
+        { control: 'lightTaxi', amps: 3 },
+        { control: 'pitotHeat', amps: 5.5 },
+        { control: 'fuelPump', amps: 3 },
+      ],
     },
   },
   fuel: {
@@ -227,6 +243,9 @@ const C172_SYSTEMS: SystemsData = {
     // A leak of about 10 gal/h: noticeable on the gauge within a quarter of an hour.
     leakRate: (10 * GAL) / 3600,
     lineFuel: 0.02,
+    // LEFT, BOTH, RIGHT.
+    selector: { control: 'fuelSelector', feeds: [[0], [0, 1], [1]] },
+    shutoff: 'fuelShutoff',
   },
   engine: {
     singleMagnetoLoss: 0.11,
@@ -238,6 +257,60 @@ const C172_SYSTEMS: SystemsData = {
   vacuum: { suction: 5, fullRpm: 850, low: 3 },
   icing: { iceMass: 50 },
 };
+/** McCauley 1A170E/JHA7660 fixed-pitch propeller: thrust and power coefficients over J. */
+const PROPELLER_CT: readonly (readonly [number, number])[] = [
+  // Blades partly stalled standing still: static thrust is not the maximum.
+  [0, 0.084],
+  [0.2, 0.086],
+  [0.4, 0.088],
+  [0.5, 0.083],
+  [0.6, 0.0715],
+  [0.7, 0.056],
+  [0.8, 0.043],
+  [0.9, 0.029],
+  [1.0, 0.007],
+  [1.1, -0.01],
+  [1.2, -0.026],
+  [1.4, -0.05],
+  [1.7, -0.1],
+  [2.0, -0.15],
+  [3.0, -0.38],
+];
+const PROPELLER_CP: readonly (readonly [number, number])[] = [
+  [0, 0.063],
+  [0.2, 0.062],
+  [0.4, 0.058],
+  [0.6, 0.051],
+  [0.7, 0.0475],
+  [0.8, 0.042],
+  [0.9, 0.033],
+  [1.0, 0.022],
+  [1.1, 0.01],
+  [1.2, -0.003],
+  [1.4, -0.025],
+  [1.7, -0.06],
+  [2.0, -0.1],
+  [3.0, -0.25],
+];
+
+/** Lycoming IO-360-L2A, 180 hp at 2700 rpm. */
+const IO360: PistonEngineData = {
+  ratedPower: 180 * 745.7,
+  ratedRpm: 2700,
+  displacement: 361 * 1.6387e-5,
+  volumetricEfficiency: 0.85,
+  idleManifold: 0.22,
+  frictionTorque: 46,
+  frictionPerRadS: 0.16,
+  pumpingTorque: 40,
+  inertia: 2.4,
+  fullRichRatio: 1.25,
+  starterTorque: 140,
+  starterRpm: 280,
+};
+
+const PROPELLER_HUB = v(1.95, 0, -0.15);
+
 const stallHorn = strips.findIndex((s) => s.name === 'wing-left-2');
 
 export const C172: AircraftDefinition = {
@@ -251,6 +324,28 @@ export const C172: AircraftDefinition = {
     vne: 163 * KT,
     maxTakeoffMass: 2550 * 0.45359237,
     retractableGear: false,
+    category: 'piston',
+    // Normal approach 65 KIAS with full flaps, rotation at 55 KIAS (POH section 4).
+    vApproach: 65 * KT,
+    vRotate: 55 * KT,
+    specs: {
+      maker: 'Cessna Aircraft Company, Wichita',
+      powerplant: 'Lycoming IO-360-L2A, 180 hp',
+      span: 11.0,
+      length: 8.28,
+      height: 2.72,
+      emptyMass: 767,
+      // POH section 5: 124 KTAS at 8000 ft and 80 % power; VNE 163 KIAS.
+      cruiseSpeed: 124 * KT,
+      maxSpeed: 163 * KT,
+      ceiling: 14_000 * FT,
+      range: 640 * 1852,
+      climbRate: (730 * FT) / 60,
+      takeoffRoll: 960 * FT,
+      landingRoll: 575 * FT,
+      seats: 4,
+      firstFlight: 1955,
+    },
   },
   // 2550 lb gross with 53 US gal (318 lb) of usable fuel.
   mass: (2550 - 318) * 0.45359237,
@@ -286,59 +381,19 @@ export const C172: AircraftDefinition = {
     pitchMunk: 0.25,
     yawMunk: 0.05,
   },
-  propeller: {
-    diameter: 76 * 0.0254,
-    position: v(1.95, 0, -0.15),
-    swirlFactor: 0.3,
-    ct: [
-      // Blades partly stalled standing still: static thrust is not the maximum.
-      [0, 0.084],
-      [0.2, 0.086],
-      [0.4, 0.088],
-      [0.5, 0.083],
-      [0.6, 0.0715],
-      [0.7, 0.056],
-      [0.8, 0.043],
-      [0.9, 0.029],
-      [1.0, 0.007],
-      [1.1, -0.01],
-      [1.2, -0.026],
-      [1.4, -0.05],
-      [1.7, -0.1],
-      [2.0, -0.15],
-      [3.0, -0.38],
-    ],
-    cp: [
-      [0, 0.063],
-      [0.2, 0.062],
-      [0.4, 0.058],
-      [0.6, 0.051],
-      [0.7, 0.0475],
-      [0.8, 0.042],
-      [0.9, 0.033],
-      [1.0, 0.022],
-      [1.1, 0.01],
-      [1.2, -0.003],
-      [1.4, -0.025],
-      [1.7, -0.06],
-      [2.0, -0.1],
-      [3.0, -0.25],
-    ],
-  },
-  engine: {
-    ratedPower: 180 * 745.7,
-    ratedRpm: 2700,
-    displacement: 361 * 1.6387e-5,
-    volumetricEfficiency: 0.85,
-    idleManifold: 0.22,
-    frictionTorque: 46,
-    frictionPerRadS: 0.16,
-    pumpingTorque: 40,
-    inertia: 2.4,
-    fullRichRatio: 1.25,
-    starterTorque: 140,
-    starterRpm: 280,
-  },
+  engines: [
+    {
+      kind: 'piston',
+      position: PROPELLER_HUB,
+      engine: IO360,
+      propeller: {
+        diameter: 76 * 0.0254,
+        swirlFactor: 0.3,
+        ct: PROPELLER_CT,
+        cp: PROPELLER_CP,
+      },
+    },
+  ],
   controls: {
     elevatorUp: 28 * DEG,
     elevatorDown: 23 * DEG,

@@ -31,6 +31,69 @@ export interface AirfoilData {
   /** Flat-plate lift and drag amplitude (cl = a sin 2α, cd = b sin²α). */
   plateLift: number;
   plateDrag: number;
+  /**
+   * Compressibility, for sections that fly fast enough to need it (Phase 4). Without it the
+   * section is incompressible: the slow types' data are calibrated against flight tests that
+   * already contain the little Mach effect they have.
+   */
+  mach?: MachData;
+}
+
+/** How a section behaves at speed. */
+export interface MachData {
+  /** Drag-divergence Mach number of the section (normal to the sweep), at its design lift. */
+  divergence: number;
+  /** Thickness ratio (sets the supersonic wave drag and the transonic drag peak). */
+  thickness: number;
+}
+
+/** What compressibility does to a section at one Mach number (normal to the sweep). */
+export interface MachEffects {
+  /** Factor on the lift slope (Prandtl-Glauert below, Ackeret above the speed of sound). */
+  lift: number;
+  /** Extra drag: Lock's fourth-power drag rise, then the supersonic wave drag. */
+  drag: number;
+  /** Rearward shift of the centre of pressure, as a share of chord (0 at low speed, 0.25 supersonic). */
+  cpShift: number;
+  /** Factor on what a trailing-edge control surface does (shock-induced separation behind it). */
+  control: number;
+}
+
+/**
+ * Compressibility of a section at Mach `m`. Subsonic: Prandtl-Glauert, 1/√(1-M²). Supersonic
+ * thin-airfoil theory (Ackeret): lift slope 4/√(M²-1) and wave drag 4(t/c)²/√(M²-1). Between
+ * them a blend through the transonic range. The drag rise below M = 1 follows Lock's empirical
+ * law, Δcd = 20 (M - Mcr)⁴ with Mcr = Mdd - (0.1/80)^(1/3) (as used in W. H. Mason,
+ * Configuration Aerodynamics, ch. 7), capped at the transonic peak.
+ */
+export function machEffects(
+  data: MachData,
+  liftSlope: number,
+  m: number,
+  out: MachEffects,
+): MachEffects {
+  const critical = data.divergence - 0.108;
+  const sub = 1 / Math.sqrt(1 - Math.min(m, 0.85) ** 2);
+  const sup = 4 / liftSlope / Math.sqrt(Math.max(m, 1.15) ** 2 - 1);
+  if (m <= 0.85) out.lift = sub;
+  else if (m >= 1.15) out.lift = sup;
+  else out.lift = sub + (sup - sub) * smoothstep(0.85, 1.15, m);
+  const t2 = data.thickness * data.thickness;
+  const peak = (4 * t2) / Math.sqrt(1.1 * 1.1 - 1);
+  const x = Math.max(0, m - critical);
+  out.drag = m <= 1.1 ? Math.min(peak, 20 * x * x * x * x) : (4 * t2) / Math.sqrt(m * m - 1);
+  // Above the critical Mach the shock walks aft and takes the lift with it.
+  out.cpShift = 0.25 * smoothstep(critical, 1.1, m);
+  out.control = 1 - 0.5 * smoothstep(critical, data.divergence + 0.1, m);
+  return out;
+}
+
+/** Leading-edge vortex lift (Polhamus' suction analogy): extra lift coefficient at angle a. */
+export function vortexLift(kv: number, a: number): number {
+  const s = Math.sin(a);
+  // The vortex bursts over the wing at high angles and its lift goes with it.
+  const burst = 1 - smoothstep(28 * DEG, 45 * DEG, Math.abs(a));
+  return kv * s * Math.abs(s) * Math.cos(a) * burst;
 }
 
 export interface SectionCoefficients {

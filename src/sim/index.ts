@@ -11,6 +11,7 @@ export type {
   ControlInput,
   EngineTelemetry,
   Environment,
+  Exceedance,
   GroundSample,
   InitialCondition,
   Telemetry,

@@ -32,7 +32,16 @@ export interface SystemsTelemetry {
   /** The pitot tube is blocked by ice: the airspeed indicator is wrong. */
   pitotBlocked: boolean;
   /** Which exterior lights are lit (switch on and the bus powered). */
-  lights: { beacon: boolean; landing: boolean; taxi: boolean; nav: boolean; strobe: boolean };
+  lights: {
+    beacon: boolean;
+    landing: boolean;
+    taxi: boolean;
+    nav: boolean;
+    strobe: boolean;
+    /** Phase 4, on types that have them: wing-tip recognition lights, wing ice light. */
+    recognition?: boolean;
+    ice?: boolean;
+  };
   /** Panel lighting 0..1 (knob and power). */
   panelLight: number;
   /** The annunciator panel. */
@@ -42,7 +51,33 @@ export interface SystemsTelemetry {
     lowFuelRight: boolean;
     lowVacuum: boolean;
     oilPressure: boolean;
+    /** Phase 4, on types that have them: a generator off line (one entry per generator). */
+    generators?: boolean[];
+    /** Cabin altitude above its warning. */
+    cabinAltitude?: boolean;
+    /** The gear is neither up and locked nor down and locked, or down too fast. */
+    gearUnsafe?: boolean;
+    /** A hydraulic system below half its pressure. */
+    hydraulics?: boolean;
+    /** The starter is engaged; the igniters are firing. */
+    starter?: boolean;
+    ignition?: boolean;
+    /** The de-icing boots are cycling. */
+    deice?: boolean;
+    /** The inertial separator is open. */
+    inertialSeparator?: boolean;
   };
+  /** Phase 4: fuel in every tank, kg, for types with more than two. */
+  fuelTanks?: number[];
+  /** Phase 4: pressure of each hydraulic system, psi. */
+  hydraulics?: number[];
+  /** Phase 4: cabin altitude (m), differential pressure (Pa) and cabin rate (m/s, positive up). */
+  cabinAltitude?: number;
+  cabinDifferential?: number;
+  cabinRate?: number;
+  /** Phase 4: current of each generator (A) and charge of each battery (0..1). */
+  generatorAmps?: number[];
+  batteryCharges?: number[];
 }
 
 /**
@@ -74,6 +109,8 @@ export interface InstrumentTelemetry {
   /** Flags on the gauges: no suction for the gyros, no power for the turn coordinator. */
   gyroFlag: boolean;
   turnFlag: boolean;
+  /** Phase 4: the altimeter shows standard pressure (1013.25 hPa) instead of its setting. */
+  baroStd?: boolean;
 }
 
 /** What can be made to fail. */

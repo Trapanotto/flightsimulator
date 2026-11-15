@@ -1,8 +1,8 @@
 /**
- * The C172's avionics stack as one unit: two NAV/COM radios, DME, ADF, transponder, a panel
- * GPS, marker beacons and the autopilot. The flight model steps it once per simulation step;
- * it reads its knobs and buttons from the cockpit by name and writes back what a press
- * changes.
+ * The avionics stack as one unit: two NAV/COM radios, DME, ADF, transponder, a GPS, marker
+ * beacons and the type's autopilot (`AvionicsConfig`). The flight model steps it once per
+ * simulation step; it reads its knobs and buttons from the cockpit by name and writes back
+ * what a press changes.
  */
 import type {
   AutopilotCommand,
@@ -17,10 +17,19 @@ import type { Cockpit } from '../cockpit';
 import { smoothstep } from '../math';
 import {
   Autopilot,
+  C172_AUTOPILOT,
   type AutopilotButtons,
   type LateralGuidance,
   type VerticalGuidance,
 } from './autopilot';
+import {
+  C172_AVIONICS,
+  type AutopilotComputer,
+  type AutopilotContext,
+  type AvionicsConfig,
+  type NavSource,
+} from './config';
+import { FlightDirectorAutopilot } from './flightDirector';
 import { KT, NM, type RangeBearing, rangeBearing, wrap360 } from './geo';
 import { Gps } from './gps';
 import { NavReceiver } from './navReceiver';
@@ -38,37 +47,15 @@ const LOOKUP_INTERVAL = 1;
 
 const XPDR_MODES = ['off', 'standby', 'on', 'alt'] as const;
 
-const BUTTONS = [
-  'com1Swap',
-  'com2Swap',
-  'nav1Swap',
-  'nav2Swap',
-  'xpdrIdent',
-  'apEngage',
-  'apHdg',
-  'apNav',
-  'apApr',
-  'apAlt',
-  'apVsUp',
-  'apVsDown',
-] as const;
-type Button = (typeof BUTTONS)[number];
-
-export function createAvionics(): AvionicsUnit {
-  return new C172Avionics();
+/** The avionics of a type; by default the Cessna's stack with the KAP 140. */
+export function createAvionics(config: AvionicsConfig = C172_AVIONICS): AvionicsUnit {
+  return new AvionicsStack(config);
 }
 
-class C172Avionics implements AvionicsUnit {
-  readonly telemetry: AvionicsTelemetry;
-  private readonly nav1 = new NavReceiver();
-  private readonly nav2 = new NavReceiver();
-  private readonly gps = new Gps();
-  private readonly autopilot = new Autopilot();
-  private db: NavDatabase | undefined;
-  private time = 0;
-  private readonly lastButton = new Float64Array(BUTTONS.length);
-  private readonly pressed = new Uint8Array(BUTTONS.length);
-  private readonly apButtons: AutopilotButtons = {
+/** The KAP 140 as an autopilot computer: its buttons by the Cessna's names. */
+class Kap140 implements AutopilotComputer {
+  private readonly autopilot: Autopilot;
+  private readonly buttons: AutopilotButtons = {
     engage: false,
     hdg: false,
     nav: false,
@@ -77,6 +64,69 @@ class C172Avionics implements AvionicsUnit {
     up: false,
     down: false,
   };
+
+  constructor(config: AvionicsConfig) {
+    this.autopilot = new Autopilot({ ...C172_AUTOPILOT, ...config.kap140 });
+  }
+
+  get telemetry() {
+    return this.autopilot.telemetry;
+  }
+
+  get command(): AutopilotCommand | undefined {
+    return this.autopilot.engaged ? this.autopilot.command : undefined;
+  }
+
+  reset() {
+    this.autopilot.reset();
+  }
+
+  step(dt: number, ctx: AutopilotContext) {
+    const b = this.buttons;
+    b.engage = ctx.pressed('apEngage');
+    b.hdg = ctx.pressed('apHdg');
+    b.nav = ctx.pressed('apNav');
+    b.apr = ctx.pressed('apApr');
+    b.alt = ctx.pressed('apAlt');
+    b.up = ctx.pressed('apVsUp');
+    b.down = ctx.pressed('apVsDown');
+    const c = ctx.cockpit;
+    this.autopilot.step(
+      dt,
+      ctx.input,
+      b,
+      c.get('apAltitude'),
+      c.get('headingBug'),
+      c.get('trim'),
+      ctx.lateral,
+      ctx.vertical,
+    );
+  }
+}
+
+/** What the stack hands its autopilot each step (filled in place). */
+interface MutableContext extends AutopilotContext {
+  input: AvionicsInput;
+  cockpit: Cockpit;
+  source: NavSource;
+}
+
+class AvionicsStack implements AvionicsUnit {
+  readonly telemetry: AvionicsTelemetry;
+  private readonly nav1 = new NavReceiver();
+  private readonly nav2 = new NavReceiver();
+  private readonly gps = new Gps();
+  private readonly autopilot: AutopilotComputer;
+  private db: NavDatabase | undefined;
+  private time = 0;
+  /** Edge detection over every button of the cockpit it is stepped with. */
+  private buttonSpecs: readonly unknown[] | undefined;
+  private readonly buttonIndex = new Map<string, number>();
+  private buttonIds: string[] = [];
+  private lastButton = new Float64Array(0);
+  private pressedNow = new Uint8Array(0);
+  private source: NavSource = 'nav1';
+  private readonly context: MutableContext;
   private readonly lateral: LateralGuidance = {
     valid: false,
     course: 0,
@@ -96,7 +146,14 @@ class C172Avionics implements AvionicsUnit {
   private identTimer = 0;
   private readonly rb: RangeBearing = { distance: 0, bearing: 0 };
 
-  constructor() {
+  constructor(readonly config: AvionicsConfig) {
+    const a = config.autopilot;
+    this.autopilot =
+      a === 'kap140'
+        ? new Kap140(config)
+        : a === 'flightDirector'
+          ? new FlightDirectorAutopilot(config.flightDirector)
+          : a();
     const ap = this.autopilot.telemetry;
     this.telemetry = {
       powered: false,
@@ -111,10 +168,18 @@ class C172Avionics implements AvionicsUnit {
       autopilot: ap,
       gps: this.gps.telemetry,
     };
+    this.context = {
+      input: undefined as unknown as AvionicsInput,
+      cockpit: undefined as unknown as Cockpit,
+      pressed: (id) => this.wasPressed(id),
+      lateral: this.lateral,
+      vertical: this.vertical,
+      source: 'nav1',
+    };
   }
 
   get command(): AutopilotCommand | undefined {
-    return this.autopilot.engaged ? this.autopilot.command : undefined;
+    return this.autopilot.command;
   }
 
   setDatabase(db: NavDatabase) {
@@ -136,6 +201,7 @@ class C172Avionics implements AvionicsUnit {
   reset() {
     this.time = 0;
     this.lastButton.fill(0);
+    this.pressedNow.fill(0);
     this.nav1.reset();
     this.nav2.reset();
     this.gps.reset();
@@ -183,8 +249,9 @@ class C172Avionics implements AvionicsUnit {
 
     // ---- GPS ----
     this.gps.update(input);
-    const gpsSource = cockpit.get('navSource') === 1;
-    if (gpsSource) this.showGpsOnNav1();
+    const sources = this.config.navSources;
+    this.source = sources[cockpit.get('navSource')] ?? sources[0] ?? 'nav1';
+    if (this.source === 'gps') this.showGpsOnNav1();
 
     // ---- DME, ADF, transponder, markers ----
     this.updateDme(cockpit.get('dmeSource') === 1 ? this.nav2 : this.nav1, cockpit, powered);
@@ -198,37 +265,33 @@ class C172Avionics implements AvionicsUnit {
     }
 
     // ---- autopilot ----
-    this.guidance(gpsSource);
-    const b = this.apButtons;
-    b.engage = this.wasPressed('apEngage');
-    b.hdg = this.wasPressed('apHdg');
-    b.nav = this.wasPressed('apNav');
-    b.apr = this.wasPressed('apApr');
-    b.alt = this.wasPressed('apAlt');
-    b.up = this.wasPressed('apVsUp');
-    b.down = this.wasPressed('apVsDown');
-    this.autopilot.step(
-      dt,
-      input,
-      b,
-      cockpit.get('apAltitude'),
-      cockpit.get('headingBug'),
-      cockpit.get('trim'),
-      this.lateral,
-      this.vertical,
-    );
+    this.guidance(this.source);
+    const ctx = this.context;
+    ctx.input = input;
+    ctx.cockpit = cockpit;
+    ctx.source = this.source;
+    this.autopilot.step(dt, ctx);
   }
 
   private readButtons(cockpit: Cockpit) {
-    for (let i = 0; i < BUTTONS.length; i++) {
-      const v = cockpit.get(BUTTONS[i]!);
-      this.pressed[i] = v >= 0.5 && this.lastButton[i]! < 0.5 ? 1 : 0;
+    if (this.buttonSpecs !== cockpit.specs) {
+      this.buttonSpecs = cockpit.specs;
+      this.buttonIds = cockpit.specs.filter((s) => s.kind === 'button').map((s) => s.id);
+      this.buttonIndex.clear();
+      this.buttonIds.forEach((id, i) => this.buttonIndex.set(id, i));
+      this.lastButton = new Float64Array(this.buttonIds.length);
+      this.pressedNow = new Uint8Array(this.buttonIds.length);
+    }
+    for (let i = 0; i < this.buttonIds.length; i++) {
+      const v = cockpit.get(this.buttonIds[i]!);
+      this.pressedNow[i] = v >= 0.5 && this.lastButton[i]! < 0.5 ? 1 : 0;
       this.lastButton[i] = v;
     }
   }
 
-  private wasPressed(id: Button): boolean {
-    return this.pressed[BUTTONS.indexOf(id)] === 1;
+  private wasPressed(id: string): boolean {
+    const i = this.buttonIndex.get(id);
+    return i !== undefined && this.pressedNow[i] === 1;
   }
 
   /** With NAV source on GPS, indicator 1 shows the GPS course and its deviation. */
@@ -251,11 +314,11 @@ class C172Avionics implements AvionicsUnit {
     n.bearing = g.bearing;
   }
 
-  private guidance(gpsSource: boolean) {
+  private guidance(source: NavSource) {
     const l = this.lateral;
     const v = this.vertical;
     v.valid = false;
-    if (gpsSource) {
+    if (source === 'gps') {
       const g = this.gps;
       l.valid = g.valid;
       l.course = g.desiredTrack;
@@ -264,7 +327,7 @@ class C172Avionics implements AvionicsUnit {
       l.frozen = false;
       return;
     }
-    const n = this.nav1;
+    const n = source === 'nav2' ? this.nav2 : this.nav1;
     // The autopilot couples to a localizer's front course only (no back-course mode).
     l.valid = n.courseValid && (!n.telemetry.localizer || n.frontCourse);
     l.course = n.guidedCourse;

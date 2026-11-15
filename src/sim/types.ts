@@ -158,7 +158,30 @@ export interface EngineTelemetry {
   reversing?: boolean;
   /** The starter is turning the engine. */
   starting?: boolean;
+  /** Oil pressure (psi) and temperature (°C) of this engine (SystemsTelemetry has the first). */
+  oilPressure?: number;
+  oilTemperature?: number;
 }
+
+/** A placard limit being exceeded (Phase 4). Noted, not a failure: the aircraft flies on. */
+export type Exceedance =
+  /** Above VMO or VNE. */
+  | 'overspeed'
+  /** Above MMO. */
+  | 'mach'
+  /** Flaps out above their speed. */
+  | 'flaps'
+  /** Gear extended above VLE, or moving above VLO. */
+  | 'gear'
+  /** Engine limits. */
+  | 'torque'
+  | 'itt'
+  | 'ng'
+  | 'propeller'
+  | 'egt'
+  | 'n1'
+  /** Load factor beyond the limit (but short of breaking). */
+  | 'load';
 
 /**
  * Derived values of one aircraft, refreshed every step. Everything outside the simulation
@@ -207,6 +230,13 @@ export interface Telemetry {
   /** Phase 4: Mach number, and the speed brake or spoiler position actually reached, 0..1. */
   mach?: number;
   speedbrake?: number;
+  /** Phase 4: stick shaker and stick pusher active (types with stall protection). */
+  stickShaker?: boolean;
+  stickPusher?: boolean;
+  /** Phase 4: movable stabiliser incidence, rad, positive nose up (types that trim with it). */
+  stabiliser?: number;
+  /** Phase 4: the limits being exceeded now (the same array, refilled every step). */
+  exceedances?: Exceedance[];
   /** Phase 3: the systems, what the instruments show, and the avionics. */
   systems?: SystemsTelemetry;
   instruments?: InstrumentTelemetry;
@@ -224,6 +254,11 @@ export interface InitialCondition {
   onGround: boolean;
   /** Engines running (default true). */
   enginesRunning?: boolean;
+  /**
+   * Phase 4: a retractable gear's lever in the air (default up; on the ground always down).
+   * The flap lever is taken from `controls.flaps` as set before the reset.
+   */
+  gearDown?: boolean;
 }
 
 /** The aircraft types the simulation knows. */

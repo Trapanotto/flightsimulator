@@ -17,7 +17,7 @@ export function createAircraft(
 ): SimAircraft {
   switch (id) {
     case 'c172':
-      return new FlightModel(C172, options.avionics ?? createAvionics());
+      return new FlightModel(C172, options.avionics ?? createAvionics(C172.avionics));
   }
   throw new Error(`createAircraft('${String(id)}'): unknown type`);
 }

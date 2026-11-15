@@ -91,6 +91,8 @@ export interface AutopilotTelemetry {
   selectedMach?: number;
   /** Autothrottle or autothrust. */
   autothrottle?: { engaged: boolean; mode: 'speed' | 'thrust' | 'idle' | 'off' };
+  /** Phase 4: go-around mode: wings level and the go-around pitch on the flight director. */
+  goAround?: boolean;
 }
 
 export interface GpsTelemetry {
@@ -196,6 +198,13 @@ export interface AutopilotCommand {
   /** The autopilot flies pitch through the trim, like the real one, plus a small elevator input. */
   pitch: number;
   pitchTrim: number;
+  /**
+   * Phase 4: an autothrottle's lever position for every engine, 0..1, while it is engaged
+   * (the flight model then flies it instead of the pilot's levers). Undefined: hands off.
+   */
+  throttle?: number;
+  /** Phase 4: the autopilot (not only the yaw damper) flies the rudder, -1..1. */
+  yaw?: number;
 }
 
 /**

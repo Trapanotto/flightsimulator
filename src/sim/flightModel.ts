@@ -3,23 +3,53 @@
  * quadrants see their own airflow (aircraft motion, rotation, local wind, slipstream and
  * swirl, wing downwash, crossflow around the cabin); stall, wing drop, spin, ground effect,
  * adverse yaw, P-factor and crosswind behaviour come out of that instead of being added.
+ * Sections that fly fast carry their compressibility (Prandtl-Glauert lift, drag rise and
+ * wave drag, the aft shift of the centre of pressure, the loss of control power), swept
+ * strips work on the flow normal to their span, and strakes add vortex lift.
  *
- * Integration: aerodynamics and engine once per fixed step, then the rigid body in sub-steps
+ * A type is data (`AircraftDefinition`) plus, where it needs one, a module of its own: its
+ * engines are `Powerplant`s, its control law turns the pilot's input into surface commands,
+ * its avionics unit carries its autopilot.
+ *
+ * Integration: aerodynamics and engines once per fixed step, then the rigid body in sub-steps
  * with the gear and contact points recomputed each sub-step (they are stiff). Semi-implicit
  * Euler, which keeps the phugoid and the gear oscillation from gaining energy.
  */
 import type { Avionics, AvionicsInput, AvionicsUnit } from './avionicsTypes';
 import { C172_CONTROLS, CockpitPanel } from './cockpit';
-import { AircraftSystems } from './systems/systems';
-import { FailureSet } from './systems/failures';
 import {
+  createControlLaw,
+  newSurfaceCommand,
+  trimAngle,
+  type ControlLaw,
+  type ControlLawContext,
+} from './controlLaw';
+import { AircraftSystems } from './systems/systems';
+import { ALL_FAILURES, FailureSet } from './systems/failures';
+import {
+  machEffects,
   sectionCoefficients,
   staticSeparation,
   updateSeparation,
+  vortexLift,
+  type MachEffects,
   type SectionCoefficients,
 } from './airfoil';
 import type { AircraftDefinition, ContactPoint, WheelDef } from './definition';
-import { PistonEngine, propellerForces, type EngineOutput, type PropellerOutput } from './engine';
+import {
+  bladeForces,
+  createPowerplant,
+  newPowerplantInput,
+  propellerForces,
+  type EngineDef,
+  type Powerplant,
+  type PowerplantInput,
+  type PropellerData,
+  type PropellerMount,
+  type PropellerOutput,
+  type Rotor,
+} from './propulsion';
+import type { PistonPowerplant } from './propulsion/piston';
 import {
   DEG,
   KT,
@@ -48,6 +78,7 @@ import type {
   AircraftState,
   ControlInput,
   Environment,
+  Exceedance,
   GroundSample,
   InitialCondition,
   SimAircraft,
@@ -59,6 +90,9 @@ import type {
 const G0 = 9.80665;
 const EARTH_RADIUS = 6_371_000;
 const SEA_LEVEL_DENSITY = 1.225;
+const SEA_LEVEL_PRESSURE = 101_325;
+const SEA_LEVEL_SOUND = 340.294;
+const R_AIR = 287.053;
 /** Below this height of the centre of gravity the gear and contact points are evaluated. */
 const CONTACT_RANGE = 60;
 const GEAR_SUBSTEPS = 4;
@@ -72,6 +106,8 @@ const ICE_BODY_DRAG = 0.3;
 const X_AXIS: Vec3 = { x: 1, y: 0, z: 0 };
 const Y_AXIS: Vec3 = { x: 0, y: 1, z: 0 };
 const Z_AXIS: Vec3 = { x: 0, y: 0, z: 1 };
+/** The gear counts as down and locked from here; below, the wheels carry nothing. */
+const GEAR_LOCKED = 0.999;
 
 /** Tyre friction (dry, fully wet) and rolling resistance per surface. */
 const SURFACES: Record<Surface, { dry: number; wet: number; rolling: number }> = {
@@ -113,6 +149,29 @@ const newAir = (): AirSample => ({
   pressure: 101325,
 });
 
+/** A propeller on the airframe and what it did in the last step. */
+interface PropState {
+  /** Index of the engine that turns it. */
+  engine: number;
+  data: PropellerData & PropellerMount;
+  position: Vec3;
+  /** +1 clockwise seen from behind. */
+  rotation: number;
+  thrust: number;
+  torque: number;
+  slipDelta: number;
+  slipRadius: number;
+  swirl: number;
+  /** Induced velocity of each quadrant (variable pitch), carried between calls. */
+  inflow: { vi: number }[];
+  rotor: Rotor;
+}
+
+/** The propeller of an engine definition, if it has one. */
+function propellerOf(def: EngineDef): (PropellerData & PropellerMount) | undefined {
+  return def.kind === 'piston' || def.kind === 'turboprop' ? def.propeller : undefined;
+}
+
 export class FlightModel implements SimAircraft {
   readonly info: AircraftInfo;
   readonly state: AircraftState = {
@@ -123,16 +182,18 @@ export class FlightModel implements SimAircraft {
   };
   readonly controls: ControlInput;
   readonly telemetry: Telemetry;
-  readonly cockpit: CockpitPanel = new CockpitPanel(C172_CONTROLS);
-  readonly failures = new FailureSet();
+  readonly cockpit: CockpitPanel;
+  readonly failures: FailureSet;
   /**
    * The avionics (radios, navigation, transponder, GPS, autopilot), plugged in by whoever
    * builds the aircraft. Without one the aircraft flies as before, with dark avionics.
    */
   avionicsUnit: AvionicsUnit | undefined;
   readonly systems: AircraftSystems;
+  /** The engines, in the order of the definition. */
+  readonly engines: Powerplant[];
+  readonly controlLaw: ControlLaw;
 
-  private readonly engine: PistonEngine;
   private time = 0;
   private crashed: string | undefined;
   /** Waiting for the terrain to load while standing: the aircraft is held in place. */
@@ -141,10 +202,31 @@ export class FlightModel implements SimAircraft {
   private heldStart: InitialCondition | undefined;
 
   // Control surface positions actually reached.
-  private elevator = 0; // rad, positive nose up (trailing edge up), trim included
+  private elevator = 0; // rad, positive nose up (trailing edge up), a tab's trim included
+  private stabiliser = 0; // rad, positive nose up (movable stabiliser)
   private aileron = 0; // -1..1, positive roll right
   private rudder = 0; // -1..1, positive nose right
   private flap = 0; // rad
+  private slat = 0; // rad
+  private spoiler = 0; // 0..1
+  private speedbrake = 0; // 0..1
+  private differentialTail = 0; // -1..1
+  /** Gear 0 up .. 1 down and locked. */
+  private gear = 1;
+  private readonly surfaceCommand = newSurfaceCommand();
+  private readonly lawContext: ControlLawContext & {
+    telemetry: Telemetry;
+    pitch: number;
+    roll: number;
+    yaw: number;
+    q: number;
+    mach: number;
+    vaneAlpha: number;
+    powered: boolean;
+    yawDamper: boolean;
+    stallProtection: boolean;
+    dt: number;
+  };
 
   // Aerodynamic state.
   private readonly separation: Float64Array;
@@ -156,6 +238,10 @@ export class FlightModel implements SimAircraft {
   private readonly inducedRelaxation: Float64Array;
   private downwash = 0;
   private stallHornAlpha = 0;
+  private mach = 0;
+  private readonly machOut: MachEffects = { lift: 1, drag: 0, cpShift: 0, control: 1 };
+  /** Any section carries compressibility data: the airspeed indicator reads true CAS. */
+  private readonly compressible: boolean;
 
   // Gear state.
   private readonly bristleLong: Float64Array;
@@ -166,18 +252,17 @@ export class FlightModel implements SimAircraft {
   private readonly contactTouching: Uint8Array;
   private cgPlane = newPlane();
 
+  // Propulsion.
+  private readonly props: PropState[];
+  private readonly engineInputs: PowerplantInput[];
+  /** Lever positions flown: the pilot's, or an autothrottle's. */
+  private readonly throttleIn: Float64Array;
+
   // Per-step results.
   private readonly forceBody = vec();
   private readonly momentBody = vec();
   private readonly gearForce = vec();
   private readonly gearMoment = vec();
-  private propTorque = 0;
-  private thrust = 0;
-  private slipDelta = 0;
-  private slipRadius = 0;
-  private swirl = 0;
-  private fuelFlow = 0;
-  private enginePower = 0;
   private specificForceZ = -G0;
   /** Specific force (aero and gear over mass), world frame, averaged over the sub-steps. */
   private readonly specificForce = vec();
@@ -186,6 +271,7 @@ export class FlightModel implements SimAircraft {
   /** Stick input actually flown this step: the pilot's, or the autopilot's while engaged. */
   private pitchIn = 0;
   private rollIn = 0;
+  private yawIn = 0;
   private readonly avionicsInput: AvionicsInput = {
     powered: false,
     com1Failed: false,
@@ -207,7 +293,8 @@ export class FlightModel implements SimAircraft {
     pilotPitch: 0,
     pilotRoll: 0,
   };
-  private readonly afterEngine = { fuelFlow: 0, load: 0, tas: 0, slipstream: 0, phi: 1 };
+  private readonly afterEngine = { tas: 0, slipstream: 0, phi: 1 };
+  private readonly exceedances: Exceedance[] = [];
 
   // Air samples: centre, left tip, right tip, tail.
   private readonly air = [newAir(), newAir(), newAir(), newAir()];
@@ -220,6 +307,7 @@ export class FlightModel implements SimAircraft {
   private readonly t2 = vec();
   private readonly t3 = vec();
   private readonly t4 = vec();
+  private readonly t5 = vec();
   private readonly up = vec();
   private readonly north = vec();
   private readonly vBody = vec();
@@ -227,13 +315,6 @@ export class FlightModel implements SimAircraft {
   private readonly accel = vec();
   private readonly mBody = vec();
   private readonly coeff: SectionCoefficients = { cl: 0, cd: 0, cm: 0 };
-  private readonly engineOut: EngineOutput = {
-    torque: 0,
-    power: 0,
-    fuelFlow: 0,
-    manifoldPressure: 0,
-    running: true,
-  };
   private readonly propOut: PropellerOutput = { thrust: 0, torque: 0 };
 
   constructor(
@@ -242,14 +323,42 @@ export class FlightModel implements SimAircraft {
   ) {
     this.info = def.info;
     this.avionicsUnit = avionicsUnit;
+    this.cockpit = new CockpitPanel(def.cockpit ?? C172_CONTROLS);
+    this.failures = new FailureSet(def.systems.failures ?? ALL_FAILURES);
     const span = def.wingSpan / 2;
     this.airPoints = [vec(0, 0, 0), vec(0, -span, 0), vec(0, span, 0), vec(-def.tailArm, 0, 0)];
-    this.engine = new PistonEngine(def.engine);
-    this.systems = new AircraftSystems(def.systems, this.cockpit, this.failures);
-    const n = def.strips.length;
-    this.separation = new Float64Array(n).fill(1);
-    this.stripCl = new Float64Array(n);
-    this.stripAlpha = new Float64Array(n);
+    this.engines = def.engines.map(createPowerplant);
+    this.props = [];
+    def.engines.forEach((e, i) => {
+      const data = propellerOf(e);
+      if (!data) return;
+      const k = this.props.length;
+      this.props.push({
+        engine: i,
+        data,
+        position: e.position,
+        rotation: data.rotation ?? 1,
+        thrust: 0,
+        torque: 0,
+        slipDelta: 0,
+        slipRadius: 0,
+        swirl: 0,
+        inflow: [{ vi: 0 }, { vi: 0 }, { vi: 0 }, { vi: 0 }],
+        rotor: { absorb: (omega, beta, apply) => this.propeller(k, omega, beta, apply) },
+      });
+    });
+    const n = def.engines.length;
+    this.engineInputs = def.engines.map(() => newPowerplantInput());
+    this.throttleIn = new Float64Array(n);
+    this.systems = new AircraftSystems(def.systems, this.cockpit, this.failures, this.engines, {
+      retractableGear: def.gear !== undefined,
+    });
+    this.controlLaw = createControlLaw(def);
+    this.compressible = def.strips.some((s) => s.foil.mach !== undefined);
+    const ns = def.strips.length;
+    this.separation = new Float64Array(ns).fill(1);
+    this.stripCl = new Float64Array(ns);
+    this.stripAlpha = new Float64Array(ns);
     this.groupCl = new Float64Array(def.groups.length);
     this.groupInduced = new Float64Array(def.groups.length);
     this.inducedRelaxation = new Float64Array(
@@ -273,19 +382,43 @@ export class FlightModel implements SimAircraft {
     this.wheelPlanes = def.wheels.map(newPlane);
     this.contactPlanes = def.contacts.map(newPlane);
     this.contactTouching = new Uint8Array(def.contacts.length);
+    const turbine = def.engines.some((e) => e.kind !== 'piston');
     this.controls = {
       pitch: 0,
       roll: 0,
       yaw: 0,
-      throttle: [0],
+      throttle: Array.from({ length: n }, () => 0),
       flaps: 0,
       gearDown: true,
       brakeLeft: 0,
       brakeRight: 0,
       parkingBrake: false,
       pitchTrim: 0,
-      mixture: [1],
-      starter: [false],
+      mixture: Array.from({ length: n }, () => 1),
+      starter: Array.from({ length: n }, () => false),
+    };
+    if (turbine) {
+      this.controls.condition = Array.from({ length: n }, () => 1);
+      this.controls.reverse = false;
+    }
+    if (def.speedbrake || def.strips.some((s) => s.control?.kind === 'spoiler'))
+      this.controls.speedbrake = 0;
+    if (def.controls.rollTrim) this.controls.rollTrim = 0;
+    if (def.controls.yawTrim) this.controls.yawTrim = 0;
+    this.lawContext = {
+      controls: this.controls,
+      pitch: 0,
+      roll: 0,
+      yaw: 0,
+      state: this.state,
+      telemetry: undefined as unknown as Telemetry,
+      q: 0,
+      mach: 0,
+      vaneAlpha: 0,
+      powered: true,
+      yawDamper: false,
+      stallProtection: false,
+      dt: 0,
     };
     this.telemetry = {
       time: 0,
@@ -309,12 +442,22 @@ export class FlightModel implements SimAircraft {
       elevator: 0,
       aileron: 0,
       rudder: 0,
-      engines: [{ running: true, rpm: 0, power: 0, fuelFlow: 0 }],
+      engines: this.engines.map((e) => e.telemetry),
       fuel: this.fuel,
       crashed: undefined,
       systems: this.systems.telemetry,
       instruments: this.systems.instruments.telemetry,
     };
+    const t = this.telemetry;
+    if (this.compressible || turbine) t.mach = 0;
+    if (this.controls.speedbrake !== undefined) t.speedbrake = 0;
+    if (def.stallProtection) {
+      t.stickShaker = false;
+      t.stickPusher = false;
+    }
+    if (def.controls.trim === 'stabiliser') t.stabiliser = 0;
+    if (def.limits) t.exceedances = this.exceedances;
+    this.lawContext.telemetry = t;
     this.bindCockpit();
   }
 
@@ -334,8 +477,8 @@ export class FlightModel implements SimAircraft {
   }
 
   /**
-   * Fuel in the tanks, kg (the planned fuel load; a reset fills both). Usable fuel only,
-   * clamped to a tank's capacity.
+   * Fuel in the tanks, kg (the planned fuel load; a reset fills them all). Usable fuel only,
+   * clamped to a tank's capacity. Two numbers fill the two wing tanks.
    */
   setFuel(left: number, right: number) {
     this.systems.fuel.reset(left, right);
@@ -343,84 +486,203 @@ export class FlightModel implements SimAircraft {
     this.telemetry.fuel = this.fuel;
   }
 
-  /** The levers of ControlInput appear in the cockpit under their names. */
+  /** Fuel in every tank, kg, in the order of the type's tanks. */
+  setFuelTanks(amounts: readonly number[]) {
+    this.systems.fuel.fill(amounts);
+    this.systems.fillTelemetry();
+    this.telemetry.fuel = this.fuel;
+  }
+
+  /**
+   * The levers of ControlInput appear in the cockpit under their names: `throttle`,
+   * `mixture` and `condition` (every engine, or `throttle1`, `throttle2`... one each),
+   * `flaps`, `trim`, `aileronTrim`, `rudderTrim`, `gear`, `reverse`, `speedbrake` and
+   * `parkingBrake`. A control the type's cockpit does not list is not bound.
+   */
   private bindCockpit() {
     const p = this.cockpit;
     const c = this.controls;
+    const n = this.engines.length;
     const detents = this.def.controls.flapDetents.length - 1;
-    p.bind(
-      'throttle',
-      () => c.throttle[0] ?? 0,
-      (v) => (c.throttle[0] = v),
-    );
-    p.bind(
-      'mixture',
-      () => c.mixture[0] ?? 0,
-      (v) => (c.mixture[0] = v),
-    );
+    const bindLever = (
+      id: string,
+      arr: () => number[] | undefined,
+      spec = p.specs.find((s) => s.id === id),
+    ) => {
+      if (!spec) return;
+      // A selector's positions spread over 0..1 (cut-off, ground idle, flight idle).
+      const last = spec.kind === 'selector' ? (spec.positions?.length ?? 1) - 1 : 0;
+      const toLever = (v: number) => (last > 0 ? v / last : v);
+      const fromLever = (v: number) => (last > 0 ? Math.round(clamp(v, 0, 1) * last) : v);
+      p.bind(
+        id,
+        () => fromLever(arr()?.[0] ?? 0),
+        (v) => {
+          const a = arr();
+          if (a) for (let i = 0; i < n; i++) a[i] = toLever(v);
+        },
+      );
+      for (let i = 0; i < n; i++) {
+        const one = p.specs.find((s) => s.id === `${id}${i + 1}`);
+        if (one)
+          p.bind(
+            one.id,
+            () => fromLever(arr()?.[i] ?? 0),
+            (v) => {
+              const a = arr();
+              if (a) a[i] = toLever(v);
+            },
+          );
+      }
+    };
+    bindLever('throttle', () => c.throttle);
+    bindLever('mixture', () => c.mixture);
+    bindLever('condition', () => c.condition);
     // The selector's positions are the flap detents; ControlInput spreads them over 0..1.
-    p.bind(
-      'flaps',
-      () => Math.round(clamp(c.flaps, 0, 1) * detents),
-      (v) => (c.flaps = v / detents),
-    );
-    p.bind(
-      'trim',
-      () => c.pitchTrim,
-      (v) => (c.pitchTrim = v),
-    );
-    p.bind(
-      'parkingBrake',
-      () => (c.parkingBrake ? 1 : 0),
-      (v) => (c.parkingBrake = v >= 0.5),
-    );
+    if (p.has('flaps'))
+      p.bind(
+        'flaps',
+        () => Math.round(clamp(c.flaps, 0, 1) * detents),
+        (v) => (c.flaps = v / detents),
+      );
+    if (p.has('trim'))
+      p.bind(
+        'trim',
+        () => c.pitchTrim,
+        (v) => (c.pitchTrim = v),
+      );
+    if (p.has('aileronTrim'))
+      p.bind(
+        'aileronTrim',
+        () => c.rollTrim ?? 0,
+        (v) => (c.rollTrim = v),
+      );
+    if (p.has('rudderTrim'))
+      p.bind(
+        'rudderTrim',
+        () => c.yawTrim ?? 0,
+        (v) => (c.yawTrim = v),
+      );
+    if (p.has('parkingBrake'))
+      p.bind(
+        'parkingBrake',
+        () => (c.parkingBrake ? 1 : 0),
+        (v) => (c.parkingBrake = v >= 0.5),
+      );
+    if (p.has('gear'))
+      p.bind(
+        'gear',
+        () => (c.gearDown ? 1 : 0),
+        (v) => (c.gearDown = v >= 0.5),
+      );
+    if (p.has('reverse'))
+      p.bind(
+        'reverse',
+        () => (c.reverse ? 1 : 0),
+        (v) => (c.reverse = v >= 0.5),
+      );
+    if (p.has('speedbrake'))
+      p.bind(
+        'speedbrake',
+        () => c.speedbrake ?? 0,
+        (v) => (c.speedbrake = v),
+      );
   }
 
   // ---------------------------------------------------------------------------------------
   // Controls
 
-  private flapTarget(): number {
+  private flapIndex(): number {
     const detents = this.def.controls.flapDetents;
     // The lever has detents; the input is snapped to the nearest one.
-    const i = Math.round(clamp(this.controls.flaps, 0, 1) * (detents.length - 1));
-    return detents[i]!;
+    return Math.round(clamp(this.controls.flaps, 0, 1) * (detents.length - 1));
   }
 
-  private elevatorTarget(hold = 1): number {
+  private flapTarget(): number {
+    return this.def.controls.flapDetents[this.flapIndex()]!;
+  }
+
+  /** Elevator angle the trim (and a centred yoke) asks for, rad. */
+  private elevatorTarget(): number {
     const c = this.def.controls;
-    const trim = clamp(this.controls.pitchTrim, -1, 1);
-    const trimAngle = trim >= 0 ? trim * c.trimUp : trim * c.trimDown;
-    const p = clamp(this.pitchIn, -1, 1) * hold;
-    const stick = p >= 0 ? p * c.elevatorUp : p * c.elevatorDown;
-    return clamp(trimAngle + stick, -c.elevatorDown, c.elevatorUp);
+    if (c.trim === 'stabiliser') return 0;
+    return clamp(trimAngle(this.def, this.controls.pitchTrim), -c.elevatorDown, c.elevatorUp);
   }
 
-  /**
-   * Surfaces follow the yoke at a finite rate, and at high dynamic pressure the pilot cannot
-   * hold full deflection against the air loads (reversible controls).
-   */
+  /** The control law decides where the surfaces go; they follow at their rates. */
   private moveSurfaces(dt: number, q: number) {
-    const c = this.def.controls;
-    const hold = Math.min(1, c.holdLimitPressure / Math.max(q, 1));
+    const def = this.def;
+    const c = def.controls;
+    const ctx = this.lawContext;
+    ctx.pitch = this.pitchIn;
+    ctx.roll = this.rollIn;
+    ctx.yaw = this.yawIn;
+    ctx.q = q;
+    ctx.mach = this.mach;
+    ctx.vaneAlpha = this.stallHornAlpha;
+    ctx.powered =
+      c.holdLimitPressure === Infinity ? this.systems.hydraulicShare('controls') > 0.5 : true;
+    ctx.yawDamper = this.telemetry.avionics?.autopilot.yawDamper ?? false;
+    ctx.stallProtection = this.systems.electrical.busPowered;
+    ctx.dt = dt;
+    const cmd = this.surfaceCommand;
+    this.controlLaw.step(ctx, cmd);
     const rate = c.surfaceRate * dt;
-    // Trim tabs take the load off, so only the yoke's share is limited by the air load.
-    const eTarget = this.elevatorTarget(hold);
-    const eRange = c.elevatorUp + c.elevatorDown;
-    this.elevator += clamp(eTarget - this.elevator, -rate * eRange, rate * eRange);
-    const aTarget = clamp(clamp(this.rollIn, -1, 1) * hold + c.aileronRigging, -1, 1);
-    this.aileron += clamp(aTarget - this.aileron, -rate * 2, rate * 2);
-    const rTarget = clamp(clamp(this.controls.yaw, -1, 1) * hold + c.rudderRigging, -1, 1);
-    this.rudder += clamp(rTarget - this.rudder, -rate * 2, rate * 2);
-    // The flaps are electric: without power they stay where they are.
-    const fTarget = this.flapTarget();
+    if (ctx.powered) {
+      const eRange = c.elevatorUp + c.elevatorDown;
+      this.elevator += clamp(cmd.elevator - this.elevator, -rate * eRange, rate * eRange);
+      this.aileron += clamp(cmd.aileron - this.aileron, -rate * 2, rate * 2);
+      this.rudder += clamp(cmd.rudder - this.rudder, -rate * 2, rate * 2);
+      this.differentialTail += clamp(
+        cmd.differentialTail - this.differentialTail,
+        -rate * 2,
+        rate * 2,
+      );
+    }
+    // The trim motor runs the stabiliser at about a degree a second.
+    if (c.trim === 'stabiliser' && this.systems.electrical.busPowered) {
+      const s = (c.trimUp + c.trimDown) / 12;
+      this.stabiliser += clamp(cmd.stabiliser - this.stabiliser, -s * dt, s * dt);
+    }
+    const sr = (c.spoilerRate ?? 1) * dt;
+    this.spoiler += clamp(cmd.spoilers - this.spoiler, -sr, sr);
+    this.speedbrake += clamp(cmd.speedbrake - this.speedbrake, -sr, sr);
+    // The flaps are electric (or hydraulic): without power they stay where they are.
+    const fTarget = cmd.flap ?? this.flapTarget();
     const moving = Math.abs(fTarget - this.flap) > 1e-9;
     if (this.systems.flapsPowered)
       this.flap += clamp(fTarget - this.flap, -c.flapRate * dt, c.flapRate * dt);
     this.systems.flapsMoving = moving;
+    const slats = c.slatDetents;
+    if (slats || cmd.leadingEdge !== undefined) {
+      const sTarget = cmd.leadingEdge ?? slats![this.flapIndex()]!;
+      if (this.systems.flapsPowered)
+        this.slat += clamp(sTarget - this.slat, -c.flapRate * dt, c.flapRate * dt);
+    }
+  }
+
+  /** The gear follows its lever while it has power; the squat switch keeps it down on the ground. */
+  private moveGear(dt: number) {
+    const g = this.def.gear;
+    if (!g) return;
+    const down = this.controls.gearDown || (this.telemetry.onGround && this.gear >= GEAR_LOCKED);
+    const target = down ? 1 : 0;
+    const s = this.systems;
+    s.gear.moving = Math.abs(target - this.gear) > 1e-9;
+    if (s.gearPowered) {
+      const rate = dt / (target > this.gear ? g.extendTime : g.retractTime);
+      this.gear += clamp(target - this.gear, -rate, rate);
+    }
+    s.gear.unsafe = this.gear > 1e-6 && this.gear < GEAR_LOCKED;
   }
 
   /** Change of zero-lift angle of a strip from its control surface, rad. */
-  private controlAlpha(kind: string, effectiveness: number, side: number | undefined): number {
+  private controlAlpha(
+    kind: string,
+    effectiveness: number,
+    side: number | undefined,
+    roll = 0,
+  ): number {
     const c = this.def.controls;
     switch (kind) {
       case 'flap': {
@@ -434,13 +696,25 @@ export class FlightModel implements SimAircraft {
         const d = a >= 0 ? -a * c.aileronUp : -a * c.aileronDown;
         return effectiveness * d;
       }
-      case 'elevator':
-        // Trailing edge up (nose up) is negative lift on the tailplane.
-        return -effectiveness * this.elevator;
+      case 'elevator': {
+        // Trailing edge up (nose up) is negative lift on the tailplane; a differential tail
+        // adds the opposite on each side to roll.
+        let e = -effectiveness * this.elevator;
+        if (roll && side)
+          e += effectiveness * roll * side * -this.differentialTail * c.elevatorDown;
+        return e;
+      }
       case 'rudder':
         return effectiveness * this.rudder * c.rudder;
     }
     return 0;
+  }
+
+  /** Raised share of a spoiler strip: the speed brake, and on the down-going wing, the roll. */
+  private spoilerShare(side: number | undefined, roll: number | undefined): number {
+    let s = this.spoiler;
+    if (roll && side) s = Math.max(s, clamp(this.aileron * side * roll, 0, 1));
+    return s;
   }
 
   // ---------------------------------------------------------------------------------------
@@ -488,33 +762,53 @@ export class FlightModel implements SimAircraft {
   }
 
   /**
-   * Propeller: the disk is split into four quadrants, each at 3/4 radius with its own inflow.
-   * At an angle of attack the descending blade meets the air faster than the rising one and
-   * makes more thrust: P-factor. Returns the torque absorbed and accumulates forces.
+   * Propeller `k`: the disk is split into four quadrants, each at 3/4 radius with its own
+   * inflow. At an angle of attack the descending blade meets the air faster than the rising
+   * one and makes more thrust: P-factor. Returns the torque absorbed and accumulates forces.
    */
-  private propeller(omega: number, density: number, accumulate: boolean): number {
-    const prop = this.def.propeller;
+  private propeller(k: number, omega: number, beta: number, accumulate: boolean): number {
+    const ps = this.props[k]!;
+    const prop = ps.data;
+    const rot = ps.rotation;
     const r = 0.375 * prop.diameter;
     const n = omega / (2 * Math.PI);
+    const air = this.air[0]!;
+    const sound = Math.sqrt(1.4 * R_AIR * air.temperature);
     let torque = 0;
     let thrust = 0;
     const p = this.t1;
     const dir = this.t2;
     const vel = this.t0;
-    for (let k = 0; k < 4; k++) {
+    for (let q = 0; q < 4; q++) {
       // Quadrant directions: right, down, left, up; blade motion = x × dir.
-      const dy = k === 0 ? 1 : k === 2 ? -1 : 0;
-      const dz = k === 1 ? 1 : k === 3 ? -1 : 0;
+      const dy = q === 0 ? 1 : q === 2 ? -1 : 0;
+      const dz = q === 1 ? 1 : q === 3 ? -1 : 0;
       set(dir, 0, dy, dz);
-      addScaled(p, prop.position, dir, r);
+      addScaled(p, ps.position, dir, r);
       this.airVelocityAt(p, vel);
       // Tangential direction of the blade (clockwise seen from the cockpit) is (0, -dz, dy).
-      const vt = -dz * vel.y + dy * vel.z;
+      const vt = rot * (-dz * vel.y + dy * vel.z);
       const bladeSpeed = omega * r;
       const s = bladeSpeed > 5 ? clamp(1 + vt / bladeSpeed, 0.3, 3) : 1;
-      propellerForces(prop, n * s, vel.x, density, this.propOut);
-      const tq = this.propOut.thrust / 4;
-      const qq = this.propOut.torque / 4;
+      if (prop.kind === 'variable')
+        bladeForces(
+          prop,
+          n * s,
+          vel.x,
+          air.density,
+          beta,
+          sound,
+          0.25,
+          ps.inflow[q]!,
+          this.propOut,
+        );
+      else {
+        propellerForces(prop, n * s, vel.x, air.density, this.propOut);
+        this.propOut.thrust /= 4;
+        this.propOut.torque /= 4;
+      }
+      const tq = this.propOut.thrust;
+      const qq = this.propOut.torque;
       thrust += tq;
       torque += qq;
       if (accumulate) {
@@ -524,11 +818,14 @@ export class FlightModel implements SimAircraft {
         const f = this.t3;
         set(f, tq, 0, 0);
         this.addForce(p, f);
-        set(f, 0, (qq / r) * dz, (-qq / r) * dy);
-        this.addForce(prop.position, f);
+        set(f, 0, rot * (qq / r) * dz, rot * (-qq / r) * dy);
+        this.addForce(ps.position, f);
       }
     }
-    if (accumulate) this.thrust = thrust;
+    if (accumulate) {
+      ps.thrust = thrust;
+      ps.torque = torque;
+    }
     return torque;
   }
 
@@ -551,6 +848,23 @@ export class FlightModel implements SimAircraft {
     return (x * x) / (1 + x * x);
   }
 
+  /** Slipstream of every propeller from momentum theory: speed increment, contraction, swirl. */
+  private slipstreams(vc: Vec3, rho: number) {
+    for (const ps of this.props) {
+      const prop = ps.data;
+      const disk = (Math.PI * prop.diameter * prop.diameter) / 4;
+      const va = Math.max(vc.x, 0);
+      const radicand = va * va + (2 * ps.thrust) / (rho * disk);
+      ps.slipDelta = Math.sqrt(Math.max(radicand, 0)) - va;
+      const vDisk = Math.max(va + ps.slipDelta / 2, 1);
+      ps.slipRadius = (prop.diameter / 2) * Math.sqrt(vDisk / Math.max(va + ps.slipDelta, 1));
+      const massFlow = rho * disk * vDisk;
+      ps.swirl =
+        (ps.rotation * prop.swirlFactor * 2 * Math.max(ps.torque, 0)) /
+        (massFlow * ps.slipRadius * ps.slipRadius);
+    }
+  }
+
   /**
    * One pass over all elements. `steady` puts every lagging state (separation, downwash,
    * induced angle) at its equilibrium instead of moving it by dt; the trim solver uses it.
@@ -566,19 +880,8 @@ export class FlightModel implements SimAircraft {
     // Free stream at the centre of gravity.
     const vc = sub(this.t0, this.vBody, this.windBody[0]!);
     const speed = length(vc);
-
-    // Slipstream from momentum theory: fully developed speed increment and swirl.
-    const prop = def.propeller;
-    const disk = (Math.PI * prop.diameter * prop.diameter) / 4;
-    const va = Math.max(vc.x, 0);
-    const radicand = va * va + (2 * this.thrust) / (rho * disk);
-    this.slipDelta = Math.sqrt(Math.max(radicand, 0)) - va;
-    const vDisk = Math.max(va + this.slipDelta / 2, 1);
-    this.slipRadius = (prop.diameter / 2) * Math.sqrt(vDisk / Math.max(va + this.slipDelta, 1));
-    const massFlow = rho * disk * vDisk;
-    this.swirl =
-      (prop.swirlFactor * 2 * Math.max(this.propTorque, 0)) /
-      (massFlow * this.slipRadius * this.slipRadius);
+    this.mach = speed / Math.sqrt(1.4 * R_AIR * air.temperature);
+    this.slipstreams(vc, rho);
 
     // Lagged wing downwash at the tail; it reaches the tail after the tail arm's travel time.
     const groups = def.groups;
@@ -604,23 +907,26 @@ export class FlightModel implements SimAircraft {
     const ve = this.t1;
     const sideSpeed = vc.y;
     const crossflow = def.wingRoot;
+    const sound = Math.sqrt(1.4 * R_AIR * air.temperature);
+    const mo = this.machOut;
     for (let i = 0; i < def.strips.length; i++) {
       const strip = def.strips[i]!;
       const r = strip.position;
       this.airVelocityAt(r, ve);
-      // Slipstream: faster axial flow and swirl inside the contracted tube behind the disk.
-      if (r.x < prop.position.x && this.slipRadius > 0) {
-        const ry = r.y - prop.position.y;
-        const rz = r.z - prop.position.z;
+      // Slipstream: faster axial flow and swirl inside the contracted tube behind each disk.
+      for (const ps of this.props) {
+        if (r.x >= ps.position.x || ps.slipRadius <= 0) continue;
+        const ry = r.y - ps.position.y;
+        const rz = r.z - ps.position.z;
         const d = Math.sqrt(ry * ry + rz * rz);
         const inside =
-          (1 - smoothstep(0.8 * this.slipRadius, 1.2 * this.slipRadius, d)) *
+          (1 - smoothstep(0.8 * ps.slipRadius, 1.2 * ps.slipRadius, d)) *
           strip.slipstreamDevelopment;
         if (inside > 0) {
-          ve.x += this.slipDelta * inside;
+          ve.x += ps.slipDelta * inside;
           // Air rotating with the propeller: velocity Ω x̂ × r; the strip moves against it.
-          ve.y += this.swirl * rz * inside;
-          ve.z -= this.swirl * ry * inside;
+          ve.y += ps.swirl * rz * inside;
+          ve.z -= ps.swirl * ry * inside;
         }
       }
       if (strip.downwash) ve.z -= this.downwash * ve.x;
@@ -637,36 +943,71 @@ export class FlightModel implements SimAircraft {
       const v2 = uc * uc + un * un;
       const alphaGeo = Math.atan2(-un, uc);
       const alpha = alphaGeo - this.groupInduced[strip.group]!;
-      const ctrl = strip.control
-        ? this.controlAlpha(strip.control.kind, strip.control.effectiveness, strip.control.side)
-        : 0;
+      const foil = strip.foil;
+      const control = strip.control;
+      let ctrl = 0;
+      let sepShift = 0;
+      let spoiled = 0;
+      if (control) {
+        if (control.kind === 'slat') sepShift = control.effectiveness * this.slat;
+        else if (control.kind === 'spoiler')
+          spoiled = this.spoilerShare(control.side, control.roll);
+        else
+          ctrl = this.controlAlpha(control.kind, control.effectiveness, control.side, control.roll);
+        // A movable stabiliser turns the whole tailplane.
+        if (control.kind === 'elevator' && def.controls.trim === 'stabiliser')
+          ctrl += this.stabiliser;
+      }
+      // Compressibility on the flow normal to the sweep.
+      const cosSweep = strip.sweep ? Math.cos(strip.sweep) : 1;
+      let liftScale = cosSweep;
+      let extraDrag = 0;
+      let cpShift = 0;
+      if (foil.mach) {
+        const mn = (Math.sqrt(v2) / sound) * cosSweep;
+        machEffects(foil.mach, foil.liftSlope, mn, mo);
+        liftScale *= mo.lift;
+        extraDrag = mo.drag;
+        cpShift = mo.cpShift;
+        // An all-moving tail keeps its power; a hinged surface loses it behind the shock.
+        if (
+          control &&
+          control.kind !== 'slat' &&
+          control.kind !== 'spoiler' &&
+          control.effectiveness < 0.95
+        )
+          ctrl *= mo.control;
+      }
+      // A raised spoiler destroys most of the lift behind it.
+      if (spoiled > 0) ctrl -= 0.6 * spoiled * (alpha - foil.alpha0) + 4 * DEG * spoiled;
       const alphaControl = alpha + def.controls.stallShift * ctrl;
-      let alphaSep = alphaControl;
+      let alphaSep = alphaControl - sepShift;
       // Ice roughens the leading edge: the flow separates at a smaller angle. The stall
       // horn's reed does not know that, which is why it warns late on an iced wing.
       if (ice > 0) alphaSep /= 1 - ICE_STALL * ice;
-      if (steady) this.separation[i] = staticSeparation(strip.foil, alphaSep);
+      if (steady) this.separation[i] = staticSeparation(foil, alphaSep);
       const f = this.separation[i]!;
-      const c = sectionCoefficients(strip.foil, alpha, ctrl, f, this.coeff);
+      const c = sectionCoefficients(foil, alpha, ctrl, f, this.coeff);
       if (!steady)
-        this.separation[i] = updateSeparation(
-          strip.foil,
-          f,
-          alphaSep,
-          Math.sqrt(v2),
-          strip.chord,
-          dt,
-        );
-      const cl = c.cl * (strip.liftFactor ?? 1);
-      let cd = c.cd;
+        this.separation[i] = updateSeparation(foil, f, alphaSep, Math.sqrt(v2), strip.chord, dt);
+      let cl = c.cl * (strip.liftFactor ?? 1);
+      if (liftScale !== 1) cl *= liftScale;
+      if (strip.vortexLift) cl += vortexLift(strip.vortexLift, alpha);
+      let cd = c.cd + extraDrag;
       if (ice > 0) cd += ICE_DRAG * ice;
-      if (strip.control?.kind === 'flap') {
+      let area = strip.area;
+      if (control?.kind === 'flap') {
         const sf = Math.sin(this.flap);
         cd += def.controls.flapDrag * sf * sf;
-      }
+        // A Fowler flap runs out behind the wing: more area as it extends.
+        if (control.extension) {
+          const travel = def.controls.flapDetents[def.controls.flapDetents.length - 1]!;
+          area *= 1 + control.extension * clamp(this.flap / travel, 0, 1);
+        }
+      } else if (spoiled > 0) cd += (def.controls.spoilerDrag ?? 0.1) * spoiled;
       this.stripCl[i] = cl;
       this.stripAlpha[i] = alphaControl;
-      const qS = 0.5 * rho * v2 * strip.area * (strip.qFactor ?? 1);
+      const qS = 0.5 * rho * v2 * area * (strip.qFactor ?? 1);
       // Lift is normal to the effective flow (tilted by the induced angle): induced drag.
       const ca = Math.cos(alpha);
       const sa = Math.sin(alpha);
@@ -678,8 +1019,8 @@ export class FlightModel implements SimAircraft {
       const fz = qS * (cl * (sa * ch.z + ca * la.z) - cd * (ca * ch.z - sa * la.z));
       set(this.t2, fx, fy, fz);
       this.addForce(r, this.t2);
-      // Section moment about the span axis (chord × lift).
-      const m = qS * strip.chord * c.cm;
+      // Section moment about the span axis (chord × lift); the shock moves it aft.
+      const m = qS * strip.chord * (cpShift > 0 ? c.cm - cpShift * cl : c.cm);
       cross(this.t3, ch, la);
       addScaled(this.momentBody, this.momentBody, this.t3, m);
     }
@@ -719,9 +1060,12 @@ export class FlightModel implements SimAircraft {
     const fus = def.fuselage;
     const vf = this.airVelocityAt(fus.dragPoint, this.t1);
     const vfl = length(vf);
-    const dragArea = ice > 0 ? fus.dragArea * (1 + ICE_BODY_DRAG * ice) : fus.dragArea;
+    let dragArea = ice > 0 ? fus.dragArea * (1 + ICE_BODY_DRAG * ice) : fus.dragArea;
+    if (fus.machDrag)
+      dragArea *= 1 + fus.machDrag.rise * smoothstep(fus.machDrag.critical, 1.05, this.mach);
     scale(this.t2, vf, -0.5 * rho * vfl * dragArea);
     this.addForce(fus.dragPoint, this.t2);
+    this.extraDrag(rho);
     for (const [station, share] of [
       [fus.front, fus.frontShare],
       [fus.rear, 1 - fus.frontShare],
@@ -741,55 +1085,55 @@ export class FlightModel implements SimAircraft {
       this.momentBody.z -= q * def.wingArea * def.wingSpan * fus.yawMunk * ((vc.x * vc.y) / uv);
   }
 
-  private engineStep(dt: number, steady: boolean, starter = false) {
+  /** Drag of the extended gear and the speed brake, each at its own point. */
+  private extraDrag(rho: number) {
+    const def = this.def;
+    const parts: [Vec3, number][] = [];
+    if (def.gear && this.gear > 0) parts.push([def.gear.dragPoint, def.gear.dragArea * this.gear]);
+    if (def.speedbrake && this.speedbrake > 0)
+      parts.push([def.speedbrake.position, def.speedbrake.dragArea * this.speedbrake]);
+    for (const [point, area] of parts) {
+      const v = this.airVelocityAt(point, this.t5);
+      scale(this.t2, v, -0.5 * rho * length(v) * area);
+      this.addForce(point, this.t2);
+    }
+  }
+
+  /** Every engine with its own levers and inflow; jets push along their axis at their nozzle. */
+  private enginesStep(dt: number, steady: boolean) {
     const c = this.controls;
     const air = this.air[0]!;
-    const hasFuel = this.systems.fuel.engineHasFuel;
-    if (steady) {
-      // Shaft speed where engine and propeller torque balance (bisection).
-      let lo = 0;
-      let hi = 420;
-      for (let k = 0; k < 40; k++) {
-        const mid = (lo + hi) / 2;
-        this.engine.omega = mid;
-        this.engine.running = true;
-        const e = this.engine.evaluate(
-          c.throttle[0] ?? 0,
-          c.mixture[0] ?? 1,
-          false,
-          air.pressure,
-          air.temperature,
-          air.density,
-          hasFuel,
-          this.engineOut,
-        );
-        const prop = this.propeller(mid, air.density, false);
-        if (e.torque - prop > 0) lo = mid;
-        else hi = mid;
+    for (let i = 0; i < this.engines.length; i++) {
+      const plant = this.engines[i]!;
+      const def = this.def.engines[i]!;
+      const input = this.engineInputs[i]!;
+      input.throttle = this.throttleIn[i]!;
+      input.reverse = c.reverse ?? false;
+      input.condition = c.condition?.[i] ?? 1;
+      input.mixture = c.mixture[i] ?? 1;
+      input.pressure = air.pressure;
+      input.temperature = air.temperature;
+      input.density = air.density;
+      input.mach = this.mach;
+      const v = this.airVelocityAt(def.position, this.t5);
+      input.airspeed = def.axis ? dot(v, def.axis) : v.x;
+      input.onGround = this.telemetry.onGround;
+      const prop = this.props.find((p) => p.engine === i);
+      const rotor = prop?.rotor;
+      if (steady) {
+        if (plant.kind === 'piston' && !plant.running) {
+          (plant as PistonPowerplant).engine.omega = 0;
+          plant.step(0, input, rotor);
+        } else plant.settle(input, rotor);
+      } else plant.step(dt, input, rotor);
+      // Reaction of the shaft torque on the airframe rolls it against the propeller.
+      this.momentBody.x += (prop?.rotation ?? 1) * plant.reactionTorque;
+      if (plant.thrust !== 0) {
+        const axis = def.axis ?? X_AXIS;
+        scale(this.t2, axis, plant.thrust);
+        this.addForce(def.position, this.t2);
       }
-      this.engine.omega = (lo + hi) / 2;
     }
-    const e = this.engine.evaluate(
-      c.throttle[0] ?? 0,
-      c.mixture[0] ?? 1,
-      starter,
-      air.pressure,
-      air.temperature,
-      air.density,
-      hasFuel,
-      this.engineOut,
-    );
-    const absorbed = this.propeller(this.engine.omega, air.density, true);
-    this.propTorque = absorbed;
-    if (!steady) {
-      this.engine.omega += ((e.torque - absorbed) / this.def.engine.inertia) * dt;
-      // A fixed-pitch propeller on a piston engine never turns backwards.
-      if (this.engine.omega < 0) this.engine.omega = 0;
-    }
-    this.fuelFlow = e.fuelFlow;
-    this.enginePower = Math.max(0, e.power);
-    // Reaction of the engine torque on the airframe rolls it against the propeller.
-    this.momentBody.x -= e.torque;
   }
 
   // ---------------------------------------------------------------------------------------
@@ -827,10 +1171,11 @@ export class FlightModel implements SimAircraft {
     const arm = this.t0;
     const pv = this.t1;
     const tmp = this.t2;
+    const locked = this.gear >= GEAR_LOCKED;
     for (let i = 0; i < def.wheels.length; i++) {
       const wheel = def.wheels[i]!;
       const plane = this.wheelPlanes[i]!;
-      if (!plane.valid) {
+      if (!plane.valid || !locked) {
         this.compression[i] = 0;
         this.bristleLat[i] = 0;
         this.bristleLong[i] = 0;
@@ -969,10 +1314,14 @@ export class FlightModel implements SimAircraft {
     const n = plane.normal;
     this.pointVelocity(arm, pv);
     const rate = -dot(pv, n);
+    // A skid slides on a runway or grass; water and rough ground wreck it unless barely moving.
+    const rough = plane.surface === 'water' || plane.surface === 'terrain';
+    const sliding = cp.skid && !(rough && length(pv) > 5);
     if (!this.contactTouching[i]) {
       this.contactTouching[i] = 1;
-      if (rate > cp.crashSpeed || cp.crashSpeed === 0) this.crash(cp.reason);
+      if (rate > cp.crashSpeed || (cp.crashSpeed === 0 && !sliding)) this.crash(cp.reason);
     }
+    if (cp.skid && !sliding) this.crash(cp.reason);
     if (depth > (cp.maxDepth ?? 0.3)) this.crash(cp.reason);
     const normal = Math.max(0, 200_000 * depth + 20_000 * rate);
     // Scraping: Coulomb friction against the sliding velocity.
@@ -1029,26 +1378,27 @@ export class FlightModel implements SimAircraft {
     const q = 0.5 * air.density * dot(vc, vc);
     const tas = length(vc);
     this.stepAvionics(dt, env);
-    const starter = this.systems.beforeEngine(
-      dt,
-      this.engine,
-      this.controls.starter?.[0] ?? false,
-      this.time,
-    );
+    this.systems.beforeEngines(dt, this.engineInputs, this.controls.starter, this.time);
     this.moveSurfaces(dt, q);
+    this.moveGear(dt);
 
     this.aerodynamics(dt, false);
-    this.engineStep(dt, false, starter);
+    this.enginesStep(dt, false);
     this.fuelImbalance();
 
-    // Fuel burns off and lightens the aircraft; the systems follow the engine.
+    // Fuel burns off and lightens the aircraft; the systems follow the engines.
     const ae = this.afterEngine;
-    ae.fuelFlow = this.fuelFlow;
-    ae.load = this.enginePower / this.def.engine.ratedPower;
     ae.tas = tas;
-    ae.slipstream = this.slipDelta;
-    ae.phi = this.engine.equivalenceRatio(this.controls.mixture[0] ?? 1, air.density);
-    this.systems.afterEngine(dt, this.engine, ae, air);
+    ae.slipstream = this.props[0]?.slipDelta ?? 0;
+    const first = this.engines[0];
+    ae.phi =
+      first?.kind === 'piston'
+        ? (first as PistonPowerplant).engine.equivalenceRatio(
+            this.controls.mixture[0] ?? 1,
+            air.density,
+          )
+        : 1;
+    this.systems.afterEngines(dt, ae, air);
 
     const agl = this.cgPlane.valid ? this.heightAboveGround(ORIGIN) : Infinity;
     if (agl < 0) this.crash('terrain');
@@ -1069,8 +1419,7 @@ export class FlightModel implements SimAircraft {
     if (this.crashed) {
       set(s.velocity, 0, 0, 0);
       set(s.angularVelocity, 0, 0, 0);
-      this.engine.omega = 0;
-      this.engine.running = false;
+      for (const e of this.engines) e.stop();
     }
     this.fillTelemetry(env);
     this.updateInstruments(env, dt);
@@ -1079,12 +1428,14 @@ export class FlightModel implements SimAircraft {
   /**
    * The avionics unit sees the aircraft as it was at the end of the last step; while its
    * autopilot is engaged it flies pitch and roll, and it turns the trim wheel itself (so the
-   * trim stays where it left it when it lets go).
+   * trim stays where it left it when it lets go). An autothrottle flies the thrust levers.
    */
   private stepAvionics(dt: number, env: Environment) {
     const c = this.controls;
     this.pitchIn = c.pitch;
     this.rollIn = c.roll;
+    this.yawIn = c.yaw;
+    for (let i = 0; i < this.throttleIn.length; i++) this.throttleIn[i] = c.throttle[i] ?? 0;
     const unit = this.avionicsUnit;
     if (!unit) return;
     const t = this.telemetry;
@@ -1120,22 +1471,23 @@ export class FlightModel implements SimAircraft {
       this.pitchIn = cmd.pitch;
       this.rollIn = cmd.roll;
       c.pitchTrim = clamp(cmd.pitchTrim, -1, 1);
+      if (cmd.yaw !== undefined) this.yawIn = cmd.yaw;
+      if (cmd.throttle !== undefined) this.throttleIn.fill(clamp(cmd.throttle, 0, 1));
     }
   }
 
   /**
-   * Fuel in one wing heavier than in the other: its weight acts off the centre line and
-   * rolls the aircraft towards the heavy wing.
+   * Fuel off the centre of gravity (one wing heavier than the other, a tank drawn before the
+   * others): its weight acts off the centre and rolls or pitches the aircraft.
    */
   private fuelImbalance() {
-    const f = this.systems.fuel;
-    const dm = f.right - f.left;
-    if (dm === 0) return;
-    const upBody = rotateInverse(this.t0, this.state.orientation, this.up);
-    const arm = this.def.systems.fuel.tankArm;
-    // Weight -dm g up acting at y = arm: moment arm × force.
-    this.momentBody.x -= arm * dm * G0 * upBody.z;
-    this.momentBody.z += arm * dm * G0 * upBody.x;
+    const r = this.systems.fuel.imbalance(this.t5);
+    if (r.x === 0 && r.y === 0 && r.z === 0) return;
+    const u = rotateInverse(this.t0, this.state.orientation, this.up);
+    // Weight -m g up acting at r: moment r × (-g u).
+    this.momentBody.x -= G0 * (r.y * u.z - r.z * u.y);
+    this.momentBody.y -= G0 * (r.z * u.x - r.x * u.z);
+    this.momentBody.z -= G0 * (r.x * u.y - r.y * u.x);
   }
 
   /** The instruments read the truth of this step through their own physics. */
@@ -1164,6 +1516,16 @@ export class FlightModel implements SimAircraft {
     else this.systems.resetInstruments(resetRunning);
   }
 
+  /** Angular momentum of every spinning engine part along body x, kg m²/s. */
+  private engineMomentum(): number {
+    let h = 0;
+    for (let i = 0; i < this.engines.length; i++) {
+      const prop = this.props.find((p) => p.engine === i);
+      h += (prop?.rotation ?? 1) * this.engines[i]!.angularMomentum;
+    }
+    return h;
+  }
+
   private integrate(dt: number, env: Environment, substeps: number) {
     const s = this.state;
     const def = this.def;
@@ -1173,7 +1535,7 @@ export class FlightModel implements SimAircraft {
     const g = G0 * (EARTH_RADIUS / (EARTH_RADIUS + alt)) ** 2;
     const aeroWorld = rotate(this.aeroWorld, s.orientation, this.forceBody);
     const I = def.inertia;
-    const hProp = def.engine.inertia * this.engine.omega;
+    const hProp = this.engineMomentum();
     const accel = this.accel;
     const mBody = this.mBody;
     let specific = 0;
@@ -1235,8 +1597,7 @@ export class FlightModel implements SimAircraft {
     const va = sub(this.t0, this.vBody, this.windBody[0]!);
     const tas = length(va);
     t.tas = tas;
-    const cas = tas * Math.sqrt(air.density / SEA_LEVEL_DENSITY);
-    t.ias = this.indicated(cas);
+    t.ias = this.indicated(this.calibrated(tas, air));
     t.alpha = Math.atan2(va.z, va.x);
     t.beta = tas > 0.1 ? Math.asin(clamp(va.y / tas, -1, 1)) : 0;
     t.verticalSpeed = dot(s.velocity, up);
@@ -1265,20 +1626,77 @@ export class FlightModel implements SimAircraft {
       t.agl = Math.max(0, lowest);
     } else t.agl = undefined;
     t.onGround = this.held || this.compression.some((c) => c > 0);
-    t.stallWarning = this.stallHornAlpha > def.stallWarning.alpha && tas > 10 && !this.crashed;
+    const horn = this.stallHornAlpha > def.stallWarning.alpha && tas > 10 && !this.crashed;
+    t.stallWarning = horn || this.controlLaw.shaker;
+    if (t.stickShaker !== undefined) {
+      t.stickShaker = this.controlLaw.shaker;
+      t.stickPusher = this.controlLaw.pusher;
+    }
     t.flaps = this.flap / def.controls.flapDetents[def.controls.flapDetents.length - 1]!;
-    t.gear = 1;
+    t.gear = this.gear;
     const c = def.controls;
     t.elevator = this.elevator >= 0 ? this.elevator / c.elevatorUp : this.elevator / c.elevatorDown;
     t.aileron = this.aileron;
     t.rudder = this.rudder;
-    const e = t.engines[0]!;
-    e.running = this.engine.running;
-    e.rpm = this.engine.rpm;
-    e.power = this.enginePower / def.engine.ratedPower;
-    e.fuelFlow = this.engine.running ? this.fuelFlow : 0;
+    if (t.stabiliser !== undefined) t.stabiliser = this.stabiliser;
+    if (t.mach !== undefined) t.mach = tas / Math.sqrt(1.4 * R_AIR * air.temperature);
+    if (t.speedbrake !== undefined) t.speedbrake = Math.max(this.speedbrake, this.spoiler);
     t.fuel = this.fuel;
     t.crashed = this.crashed;
+    if (def.limits) this.checkLimits();
+  }
+
+  /** Calibrated airspeed: from the impact pressure where the type flies fast enough to need it. */
+  private calibrated(tas: number, air: AirSample): number {
+    if (!this.compressible) return tas * Math.sqrt(air.density / SEA_LEVEL_DENSITY);
+    const a = Math.sqrt(1.4 * R_AIR * air.temperature);
+    const m = tas / a;
+    // Impact pressure: isentropic below the speed of sound, Rayleigh's pitot formula above.
+    const ratio = m < 1 ? (1 + 0.2 * m * m) ** 3.5 : (166.921 * m ** 7) / (7 * m * m - 1) ** 2.5;
+    const qc = air.pressure * (ratio - 1);
+    return SEA_LEVEL_SOUND * Math.sqrt(5 * ((qc / SEA_LEVEL_PRESSURE + 1) ** (2 / 7) - 1));
+  }
+
+  /** The placard limits being exceeded now. */
+  private checkLimits() {
+    const lim = this.def.limits!;
+    const t = this.telemetry;
+    const x = this.exceedances;
+    x.length = 0;
+    if (this.crashed || t.onGround) return;
+    const ias = t.ias;
+    if (ias > lim.vmo) x.push('overspeed');
+    if (lim.mmo !== undefined && (t.mach ?? 0) > lim.mmo) x.push('mach');
+    const detents = this.def.controls.flapDetents;
+    let i = 0;
+    while (i < detents.length - 1 && this.flap > detents[i]! + 0.5 * DEG) i++;
+    if (i > 0 && ias > (lim.vfe[i] ?? Infinity)) x.push('flaps');
+    const g = this.def.gear;
+    if (g && ((this.gear > 0.01 && ias > g.vle) || (this.systems.gear.moving && ias > g.vlo)))
+      x.push('gear');
+    let torque = false;
+    let itt = false;
+    let ng = false;
+    let prop = false;
+    let n1 = false;
+    for (const e of t.engines) {
+      if (lim.torque !== undefined && (e.torque ?? 0) > lim.torque) torque = true;
+      if (lim.itt !== undefined && (e.turbineTemperature ?? -273) + 273.15 > lim.itt) itt = true;
+      if (lim.egt !== undefined && (e.turbineTemperature ?? -273) + 273.15 > lim.egt) itt = true;
+      if (lim.ng !== undefined && (e.n2 ?? 0) > lim.ng) ng = true;
+      if (lim.propRpm !== undefined && (e.propRpm ?? 0) > lim.propRpm) prop = true;
+      if (lim.n1 !== undefined && (e.n1 ?? 0) > lim.n1) n1 = true;
+    }
+    if (torque) x.push('torque');
+    if (itt) x.push(lim.egt !== undefined ? 'egt' : 'itt');
+    if (ng) x.push('ng');
+    if (prop) x.push('propeller');
+    if (n1) x.push('n1');
+    if (
+      t.loadFactor > this.def.ultimateLoad.positive / 1.5 ||
+      t.loadFactor < this.def.ultimateLoad.negative / 1.5
+    )
+      x.push('load');
   }
 
   /** Indicated airspeed from calibrated through the handbook calibration, by flap position. */
@@ -1315,6 +1733,7 @@ export class FlightModel implements SimAircraft {
     this.systems.reset(running, !start.onGround, this.air[0]!);
     this.avionicsUnit?.reset();
     this.telemetry.avionics = this.avionicsUnit?.telemetry;
+    this.controlLaw.reset();
     this.separation.fill(1);
     this.stripCl.fill(0);
     this.groupCl.fill(0);
@@ -1324,8 +1743,11 @@ export class FlightModel implements SimAircraft {
     this.bristleLong.fill(0);
     this.compression.fill(0);
     this.contactTouching.fill(0);
-    this.thrust = 0;
-    this.propTorque = 0;
+    for (const p of this.props) {
+      p.thrust = 0;
+      p.torque = 0;
+      for (const f of p.inflow) f.vi = 0;
+    }
     set(s.angularVelocity, 0, 0, 0);
     const c = this.controls;
     c.pitch = 0;
@@ -1333,22 +1755,30 @@ export class FlightModel implements SimAircraft {
     c.yaw = 0;
     c.brakeLeft = 0;
     c.brakeRight = 0;
-    c.gearDown = true;
-    if (c.starter) c.starter[0] = false;
+    c.gearDown = start.onGround || !this.def.gear ? true : (start.gearDown ?? false);
+    if (c.starter) c.starter.fill(false);
+    if (c.reverse !== undefined) c.reverse = false;
+    if (c.speedbrake !== undefined) c.speedbrake = 0;
     this.pitchIn = 0;
     this.rollIn = 0;
-    this.engine.running = running;
-    this.engine.omega = 0;
+    this.yawIn = 0;
+    for (const e of this.engines) e.reset(running, !start.onGround);
+    this.gear = c.gearDown ? 1 : 0;
+    this.spoiler = 0;
+    this.speedbrake = 0;
+    this.differentialTail = 0;
     // Bus, ignition and fuel supply as the switches now stand, before anything is trimmed.
-    this.systems.beforeEngine(0, this.engine, false, 0);
+    this.systems.beforeEngines(0, this.engineInputs, undefined, 0);
     this.flap = this.flapTarget();
+    this.slat = this.def.controls.slatDetents?.[this.flapIndex()] ?? 0;
     this.aileron = this.def.controls.aileronRigging;
     this.rudder = this.def.controls.rudderRigging;
     if (start.onGround) {
-      c.throttle[0] = 0;
+      c.throttle.fill(0);
+      this.throttleIn.fill(0);
       c.pitchTrim = 0;
       this.elevator = this.elevatorTarget();
-      this.engine.omega = running ? 650 * ((2 * Math.PI) / 60) : 0;
+      this.stabiliser = trimAngle(this.def, 0);
       const g = env.ground(start.position);
       if (g) this.placeOnGround(start, env, g);
       else {
@@ -1360,6 +1790,7 @@ export class FlightModel implements SimAircraft {
         copy(s.position, start.position);
         set(s.velocity, 0, 0, 0);
       }
+      this.groundIdle(running, env);
     } else {
       this.trimInAir(start, env, running);
     }
@@ -1368,11 +1799,29 @@ export class FlightModel implements SimAircraft {
     scale(this.specificForce, this.up, G0);
     this.specificForceY = 0;
     this.specificForceZ = -G0;
-    // Once more with the engine turning: the alternator now carries the bus.
-    this.systems.beforeEngine(0, this.engine, false, 0);
+    // Once more with the engines turning: the generators now carry the bus.
+    this.systems.beforeEngines(0, this.engineInputs, undefined, 0);
     this.fillTelemetry(env);
     this.systems.fillTelemetry();
     this.updateInstruments(env, 0, running);
+  }
+
+  /** On the ground the engines idle: a piston at its idle stop's rpm, a turbine settled at idle. */
+  private groundIdle(running: boolean, env: Environment) {
+    this.telemetry.onGround = true;
+    for (let i = 0; i < this.engines.length; i++) {
+      const plant = this.engines[i]!;
+      if (plant.kind === 'piston') {
+        (plant as PistonPowerplant).idle(running);
+        continue;
+      }
+      if (!running) continue;
+      rotateInverse(this.vBody, this.state.orientation, this.state.velocity);
+      this.sampleAir(env);
+      set(this.forceBody, 0, 0, 0);
+      set(this.momentBody, 0, 0, 0);
+      this.enginesStep(0, true);
+    }
   }
 
   /** Lights as a pilot has them: lined up on the runway, or cruising. */
@@ -1444,12 +1893,14 @@ export class FlightModel implements SimAircraft {
 
   /**
    * Places the aircraft in level flight at the given true airspeed and solves angle of
-   * attack, elevator (as pitch trim) and throttle so forces and pitching moment balance.
-   * The solved throttle and trim are written into `controls`.
+   * attack, pitch trim (elevator or stabiliser) and throttle so forces and pitching moment
+   * balance. The solved throttle and trim are written into `controls`.
    */
   private trimInAir(start: InitialCondition, env: Environment, running: boolean) {
     const s = this.state;
     const c = this.controls;
+    const def = this.def;
+    const stabiliser = def.controls.trim === 'stabiliser';
     copy(s.position, start.position);
     const speed = Math.max(start.speed, 15);
     const up = env.up(s.position, vec());
@@ -1462,30 +1913,35 @@ export class FlightModel implements SimAircraft {
     if (g) this.setPlane(env, s.position, g, this.cgPlane);
     for (const p of this.wheelPlanes) p.valid = false;
     for (const p of this.contactPlanes) p.valid = false;
+    this.telemetry.onGround = false;
+    const trimLo = stabiliser ? -def.controls.trimDown : -def.controls.elevatorDown;
+    const trimHi = stabiliser ? def.controls.trimUp : def.controls.elevatorUp;
 
     const residual = (x: number[], out: number[]) => {
-      const [alpha, elev, thr] = x as [number, number, number];
+      const [alpha, trim, thr] = x as [number, number, number];
       this.orient(env, s.position, start.headingDeg, alpha, undefined);
       // Air-relative velocity along the heading; the wind is added on top.
       this.sampleAirAt(env);
       addScaled(s.velocity, this.air[0]!.wind, dir, speed);
       rotateInverse(this.vBody, s.orientation, s.velocity);
       this.sampleAir(env);
-      this.elevator = elev;
-      c.throttle[0] = clamp(thr, 0, 1);
+      if (stabiliser) {
+        this.stabiliser = trim;
+        this.elevator = 0;
+      } else this.elevator = trim;
+      const t = clamp(thr, 0, 1);
+      c.throttle.fill(t);
+      this.throttleIn.fill(t);
+      // Stopped engines are only stepped: they stand, windmill or feather as they are.
       for (let k = 0; k < 8; k++) {
         this.aerodynamics(0, true);
-        if (running) this.engineStep(0, true);
-        else {
-          this.engine.omega = 0;
-          this.engineStep(0, false);
-        }
+        this.enginesStep(0, running);
       }
       const grav = rotateInverse(vec(), s.orientation, scale(vec(), up, -G0 * this.mass));
       const m = this.mass * G0;
       out[0] = (this.forceBody.x + grav.x) / m;
       out[1] = (this.forceBody.z + grav.z) / m;
-      out[2] = this.momentBody.y / (m * this.def.meanChord);
+      out[2] = this.momentBody.y / (m * def.meanChord);
       // Beyond full throttle the residual keeps pulling, so the solver settles at the limit.
       if (thr > 1) out[0] -= (thr - 1) * 0.5;
       if (thr < 0) out[0] -= thr * 0.5;
@@ -1509,17 +1965,24 @@ export class FlightModel implements SimAircraft {
       const limit = [3 * DEG, 3 * DEG, 0.3];
       for (let j = 0; j < 3; j++) x[j]! -= clamp(dx[j]!, -limit[j]!, limit[j]!);
       x[0] = clamp(x[0]!, -10 * DEG, 25 * DEG);
-      x[1] = clamp(x[1]!, -this.def.controls.elevatorDown, this.def.controls.elevatorUp);
+      x[1] = clamp(x[1]!, trimLo, trimHi);
     }
     residual(x, r);
-    const cc = this.def.controls;
-    const elev = x[1]!;
-    c.pitchTrim = clamp(elev >= 0 ? elev / cc.trimUp : elev / cc.trimDown, -1, 1);
-    c.throttle[0] = clamp(x[2]!, 0, 1);
+    const cc = def.controls;
+    const trim = x[1]!;
+    c.pitchTrim = clamp(trim >= 0 ? trim / cc.trimUp : trim / cc.trimDown, -1, 1);
+    const thr = clamp(x[2]!, 0, 1);
+    c.throttle.fill(thr);
+    this.throttleIn.fill(thr);
     // Whatever trim cannot reach stays with the surface for now; the pilot must hold it.
-    this.elevator = elev;
+    if (stabiliser) {
+      this.stabiliser = trim;
+      this.elevator = 0;
+    } else this.elevator = trim;
     set(s.angularVelocity, 0, 0, 0);
-    if (!running) this.engine.running = false;
+    if (!running)
+      for (const e of this.engines)
+        if (e.kind === 'piston') (e as PistonPowerplant).engine.running = false;
   }
 
   private sampleAirAt(env: Environment, position: Vec3 = this.state.position) {

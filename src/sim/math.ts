@@ -197,6 +197,21 @@ export function lookup(table: readonly (readonly [number, number])[], x: number)
   return table[n - 1]![1];
 }
 
+/** The x where a table whose y rises with x reaches `y`; clamps at the ends. */
+export function inverseLookup(table: readonly (readonly [number, number])[], y: number): number {
+  const n = table.length;
+  const first = table[0]!;
+  if (y <= first[1]) return first[0];
+  for (let i = 1; i < n; i++) {
+    const b = table[i]!;
+    if (y <= b[1]) {
+      const a = table[i - 1]!;
+      return a[0] + ((b[0] - a[0]) * (y - a[1])) / (b[1] - a[1]);
+    }
+  }
+  return table[n - 1]![0];
+}
+
 export const DEG = Math.PI / 180;
 export const KT = 1852 / 3600;
 export const FT = 0.3048;
