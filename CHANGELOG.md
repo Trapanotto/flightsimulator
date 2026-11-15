@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1 (2026-11-15)
+
+- **Neustart nach einem Absturz:** «Nochmals versuchen» lädt den Startplatz wie bei einem
+  neuen Flug, bevor das Flugzeug hingestellt wird. Vorher war die Landschaft dort nach dem
+  Wegfliegen entladen: Das Flugzeug fiel durch den Boden und galt sofort wieder als
+  abgestürzt, und über der Piste lag flackerndes, grobes Gelände.
+
 ## 1.2.0 – Ein einfaches Design für alle Bildschirme (2026-11-15)
 
 - **Startseite:** nur noch Flugplatz, Flugzeug, Start (Piste / In der Luft / Anflug), Wetter,

@@ -203,7 +203,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     forceWebGL: query.has('webgl'),
     // The view reaches from the instrument panel (0.1 m) to the Alps (200 km): only a
     // reversed depth buffer keeps that precise.
-    reversedDepthBuffer: true,
+    // `?stddepth=1` draws as a browser without it does (no EXT_clip_control on WebGL 2).
+    reversedDepthBuffer: !query.has('stddepth'),
   });
   await renderer.init();
   const backend = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend
@@ -823,26 +824,12 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     pause: togglePause,
     resume: togglePause,
     restart() {
-      if (!flight) return;
-      closeLog();
-      leaveStill();
-      clearWreck();
-      seatPilot();
-      flight.restart();
-      recording.clear();
-      openLog(flight.aircraft.info.id);
-      openLesson(flight.aircraft);
-      flight.paused = false;
-      openDeck();
-      input.reset(
-        flight.aircraft.controls.throttle[0] ?? 0,
-        flight.aircraft.controls.flaps,
-        flight.aircraft.controls.gearDown,
-      );
-      assist.reset();
+      if (!plan) return;
+      // The same way in as a new flight: far from the start its terrain has been let go, and
+      // an aircraft set down before the ground is back falls through it and counts as crashed.
       groundHandling = 1;
-      env.heightOffset = 0;
-      game.screen.value = 'flight';
+      prepare(plan);
+      game.screen.value = 'briefing';
     },
     exitToMenu() {
       lessonId = undefined;
