@@ -4,7 +4,13 @@
  * (so 'master ON' and later 'master OFF' in the same list each wait for their turn).
  */
 import { C172_CONTROLS, type ControlSpec, type Telemetry } from '@sim';
-import { C172_CHECKLISTS, type Check, type ChecklistDef, type TelemetryKey } from './checklists';
+import {
+  C172_CHECKLISTS,
+  type Check,
+  type ChecklistDef,
+  type Phase,
+  type TelemetryKey,
+} from './checklists';
 
 export type Lang = 'de' | 'en';
 
@@ -28,13 +34,74 @@ export interface ChecklistRunnerState {
 
 const KT = 1.943844;
 const FT = 3.28084;
+const DEG = 180 / Math.PI;
+const flag = (b: boolean | undefined) => (b === undefined ? undefined : b ? 1 : 0);
 
-export function telemetryValue(t: Telemetry | null, key: TelemetryKey): number | undefined {
+export function telemetryValue(
+  t: Telemetry | null,
+  key: TelemetryKey,
+  engine = 0,
+): number | undefined {
   if (!t) return undefined;
   const sys = t.systems;
+  const e = t.engines[engine];
   switch (key) {
     case 'rpm':
-      return t.engines[0]?.rpm;
+      return e?.rpm;
+    case 'enginesRunning':
+      return t.engines.filter((x) => x.running).length;
+    case 'engineStarting':
+      return e ? (e.starting ? 1 : 0) : undefined;
+    case 'n2':
+      return e?.n2;
+    case 'n1':
+      return e?.n1;
+    case 'itt':
+      return e?.turbineTemperature;
+    case 'torque':
+      return e?.torque;
+    case 'propRpm':
+      return e?.propRpm;
+    case 'afterburner':
+      return e ? (e.afterburner ?? 0) : undefined;
+    case 'reversing':
+      return e ? (e.reversing ? 1 : 0) : undefined;
+    case 'gear':
+      return t.gear;
+    case 'flaps':
+      return t.flaps;
+    case 'speedbrake':
+      return t.speedbrake;
+    case 'mach':
+      return t.mach;
+    case 'alphaDeg':
+      return t.alpha * DEG;
+    case 'pitchDeg':
+      return t.pitch * DEG;
+    case 'bankDeg':
+      return t.bank * DEG;
+    case 'altitudeFt':
+      return (t.instruments?.altitude ?? t.altitude) * FT;
+    case 'cabinAltitudeFt':
+      return sys?.cabinAltitude === undefined ? undefined : sys.cabinAltitude * FT;
+    case 'cabinAltitudeWarning':
+      return sys ? (sys.annunciators.cabinAltitude ? 1 : 0) : undefined;
+    case 'gearUnsafe':
+      return sys ? (sys.annunciators.gearUnsafe ? 1 : 0) : undefined;
+    case 'hydraulicsLow':
+      return sys ? (sys.annunciators.hydraulics ? 1 : 0) : undefined;
+    case 'generatorsOff':
+      return sys ? (sys.annunciators.generators ?? []).filter(Boolean).length : undefined;
+    case 'baroStd':
+      return t.instruments ? (t.instruments.baroStd ? 1 : 0) : undefined;
+    case 'stallWarning':
+      return flag(t.stallWarning);
+    case 'airframeIce':
+      return sys?.airframeIce;
+    case 'carbIce':
+      return sys?.carbIce;
+    case 'pitotBlocked':
+      return sys ? (sys.pitotBlocked ? 1 : 0) : undefined;
     case 'iasKt':
       return t.ias * KT;
     case 'aglFt':
@@ -46,13 +113,14 @@ export function telemetryValue(t: Telemetry | null, key: TelemetryKey): number |
     case 'onGround':
       return t.onGround ? 1 : 0;
     case 'engineRunning':
-      return t.engines[0]?.running ? 1 : 0;
+      return e?.running ? 1 : 0;
     case 'busVolts':
       return sys?.busVolts;
     case 'batteryAmps':
       return sys?.batteryAmps;
     case 'oilPressure':
-      return sys?.oilPressure;
+      // The systems report the first engine's; a twin reports each engine's too.
+      return e?.oilPressure ?? (engine === 0 ? sys?.oilPressure : undefined);
     case 'vacuum':
       return sys?.vacuum;
     case 'lowVolts':
@@ -70,13 +138,14 @@ export function evaluate(
   specs: readonly ControlSpec[] = C172_CONTROLS,
 ): boolean {
   if ('all' in check) return check.all.every((c) => evaluate(c, cockpit, t, specs));
+  if ('any' in check) return check.any.some((c) => evaluate(c, cockpit, t, specs));
   const inRange = (v: number | undefined, min?: number, max?: number) =>
     v !== undefined &&
     Number.isFinite(v) &&
     (min === undefined || v >= min) &&
     (max === undefined || v <= max);
   if ('telemetry' in check)
-    return inRange(telemetryValue(t, check.telemetry), check.min, check.max);
+    return inRange(telemetryValue(t, check.telemetry, check.engine), check.min, check.max);
   const v = cockpit?.[check.control];
   if (v === undefined) return false;
   if ('is' in check) {
@@ -94,8 +163,8 @@ export function evaluate(
 /** The control an item is about (the first one its check names). */
 export function controlOf(check: Check | undefined): string | undefined {
   if (!check) return undefined;
-  if ('all' in check) {
-    for (const c of check.all) {
+  if ('all' in check || 'any' in check) {
+    for (const c of 'all' in check ? check.all : check.any) {
       const id = controlOf(c);
       if (id) return id;
     }
@@ -104,15 +173,45 @@ export function controlOf(check: Check | undefined): string | undefined {
   return 'control' in check ? check.control : undefined;
 }
 
-const AIRBORNE_LISTS = [
+const PHASES: readonly Phase[] = [
+  'preflight',
+  'cockpitPreparation',
+  'beforeStart',
+  'engineStart',
+  'afterStart',
+  'beforeTaxi',
+  'taxi',
+  'beforeTakeoff',
   'takeoff',
   'climb',
   'cruise',
   'descent',
+  'approach',
   'beforeLanding',
+  'landing',
   'afterLanding',
+  'parking',
+  'shutdown',
   'securing',
 ];
+
+/** The phase a normal list is due in: its own, or the one its id names. */
+export function phaseOf(def: ChecklistDef): Phase | undefined {
+  if (def.kind !== 'normal') return undefined;
+  return (
+    def.phase ?? ((PHASES as readonly string[]).find((p) => p === def.id) as Phase | undefined)
+  );
+}
+
+/** Engines not all running: the start lists are still due. */
+const COLD: readonly Phase[] = ['preflight', 'cockpitPreparation', 'beforeStart', 'engineStart'];
+const READY: readonly Phase[] = ['afterStart', 'beforeTaxi', 'taxi', 'beforeTakeoff', 'takeoff'];
+const DESCENT: readonly Phase[] = ['descent', 'approach', 'beforeLanding', 'landing'];
+const ARRIVED: readonly Phase[] = ['afterLanding', 'parking', 'shutdown', 'securing'];
+/** Lists of one flight: they start over after a landing. */
+const OF_THE_FLIGHT: readonly Phase[] = ['takeoff', 'climb', 'cruise', ...DESCENT, ...ARRIVED];
+/** Below this height above ground a descent list without `belowFt` is the approach's. */
+const LOW_FT = 2500;
 
 export class ChecklistRunner {
   lang: Lang;
@@ -173,8 +272,14 @@ export class ChecklistRunner {
         // Landed: the lists of the flight start over for the next one.
         this.s.airborne = false;
         this.s.landed = true;
-        this.s.completed = this.s.completed.filter((c) => !AIRBORNE_LISTS.includes(c));
-        for (const id of AIRBORNE_LISTS) delete this.s.done[id];
+        const again = this.lists
+          .filter((l) => {
+            const p = phaseOf(l);
+            return p !== undefined && OF_THE_FLIGHT.includes(p);
+          })
+          .map((l) => l.id);
+        this.s.completed = this.s.completed.filter((c) => !again.includes(c));
+        for (const id of again) delete this.s.done[id];
       }
     }
     this.evaluate();
@@ -221,40 +326,57 @@ export class ChecklistRunner {
    */
   suggest(): string | null {
     const t = this.telemetry;
-    const not = (id: string) => (this.s.completed.includes(id) ? null : id);
-    if (!t) return not('preflight');
-    const sys = t.systems;
-    const running = t.engines[0]?.running ?? false;
+    const open = (phases: readonly Phase[], pick?: (l: ChecklistDef) => boolean) =>
+      this.lists.find((l) => {
+        const p = phaseOf(l);
+        return (
+          p !== undefined &&
+          phases.includes(p) &&
+          !this.s.completed.includes(l.id) &&
+          (!pick || pick(l))
+        );
+      })?.id ?? null;
+    if (!t) return open(['preflight', 'cockpitPreparation']);
+    const emergency = this.dueEmergency(t);
+    if (emergency) return emergency;
+    // Jets have no propeller to watch: an engine counts as started when it says it runs.
+    const running = t.engines.filter((e) => e.running).length;
+    const allRunning = t.engines.length > 0 && running === t.engines.length;
     const aglFt = t.agl === undefined ? Infinity : t.agl * FT;
     if (!t.onGround) {
-      if (!running)
-        return aglFt > 1500 ? (not('engineRestart') ?? not('engineFailure')) : not('engineFailure');
-      if (sys?.annunciators.lowVolts) {
-        const e = not('lowVoltage');
-        if (e) return e;
-      }
-      if (sys?.annunciators.lowVacuum) {
-        const e = not('vacuumFailure');
-        if (e) return e;
-      }
-      if (sys && (sys.airframeIce > 0.1 || sys.pitotBlocked || sys.carbIce > 0.2)) {
-        const e = not('icing');
-        if (e) return e;
-      }
       const vs = t.verticalSpeed * FT * 60;
-      if (vs < -300 && aglFt < 2500) return not('beforeLanding') ?? null;
-      if (vs < -300) return not('descent') ?? not('beforeLanding');
-      if (vs > 300) return not('climb');
-      return not('cruise');
-    }
-    if (!this.s.landed) {
-      if (!running) {
-        for (const id of ['preflight', 'beforeStart', 'engineStart']) if (not(id)) return id;
-        return null;
+      if (vs < -300) {
+        const below = (l: ChecklistDef) =>
+          l.belowFt ?? (phaseOf(l) === 'descent' ? Infinity : LOW_FT);
+        const low = this.lists.some((l) => {
+          const p = phaseOf(l);
+          return (
+            p !== undefined && DESCENT.includes(p) && Number.isFinite(below(l)) && aglFt < below(l)
+          );
+        });
+        return low
+          ? open(DESCENT, (l) => Number.isFinite(below(l)) && aglFt < below(l))
+          : open(DESCENT);
       }
-      return not('beforeTakeoff') ?? not('takeoff');
+      if (vs > 300) return open(['climb']);
+      return open(['cruise']);
     }
-    return not('afterLanding') ?? not('securing');
+    if (!this.s.landed) return allRunning ? open(READY) : open(COLD);
+    return open(ARRIVED);
+  }
+
+  /** The first emergency list whose trigger holds now and that is not done yet. */
+  private dueEmergency(t: Telemetry): string | null {
+    const departure = t.onGround && !this.s.airborne && !this.s.landed;
+    const due = this.lists
+      .filter((l) => {
+        if (l.kind !== 'emergency' || !l.trigger || this.s.completed.includes(l.id)) return false;
+        if ((l.when ?? 'air') === 'air' ? t.onGround : !departure) return false;
+        if (l.requires && !this.s.completed.includes(l.requires)) return false;
+        return evaluate(l.trigger, this.cockpit, t, this.specs);
+      })
+      .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+    return due[0]?.id ?? null;
   }
 
   // ----------------------------------------------------------------

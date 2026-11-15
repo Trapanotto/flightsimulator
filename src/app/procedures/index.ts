@@ -33,6 +33,18 @@ export {
   type Check,
   type ChecklistDef,
   type ChecklistItemDef,
+  type Phase,
   type TelemetryKey,
 } from './checklists';
-export { ChecklistRunner, type ChecklistView, type Lang } from './checklistRunner';
+export { PC12_CHECKLISTS } from './checklistsPc12';
+export { A320_CHECKLISTS } from './checklistsA320';
+export { FA18_CHECKLISTS } from './checklistsFa18';
+export { ATC_AIRCRAFT, type AtcAircraft, type Category, checklistsFor } from './fleet';
+export {
+  ChecklistRunner,
+  type ChecklistView,
+  type Lang,
+  evaluate,
+  phaseOf,
+  telemetryValue,
+} from './checklistRunner';

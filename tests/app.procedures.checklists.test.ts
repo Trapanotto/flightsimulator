@@ -130,7 +130,7 @@ describe('C172S checklists', () => {
             expect(TELEMETRY_KEYS, where).toContain(c.telemetry);
             continue;
           }
-          if ('all' in c) continue;
+          if ('all' in c || 'any' in c) continue;
           const spec = C172_CONTROLS.find((s) => s.id === c.control);
           expect(spec, where).toBeDefined();
           if ('is' in c) {
