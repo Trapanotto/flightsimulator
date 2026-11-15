@@ -103,7 +103,11 @@ def compute(pos, nrm, pid, cov, ao, names):
 
     # --- the two greys: dark on top, light on the sides and below, a soft spray edge ----------
     n_edge = noise.fbm(p, 3.0, 3)
-    top_fuse = (nw - 0.30 + 0.12 * (n_edge - 0.5)) / 0.18
+    # On the fuselage the dark grey ends along the chine line, not by the surface's slope: the
+    # LEX edge's tight round would otherwise flicker between the two greys texel by texel.
+    from .fuselage import CHINE, KEY
+    chine = KEY(CHINE, np.clip(fs, 0.0, 15.95))
+    top_fuse = np.where(nw > -0.3, (wl - chine - 0.035 + 0.05 * (n_edge - 0.5)) / 0.06, -1.0)
     top_flat = (nw - 0.05 + 0.08 * (n_edge - 0.5)) / 0.10
     k_dark = np.where(fuse, np.clip(top_fuse, 0, 1), 0)
     k_dark = np.where(wing | stabs, np.clip(top_flat, 0, 1), k_dark)
@@ -209,5 +213,24 @@ def compute(pos, nrm, pid, cov, ao, names):
     base[~cov] = LIGHT
     orm = np.stack([ao_out, rough, metal], -1)
     orm[~cov] = (1.0, 0.55, 0.0)
+    # Thin islands (the LEX edge's round) are sampled beyond their texels: grow every island's
+    # colour into the empty texels round it, so filtering never pulls in the fill colour.
+    base, orm = _dilate(base, cov), _dilate(orm, cov)
     nmap = B.height_to_normal(height, pos, cov, pid, strength=DEPTH)
     return srgb_to_linear(base), orm, nmap
+
+
+def _dilate(img, cov, steps=12):
+    out = img.copy()
+    have = cov.copy()
+    for _ in range(steps):
+        acc = np.zeros_like(out)
+        n = np.zeros(have.shape, np.float32)
+        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            h = np.roll(have, (dy, dx), (0, 1))
+            acc += np.roll(out, (dy, dx), (0, 1)) * h[..., None]
+            n += h
+        grow = ~have & (n > 0)
+        out[grow] = acc[grow] / n[grow][..., None]
+        have = have | grow
+    return out

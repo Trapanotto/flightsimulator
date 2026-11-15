@@ -294,7 +294,7 @@ export class Fa18Cockpit extends CockpitCore {
     if (this.panelAtlas.update(dt, f.panel)) this.tex.panel.needsUpdate = true;
     // The HUD moves smoothly: it is redrawn whenever its picture changes, in the cockpit view.
     const brightness = f.hud.on ? value('hudBrightness') : 0;
-    this.hudGain.value = brightness * (0.45 + 2.4 * (1 - darkness(this.exposure)));
+    this.hudGain.value = brightness * (0.4 + 1.5 * (1 - darkness(this.exposure)));
     if (this.inside) {
       const key = hudKey(f.hud);
       if (key !== this.hudKey) {

@@ -190,7 +190,7 @@ def lod1_ratio(o):
     if o.name.startswith(("Lamp_", "Glow_", "Flame_", "Vapour", "Nozzles")):
         return 1.0
     if n > 20000:
-        return 0.18
+        return 0.26
     if n > 4000:
         return 0.25
     if n > 1000:

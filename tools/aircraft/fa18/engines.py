@@ -21,7 +21,7 @@ from . import fuselage as F
 IN_BL = 0.73
 OUT_BL = 1.36
 LO_WL = 1.30
-HI_WL = 2.20
+HI_WL = 2.13
 LIP = 0.035
 
 

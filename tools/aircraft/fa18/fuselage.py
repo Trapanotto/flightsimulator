@@ -182,7 +182,7 @@ def build(col, mats):
     c2 = glass_cutter(col, cut_mat, CANOPY, "CutCanopy")
     canopy_cut = M.duplicate(c2, "CutCanopyKeep")
     both = M.join([c1, c2], "GlassCutter")
-    glass_all = A.cut_windows(skin, both, mats["glass"])
+    glass_all = cut_windows(skin, both, mats["glass"])
     M.delete_object(both)
     # Split the glass into the fixed windscreen and the canopy that opens.
     canopy_glass = M.duplicate(glass_all, "CanopyGlass")
@@ -195,7 +195,54 @@ def build(col, mats):
     glass_all.name = "Glass"
     glass_all.data.name = "Glass"
     lining = A.cabin_lining(skin, col, mats, 3.30, 6.40)
+    trim_lining(lining)
     return skin, glass_all, canopy_glass, lining
+
+
+def trim_lining(lining):
+    """
+    Keeps the lining in the cockpit's hump only: inside the thin LEX shelves the inset skin
+    would poke out through the other face of the shelf.
+    """
+    import bmesh
+
+    bm = bmesh.new()
+    bm.from_mesh(lining.data)
+    floor = 2.24 - M.REF[2]
+    kill = [f for f in bm.faces if any(abs(v.co.x) > 0.47 or v.co.z < floor for v in f.verts)]
+    bmesh.ops.delete(bm, geom=kill, context="FACES")
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context="VERTS")
+    bm.to_mesh(lining.data)
+    bm.free()
+
+
+def _transfer_normals(obj, source):
+    """
+    The smooth source's normals for the glass. The skin keeps its own: the nearest source face
+    of a thin LEX shelf is often the one on its other side, which turned its shading inside out.
+    """
+    m = obj.modifiers.new("Normals", "DATA_TRANSFER")
+    m.object = source
+    m.use_loop_data = True
+    m.data_types_loops = {"CUSTOM_NORMAL"}
+    m.loop_mapping = "POLYINTERP_LNORPROJ"
+    M.apply_modifiers(obj)
+
+
+def cut_windows(skin, cutter, glass_mat):
+    """lib.airframe.cut_windows with a normal transfer that respects thin shelves."""
+    source = M.duplicate(skin, skin.name + "Source")
+    glass = M.duplicate(skin, "Glass")
+    M.boolean(glass, cutter, "INTERSECT")
+    A.delete_faces_with_material(glass, "CUT")
+    M.boolean(skin, cutter, "DIFFERENCE")
+    A.delete_faces_with_material(skin, "CUT")
+    _transfer_normals(glass, source)
+    M.delete_object(source)
+    glass.data.materials.clear()
+    glass.data.materials.append(glass_mat)
+    A.inset(glass, 0.004)
+    return glass
 
 
 def canopy_frame(col, mats):

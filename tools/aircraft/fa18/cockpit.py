@@ -163,7 +163,7 @@ def tub(b):
         rows.append([(-0.30, fs, D.COCKPIT_FLOOR_WL), (0.30, fs, D.COCKPIT_FLOOR_WL)])
     v = np.array([p for r in rows for p in r])
     b.add("interior_dark", (v, M.grid_faces(len(rows), 2)))
-    b.add("interior", M.rounded_box((0, 5.62, 2.55), (0.86, 0.04, 0.95), 0.01, 1))
+    b.add("interior", M.rounded_box((0, 5.62, 2.38), (0.80, 0.04, 0.62), 0.01, 1))
     b.add("interior_dark", M.rounded_box((0, 3.60, 2.05), (0.58, 0.20, 0.10), 0.01, 1))
 
 
