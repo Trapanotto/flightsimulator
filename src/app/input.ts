@@ -7,6 +7,9 @@ export interface TouchAxes {
   yaw: number | null;
   throttle: number | null;
   brake: boolean;
+  /** Speed brake lever 0..1 (null = not touched), and reverse held. */
+  speedbrake?: number | null;
+  reverse?: boolean;
 }
 
 /** A gamepad reduced to what flying needs. */
@@ -35,6 +38,8 @@ export interface InputEvents {
   flapsDown: number;
   flapsUp: number;
   gearToggle: number;
+  /** Steps of the speed brake since the last frame: positive out, negative in. */
+  speedbrake?: number;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -55,12 +60,16 @@ export const KEYS = {
   flapsDown: ['KeyF'],
   flapsUp: ['KeyV'],
   gear: ['KeyG'],
+  speedbrakeOut: ['KeyJ'],
+  speedbrakeIn: ['KeyM'],
+  /** Held: reverse thrust (or beta on a turboprop). */
+  reverse: ['KeyH'],
   view: ['KeyC'],
   pause: ['KeyP', 'Escape'],
 } as const;
 
-/** Flap settings the lever clicks into (0, 10, 20, 30 degrees on the Cessna). */
-const FLAP_NOTCHES = [0, 1 / 3, 2 / 3, 1];
+/** Share of the speed brake's travel per key press. */
+const SPEEDBRAKE_STEP = 0.25;
 
 /**
  * Turns keys, a gamepad and on-screen controls into the pilot's control positions.
@@ -75,8 +84,19 @@ export class PilotInput {
   private yaw = 0;
   private throttle = 0;
   private flapNotch = 0;
+  /** Flap settings the lever clicks into, as shares of its travel (four on the Cessna). */
+  private flapNotches = [0, 1 / 3, 2 / 3, 1];
   private gearDown = true;
+  private speedbrake = 0;
   private lastTouchThrottle: number | null = null;
+  private lastTouchSpeedbrake: number | null = null;
+
+  /** The aircraft's flap lever has `count` positions, evenly spread over its travel. */
+  setFlapNotches(count: number) {
+    const n = Math.max(2, Math.round(count));
+    this.flapNotches = Array.from({ length: n }, (_, i) => i / (n - 1));
+    this.flapNotch = Math.min(this.flapNotch, n - 1);
+  }
 
   /** Yoke travel per second while a key is held, and when centring. */
   private static readonly DEFLECT = 1.8;
@@ -87,12 +107,15 @@ export class PilotInput {
   reset(throttle: number, flaps: number, gearDown: boolean) {
     this.pitch = this.roll = this.yaw = 0;
     this.throttle = clamp(throttle, 0, 1);
-    this.flapNotch = FLAP_NOTCHES.reduce(
-      (best, f, i) => (Math.abs(f - flaps) < Math.abs(FLAP_NOTCHES[best]! - flaps) ? i : best),
+    const notches = this.flapNotches;
+    this.flapNotch = notches.reduce(
+      (best, f, i) => (Math.abs(f - flaps) < Math.abs(notches[best]! - flaps) ? i : best),
       0,
     );
     this.gearDown = gearDown;
+    this.speedbrake = 0;
     this.lastTouchThrottle = null;
+    this.lastTouchSpeedbrake = null;
   }
 
   /**
@@ -100,7 +123,9 @@ export class PilotInput {
    * them (a click in the cockpit), and the keys continue from there.
    */
   adopt(controls: ControlInput) {
-    this.reset(controls.throttle[0] ?? 0, controls.flaps, this.gearDown);
+    const speedbrake = this.speedbrake;
+    this.reset(controls.throttle[0] ?? 0, controls.flaps, controls.gearDown);
+    this.speedbrake = controls.speedbrake ?? speedbrake;
   }
 
   /**
@@ -160,12 +185,16 @@ export class PilotInput {
         this.throttle = clamp(touch.throttle, 0, 1);
       this.lastTouchThrottle = touch.throttle;
       brake ||= touch.brake;
+      const sb = touch.speedbrake ?? null;
+      if (sb !== null && sb !== this.lastTouchSpeedbrake) this.speedbrake = clamp(sb, 0, 1);
+      this.lastTouchSpeedbrake = sb;
     }
+    this.speedbrake = clamp(this.speedbrake + (events.speedbrake ?? 0) * SPEEDBRAKE_STEP, 0, 1);
 
     this.flapNotch = clamp(
       this.flapNotch + events.flapsDown - events.flapsUp,
       0,
-      FLAP_NOTCHES.length - 1,
+      this.flapNotches.length - 1,
     );
     if (events.gearToggle % 2 === 1) this.gearDown = !this.gearDown;
 
@@ -173,9 +202,12 @@ export class PilotInput {
     out.roll = clamp(roll, -1, 1);
     out.yaw = clamp(yaw, -1, 1);
     for (let i = 0; i < out.throttle.length; i++) out.throttle[i] = this.throttle;
-    out.flaps = FLAP_NOTCHES[this.flapNotch]!;
+    out.flaps = this.flapNotches[this.flapNotch]!;
     out.gearDown = this.gearDown;
     out.brakeLeft = out.brakeRight = brake ? 1 : 0;
+    // Only types that have them carry these fields.
+    if (out.speedbrake !== undefined) out.speedbrake = this.speedbrake;
+    if (out.reverse !== undefined) out.reverse = any(KEYS.reverse) || !!touch?.reverse;
   }
 
   get throttlePosition() {

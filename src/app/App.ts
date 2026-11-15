@@ -44,6 +44,7 @@ import {
   SIM_HZ,
   type SimAircraft,
   type Telemetry,
+  AIRCRAFT,
   createAircraft,
 } from '@sim';
 import { Sky, WEATHER_PRESETS, type Weather } from '@sky';
@@ -394,6 +395,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     };
   };
 
+  /** The type the menu's flight shows (the hangar changes it). */
+  let menuAircraft: AircraftId = 'c172';
   /** The radio, checklists and switches of the flight in progress. */
   let deck: FlightDeck | undefined;
   const openDeck = () => {
@@ -428,6 +431,15 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     deck?.dispose();
     deck = undefined;
     game.frequencies.value = p ? frequenciesFor(p) : [];
+    const type = AIRCRAFT.find((a) => a.id === (p?.aircraft ?? menuAircraft)) ?? AIRCRAFT[0]!;
+    // The briefing reads the type's controls (its flap settings) before the flight exists.
+    if (p) {
+      try {
+        game.controls.value = createAircraft(type.id).cockpit.specs;
+      } catch (err) {
+        console.warn(err);
+      }
+    }
     // Screenshot tests must not change with the calendar.
     season = shot ? 'summer' : !p?.season || p.season === 'now' ? seasonOf(new Date()) : p.season;
     const icao = p?.airport ?? (p?.start.kind === 'runway' ? p.start.airport : undefined);
@@ -453,7 +465,12 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
         lat: s.lat,
         altitude: seaLevelToEllipsoid(s.lon, s.lat, s.altitude),
         guess: 0,
-        start: { headingDeg: s.headingDeg, speed: 100 * KT, onGround: false },
+        // Faster types start faster: a jet cannot fly at a Cessna's cruise speed.
+        start: {
+          headingDeg: s.headingDeg,
+          speed: s.speed ?? Math.max(100 * KT, 1.6 * type.vs),
+          onGround: false,
+        },
         since,
       };
     } else if (p.start.kind === 'approach' && findRunwayEnd(airport, p.start.runway)) {
@@ -476,7 +493,13 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
         lat: at.lat,
         altitude: seaLevelToEllipsoid(at.lon, at.lat, height),
         guess: 0,
-        start: { headingDeg: course, speed: 80 * KT, onGround: false },
+        // A little above the approach speed, gear down, with an early stage of flaps.
+        start: {
+          headingDeg: course,
+          speed: 1.2 * (type.vApproach ?? 1.3 * type.vs0),
+          onGround: false,
+          gearDown: true,
+        },
         flaps: 1 / 3,
         since,
       };
@@ -510,7 +533,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     tilesLoaded = 0;
     reveal = undefined;
     modelReady = false;
-    void useVisual(p?.aircraft ?? 'c172').then(() => (modelReady = true));
+    void useVisual(type.id).then(() => (modelReady = true));
     if (!timeIsFixed) {
       const time = p?.time;
       sky.setTime(typeof time === 'number' ? dateAtSwissHour(new Date(), time) : new Date());
@@ -559,7 +582,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     groundHeight = ground;
     const p = pending;
     pending = undefined;
-    const id: AircraftId = p.plan?.aircraft ?? 'c172';
+    const id: AircraftId = p.plan?.aircraft ?? menuAircraft;
     let aircraft: SimAircraft;
     try {
       aircraft = createAircraft(id);
@@ -573,8 +596,17 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     aircraft.controls.flaps = p.flaps ?? 0;
     flight = new Flight(aircraft, env, { ...p.start, position });
     openDeck();
+    sound.setAircraft(aircraft.info);
+    cockpitSound.setAircraft(aircraft.info);
+    input.setFlapNotches(
+      aircraft.cockpit.specs.find((s) => s.id === 'flaps')?.positions?.length ?? 4,
+    );
     // The reset trims the aircraft: take the throttle it chose.
-    input.reset(aircraft.controls.throttle[0] ?? 0, aircraft.controls.flaps, true);
+    input.reset(
+      aircraft.controls.throttle[0] ?? 0,
+      aircraft.controls.flaps,
+      aircraft.controls.gearDown,
+    );
     assist.reset();
     visual.object.visible = true;
     // A few frames behind the loading screen: the aircraft settles on its wheels.
@@ -618,7 +650,11 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       flight.restart();
       flight.paused = false;
       openDeck();
-      input.reset(flight.aircraft.controls.throttle[0] ?? 0, flight.aircraft.controls.flaps, true);
+      input.reset(
+        flight.aircraft.controls.throttle[0] ?? 0,
+        flight.aircraft.controls.flaps,
+        flight.aircraft.controls.gearDown,
+      );
       assist.reset();
       env.heightOffset = 0;
       game.screen.value = 'flight';
@@ -633,6 +669,31 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     openChecklist: (id) => deck?.openChecklist(id),
     checkItem: () => deck?.checkItem(),
     setFailure: (id, failed) => deck?.setFailure(id, failed),
+    showAircraft(id) {
+      const next = id ?? 'c172';
+      if (next === menuAircraft) return;
+      menuAircraft = next;
+      // Only the aircraft changes: the menu's flight goes on where it is.
+      if (plan !== null || !flight) return;
+      const at = flight.aircraft.state.position;
+      void useVisual(next).then(() => {
+        if (plan !== null || menuAircraft !== next) return;
+        try {
+          const aircraft = createAircraft(next);
+          flight = new Flight(aircraft, env, {
+            position: { x: at.x, y: at.y, z: at.z },
+            headingDeg: headingAt(showcase.s),
+            speed: SHOWCASE_SPEED,
+            onGround: false,
+          });
+          sound.setAircraft(aircraft.info);
+          visual.object.visible = true;
+          visual.setCockpitView(false);
+        } catch (err) {
+          console.warn(err);
+        }
+      });
+    },
   };
   mountUi(uiRoot, actions);
   keyboard.onPress = (code) => {
@@ -651,6 +712,10 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     if (is(KEYS.gear)) {
       if (flight?.aircraft.info.retractableGear) events.gearToggle++;
       else say('msg.gearFixed');
+    }
+    if (flight?.aircraft.controls.speedbrake !== undefined) {
+      if (is(KEYS.speedbrakeOut)) events.speedbrake = (events.speedbrake ?? 0) + 1;
+      if (is(KEYS.speedbrakeIn)) events.speedbrake = (events.speedbrake ?? 0) - 1;
     }
   };
   // Taps on the on-screen buttons arrive as counters.
@@ -791,6 +856,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
             yaw: touchInput.yaw.value,
             throttle: touchInput.throttle.value,
             brake: touchInput.brake.value,
+            speedbrake: touchInput.speedbrake.value,
+            reverse: touchInput.reverse.value,
           }
         : noTouch;
       const options = {
@@ -815,7 +882,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
         // The parked aircraft of the menu is not flown, and a wreck takes no input.
         if (!flying || aircraft.telemetry.crashed) return;
         input.update(stepDt, keyboard.down, pad, touch, events, options, aircraft.controls);
-        events.flapsDown = events.flapsUp = events.gearToggle = 0;
+        events.flapsDown = events.flapsUp = events.gearToggle = events.speedbrake = 0;
         assist.apply(stepDt, aircraft.telemetry, aircraft.controls);
       });
       // The menu's aircraft is not simulated: it follows its loop, and so does the camera.
@@ -877,6 +944,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
           gearDown: c.gearDown,
           brake: c.brakeLeft > 0.5 || c.brakeRight > 0.5,
           parkingBrake: c.parkingBrake,
+          speedbrake: c.speedbrake,
+          reverse: c.reverse,
         };
       }
     }
