@@ -65,3 +65,29 @@ export type {
   NavStation,
   Waypoint,
 } from './avionicsTypes';
+// The pilot outside the aircraft (1.1): free fall, parachute, on foot.
+export {
+  FATAL_SINK,
+  HIP_HEIGHT,
+  MAX_SLOPE,
+  Parachutist,
+  RAM_AIR,
+  ROUND,
+  SOFT_SINK,
+  TERMINAL_VELOCITY,
+  type CanopyKind,
+  type ParachutistEvent,
+  type ParachutistInput,
+  type ParachutistMode,
+  type ParachutistView,
+} from './pilot/parachutist';
+export {
+  EJECTION_SPEED,
+  ENTER_REACH,
+  EXITS,
+  STOPPED_SPEED,
+  canEnter,
+  exitKind,
+  leaveAircraft,
+  type ExitKind,
+} from './pilot/exit';
