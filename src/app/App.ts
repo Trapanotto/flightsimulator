@@ -15,8 +15,11 @@ import { pass } from 'three/tsl';
 import {
   type AircraftVisual,
   ImpactWatch,
+  PilotCamera,
+  type PilotVisual,
   Wreck,
   WreckFx,
+  loadPilotVisual,
   createReferenceMarker,
   loadAircraftVisual,
 } from '@aircraft';
@@ -26,6 +29,7 @@ import {
   CockpitSound,
   CrashSound,
   NavAudio,
+  PilotSound,
   RadioSquelch,
   RadioVoice,
   browserSpeech,
@@ -53,7 +57,11 @@ import {
   type SimAircraft,
   type Telemetry,
   AIRCRAFT,
+  Parachutist,
+  type ParachutistInput,
+  canEnter,
   createAircraft,
+  leaveAircraft,
 } from '@sim';
 import { Sky, WEATHER_PRESETS, type Weather } from '@sky';
 import { SNOW_LINE, nightFactor, seasonOf } from './season';
@@ -567,6 +575,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
    */
   const prepare = (p: FlightPlan | null) => {
     closeLog();
+    seatPilot();
     clearWreck();
     leaveStill();
     recording.clear();
@@ -818,6 +827,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       closeLog();
       leaveStill();
       clearWreck();
+      seatPilot();
       flight.restart();
       recording.clear();
       openLog(flight.aircraft.info.id);
@@ -848,7 +858,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     deleteLogEntry: (id) => (game.logbook.value = logbook.remove(id)),
     clearLogbook: () => (game.logbook.value = logbook.clear()),
     openReplay() {
-      if (!flight || !plan || recording.duration < 2) return;
+      if (!flight || !plan || recording.duration < 2 || outside) return;
       if (game.screen.value !== 'paused' && game.screen.value !== 'flight') return;
       replayFromFlight = game.screen.value === 'flight';
       flight.paused = true;
@@ -928,6 +938,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       game.photo.value = next;
     },
     photoSave: () => void (saveNext = true),
+    leaveAircraft: () => leaveOrEnter(),
+    pullChute: () => void (pullHeld = 0.7),
     showAircraft(id) {
       showcase.sideShift = id ? 0.03 : 0.14;
       const next = id ?? 'c172';
@@ -962,6 +974,15 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     const is = (keys: readonly string[]) => keys.includes(code);
     if (is(KEYS.pause)) togglePause();
     if (game.screen.value !== 'flight') return;
+    if (code === 'KeyX') leaveOrEnter();
+    if (outside) {
+      // On foot or under the canopy the view key switches between the pilot's eyes and behind.
+      if (is(KEYS.view) && pilotVisual) {
+        pilotCam.firstPerson = !pilotCam.firstPerson;
+        pilotVisual.setFirstPerson(pilotCam.firstPerson);
+      }
+      return;
+    }
     if (is(KEYS.view)) toggleView();
     if (is(KEYS.flapsDown)) {
       events.flapsDown++;
@@ -1044,6 +1065,90 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     camera.up.set(0, 1, 0);
     camera.lookAt(c.look.x, c.look.y + 1.5, c.look.z);
   };
+  // ---- the pilot outside the aircraft ----
+  const parachutist = new Parachutist();
+  let pilotVisual: PilotVisual | undefined;
+  /** Frames the figure is still drawn as a speck so that its shaders exist before a jump. */
+  let pilotWarm = 30;
+  void loadPilotVisual({ quality: profile.device === 'mobile' ? 'low' : 'high' }).then(
+    (v) => {
+      pilotVisual = v;
+      scene.add(v.object);
+      v.setCompileMode(true);
+    },
+    (err: unknown) => console.warn(err),
+  );
+  const pilotCam = new PilotCamera();
+  const pilotSound = new PilotSound(audio);
+  /** The pilot has left the aircraft: it flies on by itself. */
+  let outside = false;
+  const pilotInput: ParachutistInput = { x: 0, y: 0, run: false, pull: false };
+  const pilotPose: RenderPose = {
+    position: { x: 0, y: 0, z: 0 },
+    quaternion: { x: 0, y: 0, z: 0, w: 1 },
+  };
+  const pilotHud = {
+    state: 'freefall' as const,
+    agl: 0,
+    speed: 0,
+    verticalSpeed: 0,
+    headingDeg: 0,
+  };
+  let pilotHudTime = 0;
+  /** Seconds a tap on "pull" is held for (a tap on a touch screen has no length). */
+  let pullHeld = 0;
+  /** Seconds since a fatal fall: the flight starts again shortly after. */
+  let pilotDead = -1;
+  const seatPilot = () => {
+    outside = false;
+    pilotDead = -1;
+    pullHeld = 0;
+    pilotVisual?.hide();
+    pilotSound.update(null);
+    if (game.pilot.value) game.pilot.value = null;
+  };
+  /** Key X: out of the aircraft (step out, jump or eject), or back in. */
+  const leaveOrEnter = () => {
+    if (!flight || !plan || !pilotVisual || game.screen.value !== 'flight') return;
+    const aircraft = flight.aircraft;
+    if (outside) {
+      if (parachutist.mode !== 'walk') return;
+      if (aircraft.telemetry.crashed) return say('msg.pilot.lost');
+      if (!canEnter(parachutist, aircraft, env)) return say('msg.pilot.tooFar');
+      seatPilot();
+      visual.setCockpitView(game.view.value === 'cockpit');
+      return say('msg.pilot.entered');
+    }
+    if (aircraft.telemetry.crashed) return;
+    const kind = leaveAircraft(parachutist, aircraft, env);
+    if (!kind) return say('msg.pilot.stopFirst');
+    outside = true;
+    pilotDead = -1;
+    // Seen from outside: the figure, and the aircraft flying on.
+    if (game.view.value === 'cockpit') setView('outside');
+    pilotCam.firstPerson = false;
+    pilotVisual.setFirstPerson(false);
+    pilotCam.groundY = rig.groundY;
+    pilotCam.snap();
+    say(
+      kind === 'step' ? 'msg.pilot.out' : kind === 'jump' ? 'msg.pilot.jumped' : 'msg.pilot.eject',
+    );
+  };
+  // Looking around the pilot: the rig's own listeners keep turning its (unused) camera.
+  {
+    let last: { x: number; y: number } | undefined;
+    canvas.addEventListener('pointerdown', (e) => (last = { x: e.clientX, y: e.clientY }));
+    canvas.addEventListener('pointermove', (e) => {
+      if (!last || !outside || e.buttons === 0) return;
+      pilotCam.drag(e.clientX - last.x, e.clientY - last.y);
+      last = { x: e.clientX, y: e.clientY };
+    });
+    window.addEventListener('pointerup', () => (last = undefined));
+    canvas.addEventListener('wheel', (e) => outside && pilotCam.dolly(Math.exp(e.deltaY * 0.001)), {
+      passive: true,
+    });
+  }
+
   const clearWreck = () => {
     wreck?.dispose();
     wreck = undefined;
@@ -1189,6 +1294,37 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
           groundZoom = under.zoom;
           groundHeight = under.height;
         }
+        if (flying && outside) {
+          // Nobody at the controls: they centre, the throttle stays where it was.
+          const c = aircraft.controls;
+          c.pitch = c.roll = c.yaw = 0;
+          const down = keyboard.down;
+          const key = (...codes: string[]) => (codes.some(down) ? 1 : 0);
+          const stick = touch ?? noTouch;
+          pilotInput.x = Math.max(
+            -1,
+            Math.min(1, key('KeyD', 'ArrowRight') - key('KeyA', 'ArrowLeft') + (stick.roll ?? 0)),
+          );
+          // Forward is a push: the stick's pitch is nose-up positive.
+          pilotInput.y = Math.max(
+            -1,
+            Math.min(1, key('KeyW', 'ArrowUp') - key('KeyS', 'ArrowDown') - (stick.pitch ?? 0)),
+          );
+          pilotInput.run = down('ShiftLeft') || down('ShiftRight');
+          pullHeld = Math.max(0, pullHeld - stepDt);
+          pilotInput.pull = down('Space') || pullHeld > 0;
+          for (const event of parachutist.step(stepDt, env, pilotInput)) {
+            if (event === 'opened') say('msg.pilot.opened');
+            else if (event === 'landed') say('msg.pilot.landed');
+            else if (event === 'hardLanding') say('msg.pilot.hard');
+            else if (event === 'splash') say('msg.pilot.splash');
+            else {
+              say('msg.pilot.fatal');
+              pilotDead = 0;
+            }
+          }
+          return;
+        }
         // The parked aircraft of the menu is not flown, and a wreck takes no input.
         if (!flying || aircraft.telemetry.crashed) return;
         input.update(stepDt, keyboard.down, pad, touch, events, options, aircraft.controls);
@@ -1248,9 +1384,24 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
 
       // Keep the render origin near the aircraft: single precision is exact to millimetres
       // only within a few kilometres.
-      const p = visual.object.position;
+      const walker = outside && pilotVisual ? pilotVisual : undefined;
+      const placePilot = () => {
+        if (!walker) return;
+        stateToRenderPose(parachutist.state, frame, pilotPose);
+        const { position: at, quaternion: q } = pilotPose;
+        walker.object.position.set(at.x, at.y, at.z);
+        walker.object.quaternion.set(q.x, q.y, q.z, q.w);
+      };
+      placePilot();
+      const p = (walker ?? visual).object.position;
       if (p.x * p.x + p.z * p.z > REBASE_DISTANCE * REBASE_DISTANCE) {
-        if (tour) {
+        if (walker) {
+          // The origin stays with the pilot; the aircraft flies off into the distance.
+          ecefToGeodetic(parachutist.state.position, geo);
+          rebase(geo.lon, geo.lat);
+          placeAircraft();
+          placePilot();
+        } else if (tour) {
           rebase(showcase.geo.lon, showcase.geo.lat);
           flyShowcase(0);
         } else {
@@ -1312,6 +1463,21 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
           replayTime = 0;
           game.replay.value = shown.view();
         }
+      } else if (walker) {
+        walker.update(dt, parachutist);
+        pilotCam.update(dt, camera, walker.object, parachutist);
+        pilotHudTime += dt;
+        if (pilotHudTime >= 0.05) {
+          pilotHudTime = 0;
+          parachutist.view(pilotHud);
+          game.pilot.value = {
+            ...pilotHud,
+            canEnter: canEnter(parachutist, aircraft, env),
+            aircraftLost: !!aircraft.telemetry.crashed,
+          };
+        }
+        // A fall nobody stopped ends the flight: it starts again after a look at the place.
+        if (pilotDead >= 0 && (pilotDead += dt) > 4) actions.restart?.();
       } else if (wreck) circleWreck(wreck, dt);
       else if (!tour)
         rig.update(dt, camera, visual.object, visual.view, flying && !aircraft.telemetry.onGround);
@@ -1458,13 +1624,18 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       origin: { x: local.x, z: local.z },
     });
     // The shadow map covers the aircraft and the ground around it (the moon lights at night).
-    sky.sun.target.position.copy(visual.object.position);
-    sky.sun.position.copy(visual.object.position).addScaledVector(sky.state.lightDirection, 200);
+    const lit = (outside && pilotVisual ? pilotVisual : visual).object.position;
+    sky.sun.target.position.copy(lit);
+    sky.sun.position.copy(lit).addScaledVector(sky.state.lightDirection, 200);
     if (sky.sun.castShadow) {
       // The shadow map must reach the ground below the aircraft. Ground beyond its far plane
       // counts as shadowed, and the map's whole footprint shows as a dark square from high up.
       const shadow = sky.sun.shadow;
-      const agl = plan === null ? showcaseAgl : (flight?.aircraft.telemetry.agl ?? 0);
+      const agl = outside
+        ? parachutist.agl
+        : plan === null
+          ? showcaseAgl
+          : (flight?.aircraft.telemetry.agl ?? 0);
       const reach = 250 + (agl + 80) / Math.max(sky.state.lightDirection.y, 0.12);
       const far = debug.shadowReach ?? Math.min(Math.max(reach, 400), 30_000);
       if (Math.abs(far - shadow.camera.far) > 0.02 * far) {
@@ -1481,6 +1652,9 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     else {
       pipeline.render();
       drawnOnce = true;
+      // The pilot's figure has been drawn small a few times: its shaders, shadow pass
+      // included, are built, and a jump costs no stall.
+      if (pilotVisual && pilotWarm > 0 && --pilotWarm === 0) pilotVisual.setCompileMode(false);
       // The canvas can only be read in the frame that drew it.
       if (saveNext) {
         saveNext = false;

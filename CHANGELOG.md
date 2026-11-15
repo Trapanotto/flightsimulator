@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.0 – Schlanke Startseite und Absprung (2026-11-15)
+
+- **Startseite ist die Flugplanung:** kein Hauptmenü und kein 3D-Flug im Hintergrund mehr; die
+  Seite ist in unter einer Sekunde bereit. «Trapanotto Flight Simulator» steht als ein Titel.
+- **Karte** zeigt nur Flugplätze, die das gewählte Flugzeug nutzen kann.
+- **Flugzeugwahl** zeigt die Namen der Flugzeuge; die Infokarte darunter ist entfernt.
+- **Entfernt:** erweiterte Einstellungen des Flugstarts (mit ihnen die Szenarien), Hangar,
+  Flugbuch und Flugschule.
+- **Aussteigen und Abspringen (Taste X):** am Boden aussteigen und herumgehen, im Flug mit
+  dem Fallschirm abspringen, im Kampfjet der Schleudersitz. Der Schirm öffnet nie von selbst:
+  Leertaste zieht ihn, unter dem Schirm steuern A/D, S bremst, Leertaste kurz vor dem Boden
+  fängt ab. Das verlassene Flugzeug fliegt weiter. Neben dem stehenden Flugzeug steigt X
+  wieder ein; C wechselt zwischen Ich- und Aussenansicht.
+
 ## 1.0.3 (2026-11-15)
 
 - **Lenken am Boden:** Links und rechts (A/D, Pfeiltasten, Steuerknüppel) lenken am Boden
