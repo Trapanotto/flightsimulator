@@ -47,6 +47,7 @@ export {
   type ControlSpec,
 } from './cockpit';
 export { PC12_CONTROLS } from './cockpitPc12';
+export { A320_CONTROLS } from './cockpitA320';
 export type { FailureId, Failures, InstrumentTelemetry, SystemsTelemetry } from './systemsTypes';
 export type {
   AutopilotCommand,
