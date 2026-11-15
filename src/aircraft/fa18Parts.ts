@@ -309,7 +309,7 @@ export interface HudGeometry {
 export const HUD_GEOMETRY: HudGeometry = {
   distance: 4.56 - (3.9 - 0.004),
   offsetX: 0,
-  offsetY: -0.035,
+  offsetY: -0.012,
   width: 0.24,
   height: 0.22,
 };

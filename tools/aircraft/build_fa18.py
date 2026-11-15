@@ -84,7 +84,7 @@ def materials():
     m["exhaust_in"] = P("ExhaustInner", (0.12, 0.10, 0.09), 0.7, 0.6, double_sided=True)
     m["flame"] = P("Flame", (1.0, 0.6, 0.3), 0.5, alpha=0.5, emission=(1.0, 0.55, 0.2), strength=2,
                    double_sided=True)
-    m["formation"] = P("Lamp_Formation", (0.55, 0.6, 0.45), 0.6, emission=(0.75, 1.0, 0.55), strength=1)
+    m["formation"] = P("Lamp_Formation", (0.62, 0.66, 0.56), 0.6, emission=(0.75, 1.0, 0.55), strength=1)
     m["vapour_lex"] = P("VapourLex", (1, 1, 1), 0.9, alpha=0.2, double_sided=True)
     m["vapour_tip"] = P("VapourTip", (1, 1, 1), 0.9, alpha=0.2, double_sided=True)
     m["flight_suit"] = P("FlightSuit", (0.30, 0.31, 0.26), 0.85)

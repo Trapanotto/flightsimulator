@@ -176,7 +176,7 @@ class Fa18 extends AircraftModel {
     for (const m of this.materials as Set<Material>) {
       const s = m as MeshStandardMaterial;
       if (!lit.test(m.name) || !s.isMeshStandardMaterial) continue;
-      s.emissive = new Color().copy(s.color).lerp(nvis, 0.7);
+      s.emissive = new Color().copy(s.color).multiplyScalar(0.5).add(nvis.clone().multiplyScalar(0.1));
       s.emissiveIntensity = 0;
       this.cabinMaterials.push(s);
     }

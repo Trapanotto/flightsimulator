@@ -192,6 +192,8 @@ def displays(P):
     # Fuel and engine indicator under the left DDI.
     window(P, "IFEI", pp(0.165, 0.10, 0.012), PANEL_R)
     label(P, "IFEI", pp(0.165, 0.152, 0.012), 0.003, PANEL_R)
+    knob(P, "bingo", pp(0.238, 0.035, 0.012), PANEL_R, r=0.0055, length=0.009, shape="bingo")
+    label(P, "BINGO", pp(0.205, 0.035, 0.012), 0.0026, PANEL_R)
     # Standby instruments: airspeed, altimeter, attitude, vertical speed.
     s2 = 0.008
     for did, bl2, v2 in (("STBY_ASI", -0.125, 0.175), ("STBY_ALT", -0.205, 0.175), ("STBY_ADI", -0.125, 0.085),

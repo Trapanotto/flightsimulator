@@ -338,7 +338,7 @@ export function paintHud(c: Ctx, w: number, h: number, d: HudData, geom: HudGeom
       line(c, x0, y0, x0 + tx * 8 * k, y0 + ty * 8 * k, lw, col);
       const lx = x1 + s * ax * 16 * k;
       const ly = y1 + s * ay * 16 * k;
-      txt(c, String(Math.abs(e)), lx, ly, 15 * k, col);
+      txt(c, String(Math.abs(e)), lx, ly, 20 * k, col);
     }
   }
   // --- heading tape at the top ---
@@ -378,7 +378,7 @@ export function paintHud(c: Ctx, w: number, h: number, d: HudData, geom: HudGeom
   // --- airspeed and altitude boxes ---
   const boxY = h / 2 - 20 * k;
   boxed(c, w / 2 - 150 * k, boxY, 66 * k, 26 * k, lw * 0.8, col);
-  txt(c, String(Math.round(d.ias)), w / 2 - 150 * k, boxY + 1 * k, 19 * k, col);
+  txt(c, String(Math.round(d.ias)), w / 2 - 150 * k, boxY + 1 * k, 25 * k, col);
   boxed(c, w / 2 + 150 * k, boxY, 84 * k, 26 * k, lw * 0.8, col);
   txt(
     c,
@@ -388,20 +388,20 @@ export function paintHud(c: Ctx, w: number, h: number, d: HudData, geom: HudGeom
     19 * k,
     col,
   );
-  if (d.radar) txt(c, 'R', w / 2 + 202 * k, boxY + 1 * k, 17 * k, col);
-  txt(c, String(Math.round(d.vv / 10) * 10), w / 2 + 150 * k, boxY - 28 * k, 15 * k, col);
+  if (d.radar) txt(c, 'R', w / 2 + 202 * k, boxY + 1 * k, 22 * k, col);
+  txt(c, String(Math.round(d.vv / 10) * 10), w / 2 + 150 * k, boxY - 28 * k, 20 * k, col);
   // --- left column: angle of attack, Mach, g, peak g ---
   const lx = w / 2 - 172 * k;
-  txt(c, `α ${d.alpha.toFixed(1)}`, lx, h / 2 + 40 * k, 15 * k, col, 'left');
-  txt(c, `M ${formatMach(d.mach)}`, lx, h / 2 + 62 * k, 15 * k, col, 'left');
-  txt(c, `G ${formatG(d.g)}`, lx, h / 2 + 84 * k, 15 * k, col, 'left');
-  txt(c, formatG(d.peakG), lx + 24 * k, h / 2 + 106 * k, 15 * k, col, 'left');
+  txt(c, `α ${d.alpha.toFixed(1)}`, lx, h / 2 + 40 * k, 20 * k, col, 'left');
+  txt(c, `M ${formatMach(d.mach)}`, lx, h / 2 + 62 * k, 20 * k, col, 'left');
+  txt(c, `G ${formatG(d.g)}`, lx, h / 2 + 84 * k, 20 * k, col, 'left');
+  txt(c, formatG(d.peakG), lx + 24 * k, h / 2 + 106 * k, 20 * k, col, 'left');
   // --- right column: steering data ---
   if (d.steering) {
     const rx = w / 2 + 112 * k;
-    txt(c, `${d.steering.ident}`, rx, h / 2 + 62 * k, 15 * k, col, 'left');
-    txt(c, `${d.steering.rangeNm.toFixed(1)}`, rx, h / 2 + 84 * k, 15 * k, col, 'left');
-    txt(c, formatTimeToGo(d.steering.timeToGo), rx, h / 2 + 106 * k, 15 * k, col, 'left');
+    txt(c, `${d.steering.ident}`, rx, h / 2 + 62 * k, 20 * k, col, 'left');
+    txt(c, `${d.steering.rangeNm.toFixed(1)}`, rx, h / 2 + 84 * k, 20 * k, col, 'left');
+    txt(c, formatTimeToGo(d.steering.timeToGo), rx, h / 2 + 106 * k, 20 * k, col, 'left');
   }
   // --- bank scale at the bottom, pointer for the bank ---
   const bc = body(0, -8.5);
@@ -484,7 +484,7 @@ export function paintHud(c: Ctx, w: number, h: number, d: HudData, geom: HudGeom
   }
   // --- cautions and bingo, low in the field ---
   const lines = [...d.cautions.slice(0, 2), ...(d.bingo ? ['BINGO'] : [])];
-  lines.forEach((s, i) => txt(c, s, w / 2, h - 70 * k + i * 18 * k, 15 * k, col));
+  lines.forEach((s, i) => txt(c, s, w / 2, h - 70 * k + i * 18 * k, 20 * k, col));
   c.restore();
 }
 
@@ -646,7 +646,7 @@ function paintDdi(c: Ctx, w: number, h: number, page: DdiPage, d: Fa18Displays) 
       ];
       items.forEach(([a, b], i) => {
         const y = 70 * k + i * 27 * k;
-        txt(c, a, 70 * k, y, 17 * k, G, 'left');
+        txt(c, a, 70 * k, y, 21 * k, G, 'left');
         txt(c, b, w - 70 * k, y, 17 * k, a === 'GEAR' && b !== 'DOWN' ? '#fff' : G, 'right');
       });
       break;
@@ -673,7 +673,7 @@ function paintAdi(c: Ctx, w: number, h: number, d: Fa18Displays) {
   // Ground cross-hatched, sky plain: the monochrome ball.
   c.fillStyle = '#062a10';
   c.fillRect(-400 * k, 0, 800 * k, 800 * k);
-  line(c, -400 * k, 0, 400 * k, 0, 2.5 * k, G);
+  line(c, -400 * k, 0, 400 * k, 0, 2.6 * k, G);
   for (let e = -60; e <= 60; e += 5) {
     if (e === 0) continue;
     const y = -e * ppd;
@@ -681,7 +681,7 @@ function paintAdi(c: Ctx, w: number, h: number, d: Fa18Displays) {
     c.setLineDash(e < 0 ? [6 * k, 5 * k] : []);
     line(c, -half, y, half, y, 2 * k, G);
     c.setLineDash([]);
-    if (e % 10 === 0) txt(c, String(Math.abs(e)), half + 18 * k, y, 14 * k, G);
+    if (e % 10 === 0) txt(c, String(Math.abs(e)), half + 18 * k, y, 18 * k, G);
   }
   c.restore();
   c.strokeStyle = G;
@@ -691,9 +691,9 @@ function paintAdi(c: Ctx, w: number, h: number, d: Fa18Displays) {
   c.stroke();
   line(c, cx - 60 * k, cy, cx - 15 * k, cy, 4 * k, '#fff');
   line(c, cx + 15 * k, cy, cx + 60 * k, cy, 4 * k, '#fff');
-  txt(c, String(Math.round(d.ias)), 60 * k, cy, 20 * k, G);
-  txt(c, formatHudAltitude(d.alt), w - 62 * k, cy, 20 * k, G);
-  txt(c, formatHeading(d.heading), cx, 52 * k, 18 * k, G);
+  txt(c, String(Math.round(d.ias)), 60 * k, cy, 25 * k, G);
+  txt(c, formatHudAltitude(d.alt), w - 62 * k, cy, 25 * k, G);
+  txt(c, formatHeading(d.heading), cx, 52 * k, 22 * k, G);
 }
 
 /** The flight control system page: surface positions and X's where a channel has failed. */
@@ -702,9 +702,9 @@ function paintFcs(c: Ctx, w: number, _h: number, d: Fa18Displays) {
   const s = d.surfaces;
   const failed = new Set(d.fcsFailed);
   const cell = (x: number, y: number, title: string, v: number) => {
-    txt(c, title, x, y - 22 * k, 14 * k, G);
-    boxed(c, x, y + 2 * k, 66 * k, 26 * k, 1.5 * k, G);
-    txt(c, String(Math.round(v)), x, y + 3 * k, 18 * k, G);
+    txt(c, title, x, y - 22 * k, 18 * k, G);
+    boxed(c, x, y + 2 * k, 66 * k, 26 * k, 1.6 * k, G);
+    txt(c, String(Math.round(v)), x, y + 3 * k, 22 * k, G);
   };
   cell(110 * k, 110 * k, 'LEF', s.lef);
   cell(w - 110 * k, 110 * k, 'LEF', s.lef);
@@ -719,17 +719,17 @@ function paintFcs(c: Ctx, w: number, _h: number, d: Fa18Displays) {
   // The four channels of each column; X where failed.
   for (let ch = 1; ch <= 4; ch++) {
     const x = w / 2 - 75 * k + (ch - 1) * 50 * k;
-    txt(c, String(ch), x, 120 * k, 15 * k, G);
+    txt(c, String(ch), x, 120 * k, 19 * k, G);
     for (let r = 0; r < 4; r++) {
       const y = 150 * k + r * 34 * k;
       boxed(c, x, y, 30 * k, 22 * k, 1.2 * k, GD);
       if (failed.has(ch)) {
-        line(c, x - 12 * k, y - 9 * k, x + 12 * k, y + 9 * k, 2.5 * k, G);
-        line(c, x - 12 * k, y + 9 * k, x + 12 * k, y - 9 * k, 2.5 * k, G);
+        line(c, x - 12 * k, y - 9 * k, x + 12 * k, y + 9 * k, 2.6 * k, G);
+        line(c, x - 12 * k, y + 9 * k, x + 12 * k, y - 9 * k, 2.6 * k, G);
       }
     }
   }
-  txt(c, 'FCS', w / 2, 82 * k, 18 * k, G);
+  txt(c, 'FCS', w / 2, 82 * k, 22 * k, G);
 }
 
 function paintEngines(c: Ctx, w: number, _h: number, d: Fa18Displays, color: string) {
@@ -742,15 +742,15 @@ function paintEngines(c: Ctx, w: number, _h: number, d: Fa18Displays, color: str
     ['OIL PSI', (e) => String(Math.round(e.oil))],
     ['AB', (e) => (e.ab > 0.01 ? String(Math.round(e.ab * 100)) : '--')],
   ];
-  txt(c, 'L', 180 * k, 70 * k, 20 * k, color);
-  txt(c, 'R', w - 180 * k, 70 * k, 20 * k, color);
+  txt(c, 'L', 180 * k, 70 * k, 25 * k, color);
+  txt(c, 'R', w - 180 * k, 70 * k, 25 * k, color);
   rows.forEach(([name, f], i) => {
     const y = 115 * k + i * 54 * k;
-    txt(c, name, w / 2, y, 16 * k, color);
+    txt(c, name, w / 2, y, 20 * k, color);
     for (const [j, e] of d.engines.entries()) {
       const x = j === 0 ? 180 * k : w - 180 * k;
-      boxed(c, x, y, 92 * k, 34 * k, 1.5 * k, color);
-      txt(c, e.running || name === 'NOZ %' ? f(e) : '0', x, y + 1 * k, 22 * k, color);
+      boxed(c, x, y, 92 * k, 34 * k, 1.6 * k, color);
+      txt(c, e.running || name === 'NOZ %' ? f(e) : '0', x, y + 1 * k, 28 * k, color);
     }
   });
 }
@@ -773,10 +773,10 @@ function paintFuel(c: Ctx, w: number, _h: number, d: Fa18Displays, color: string
   c.lineTo(w / 2 - 40 * k, 160 * k);
   c.closePath();
   c.stroke();
-  txt(c, formatFuelLb(f.left), w / 2 - 110 * k, 255 * k, 20 * k, color);
-  txt(c, formatFuelLb(f.right), w / 2 + 110 * k, 255 * k, 20 * k, color);
-  txt(c, 'TOTAL', w / 2, 330 * k, 15 * k, color);
-  txt(c, formatFuelLb(f.total), w / 2, 356 * k, 24 * k, color);
+  txt(c, formatFuelLb(f.left), w / 2 - 110 * k, 255 * k, 25 * k, color);
+  txt(c, formatFuelLb(f.right), w / 2 + 110 * k, 255 * k, 25 * k, color);
+  txt(c, 'TOTAL', w / 2, 330 * k, 19 * k, color);
+  txt(c, formatFuelLb(f.total), w / 2, 356 * k, 30 * k, color);
   txt(
     c,
     `BINGO ${formatFuelLb(f.bingo)}`,
@@ -785,7 +785,7 @@ function paintFuel(c: Ctx, w: number, _h: number, d: Fa18Displays, color: string
     18 * k,
     f.total < f.bingo ? '#fff' : color,
   );
-  txt(c, `FF ${formatFuelLb(f.flow)} PPH`, w / 2, 485 * k, 15 * k, color);
+  txt(c, `FF ${formatFuelLb(f.flow)} PPH`, w / 2, 485 * k, 19 * k, color);
 }
 
 /**

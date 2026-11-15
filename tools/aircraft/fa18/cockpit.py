@@ -32,7 +32,7 @@ PANEL_HALF = 0.27
 # The head-up display: the combiner glass and the plane its symbols are drawn in (normal to the
 # boresight, so the picture can be computed for the eye point exactly).
 HUD_FS = 3.90
-HUD_CENTRE_WL = D.EYE[2] - 0.035
+HUD_CENTRE_WL = D.EYE[2] - 0.012
 HUD_GLASS_H = 0.215
 HUD_PLANE = (0.24, 0.22)
 
@@ -134,11 +134,11 @@ def glareshield(b):
     v = np.array([p for r in rows for p in r])
     b.add("glareshield", (v, M.grid_faces(len(us), len(prof))))
     # HUD: the projector body, the combiner frame (the glass is its own part).
-    hud_top = top[2] + 0.06
-    b.add("plastic_black", M.rounded_box((0, 3.64, hud_top + 0.035), (0.20, 0.22, 0.075), 0.015, 2))
-    b.add("plastic_black", M.rounded_box((0, 3.80, hud_top + 0.01), (0.24, 0.10, 0.03), 0.01, 2))
+    hud_top = top[2] + 0.03
+    b.add("plastic_black", M.rounded_box((0, 3.62, hud_top + 0.02), (0.20, 0.22, 0.05), 0.015, 2))
+    b.add("plastic_black", M.rounded_box((0, 3.82, hud_top - 0.005), (0.24, 0.12, 0.02), 0.008, 2))
     for dx in (0.128, -0.128):
-        b.add("panel", M.rounded_box((dx, HUD_FS, HUD_CENTRE_WL - 0.01), (0.012, 0.014, HUD_GLASS_H + 0.03), 0.004, 1))
+        b.add("panel", M.rounded_box((dx, HUD_FS, HUD_CENTRE_WL - 0.01), (0.008, 0.012, HUD_GLASS_H + 0.03), 0.003, 1))
     b.add("panel", M.rounded_box((0, HUD_FS, HUD_CENTRE_WL + HUD_GLASS_H / 2 + 0.004), (0.268, 0.014, 0.012),
                                  0.004, 1))
 
@@ -185,7 +185,7 @@ def seat(b):
 
 
 def stick(b):
-    base = np.array([0.0, 4.30, D.COCKPIT_FLOOR_WL + 0.03])
+    base = np.array([0.0, 4.16, D.COCKPIT_FLOOR_WL + 0.03])
     pitch = b.pivot("Stick", base, (1, 0, 0))
     roll = b.pivot("StickRoll", base, (0, -1, 0), parent=pitch)
     grip_top = base + np.array([0.0, 0.05, 0.40])
@@ -219,11 +219,11 @@ def pedals(b):
 
 
 def mirrors(b):
-    for bl, fs in ((0.22, 4.15), (0.0, 4.13), (-0.22, 4.15)):
+    for bl, fs in ((0.20, 4.16), (0.0, 4.14), (-0.20, 4.16)):
         top = float(F.KEY(F.TOP, fs))
-        wl = top - 0.07 if bl == 0 else top - 0.14
-        b.add("chrome", M.rounded_box((bl, fs + 0.035, wl), (0.075, 0.006, 0.026), 0.004, 1))
-        b.add("plastic_black", M.rounded_box((bl, fs + 0.03, wl), (0.082, 0.005, 0.032), 0.005, 1))
+        wl = top - 0.05 if bl == 0 else top - 0.10
+        b.add("chrome", M.rounded_box((bl, fs + 0.035, wl), (0.06, 0.005, 0.02), 0.003, 1))
+        b.add("plastic_black", M.rounded_box((bl, fs + 0.03, wl), (0.066, 0.004, 0.026), 0.004, 1))
 
 
 def build(col, mats, root):

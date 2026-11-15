@@ -270,7 +270,6 @@ const fake = {
   name: 'climb-turn',
   n2: [0, 0],
   ab: [0, 0],
-  canopy: 0,
   hook: 0,
   peakG: 1,
   lon: 7.0,
@@ -294,7 +293,6 @@ export function setup(
   fake.name = name;
   fake.n2 = t.engines.map((e) => e.n2 ?? 0);
   fake.ab = t.engines.map((e) => e.afterburner ?? 0);
-  fake.canopy = running ? 0 : 1;
   if (running) {
     for (const id of [
       'battery',
@@ -336,7 +334,10 @@ export function setup(
     if (running) panel.set('lightFormation', 0.6);
   }
   if (q.has('hook')) panel.set('hook', Number(q.get('hook')));
-  if (q.has('canopy')) fake.canopy = Number(q.get('canopy'));
+  // ?pages=left,right,mpcd: the display pages by index (FA18_CONTROLS' positions).
+  const pages = q.get('pages')?.split(',').map(Number);
+  if (pages?.length === 3) for (const [i, id] of ['ddiLeftPage', 'ddiRightPage', 'mpcdPage'].entries()) panel.set(id, pages[i]!);
+  if (q.has('canopy')) panel.set('canopy', Number(q.get('canopy')));
   if (name === 'takeoff' || name === 'ramp') panel.set('flaps', 1);
 }
 

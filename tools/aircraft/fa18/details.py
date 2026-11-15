@@ -158,7 +158,7 @@ def pilot(col, mats):
     neck = np.array([0.0, 4.73, 2.68])
     body.append(M.tube_path([hip, 0.5 * (hip + neck) + np.array([0, 0.02, 0]), neck], [0.16, 0.19, 0.12], 14))
     # Right hand on the stick, left hand on the throttles.
-    for side, hand in ((1, np.array([0.36, 4.50, 2.42])), (-1, np.array([0.0, 4.33, 2.46]))):
+    for side, hand in ((1, np.array([0.36, 4.50, 2.42])), (-1, np.array([0.0, 4.22, 2.44]))):
         sh = neck + np.array([side * 0.19, 0.03, -0.06])
         el = np.array([side * 0.24, 4.60, 2.32])
         body.append(M.tube_path([sh, el, hand], [0.06, 0.05, 0.04], 10))
