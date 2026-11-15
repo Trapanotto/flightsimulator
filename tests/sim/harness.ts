@@ -209,4 +209,46 @@ export class Leaner {
   }
 }
 
+/**
+ * Feet on the pedals as the app's rudder helper gives them to keyboard pilots
+ * (src/app/assist.ts): on the ground they hold the heading of the start of the roll, in the
+ * air they centre the ball. In the air this adds what the helper lacks, a slow integral that
+ * holds the steady rudder the engine asks for (P-factor, swirl on the fin). A foot that is
+ * only proportional to the sideslip needs a sideslip to hold that rudder, and the sideslip
+ * rolls the aircraft through its dihedral effect.
+ */
+export class RudderFeet {
+  private hold: number | undefined;
+  private bias = 0;
+  private command = 0;
+  constructor(
+    private readonly ac: SimAircraft,
+    private readonly integral = 1,
+  ) {}
+  step(dt: number) {
+    const t = this.ac.telemetry;
+    let want = 0;
+    if (t.onGround) {
+      if (t.groundSpeed < 1) {
+        this.hold = t.headingDeg;
+        this.bias = 0;
+      } else {
+        this.hold ??= t.headingDeg;
+        const error = headingError(this.hold, t.headingDeg);
+        this.bias = clamp(this.bias + 0.5 * error * dt, -0.7, 0.7);
+        const k = clamp(20 / t.groundSpeed, 0.2, 1);
+        const rate = this.ac.state.angularVelocity.z / DEG;
+        want = clamp(k * (0.35 * error - 0.08 * rate) + this.bias, -1, 1);
+      }
+    } else {
+      if (this.hold !== undefined) this.bias = 0;
+      this.hold = undefined;
+      this.bias = clamp(this.bias + this.integral * t.beta * dt, -0.6, 0.6);
+      want = clamp(4 * t.beta + this.bias, -1, 1);
+    }
+    this.command += clamp(want - this.command, -4 * dt, 4 * dt);
+    this.ac.controls.yaw = this.command;
+  }
+}
+
 export { isa, SIM_DT };

@@ -491,7 +491,13 @@ export const PC12: AircraftDefinition = {
     flapRate: (40 * DEG) / 14,
     surfaceRate: 3,
     holdLimitPressure: 9000,
-    aileronRigging: 0,
+    // The PT6's shaft torque at take-off power (about 5000 N m) rolls the aircraft left; the
+    // slipstream swirl straightened by the wing roots gives back only a fifth of it. A
+    // single turboprop is rigged so that neutral aileron trim (its take-off mark) leaves
+    // nothing to hold in the climb at Vy and maximum power with the ball centred: about 1°
+    // of aileron. Slower, the same torque needs more aileron than the rigging gives (the
+    // torque roll after lift-off); at cruise power the aileron trim takes out the excess.
+    aileronRigging: 0.058,
     rudderRigging: 0.06,
     stallShift: 0.2,
     flapDrag: 0.12,
