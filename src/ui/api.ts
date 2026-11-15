@@ -155,6 +155,32 @@ export interface UiActions {
   photoSet?(patch: Partial<PhotoSettings>): void;
   /** Saves the picture as it is on the screen, without the interface, as a PNG download. */
   photoSave?(): void;
+
+  // ---- leaving the aircraft (1.1) ----
+  /**
+   * In the aircraft: get out (standing on the ground), jump with the parachute (in flight), or
+   * fire the ejection seat (the fighter). Outside, standing next to the aircraft: get back in.
+   * Key B. `game.pilot` becomes non-null while the pilot is outside.
+   */
+  leaveAircraft?(): void;
+  /** In free fall: pull the parachute. Under the canopy near the ground: flare. Key Space. */
+  pullChute?(): void;
+}
+
+/** The pilot outside the aircraft (1.1): falling, under the canopy, or on foot. */
+export interface PilotView {
+  state: 'freefall' | 'canopy' | 'walk';
+  /** Height above the ground, metres. */
+  agl: number;
+  /** Speed over the ground and vertical speed (positive up), m/s. */
+  speed: number;
+  verticalSpeed: number;
+  /** Heading the pilot faces or flies, degrees true. */
+  headingDeg: number;
+  /** Standing close enough to the (intact, stopped) aircraft to get back in. */
+  canEnter: boolean;
+  /** The aircraft left behind is destroyed: only a new flight helps. */
+  aircraftLost: boolean;
 }
 
 /** A text in both languages; the interface shows the one of the current language. */
@@ -391,6 +417,11 @@ export const game = {
   canReplay: signal(false),
   /** The photo settings while `screen` is 'photo', else null. */
   photo: signal<PhotoSettings | null>(null),
+  /**
+   * The pilot outside the aircraft, refreshed about 20 times a second; null while seated.
+   * `screen` stays 'flight'. `game.telemetry` goes on describing the aircraft left behind.
+   */
+  pilot: signal<PilotView | null>(null),
 };
 
 /** A frequency to expect on the flight (phase 3, briefing). */
