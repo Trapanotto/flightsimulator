@@ -39,6 +39,14 @@ import {
 } from './speeds';
 import type { SystemsState } from './systems';
 
+/**
+ * Take-off trim, rad: the stabiliser that leaves the elevator neutral at V2 + 10 in CONF
+ * 1+F, about 3.7° nose up over the mass range at this airframe's centre of gravity (from its
+ * trim at V2 + 10, 50 to 73.5 t). The crew sets it from the load sheet; a running start
+ * finds it set.
+ */
+const TAKEOFF_TRIM = 3.7 * DEG;
+
 const G = 9.80665;
 /** C*'s crossover speed: below it the pitch rate dominates what the stick asks for, m/s. */
 const V_CROSSOVER = 120;
@@ -77,6 +85,11 @@ export class FlyByWire {
   private alphaFloor = false;
   private slatPosition = 0;
   private nCommand = 1;
+  private attitudeHold = 0;
+  private derotating = false;
+  private derotationIntegral = 0;
+  private wasAirborne = false;
+  private lastElevator = 0;
   /** The sidestick asks for alpha above alpha prot (the flight guidance's alpha floor needs it). */
   alphaFloorActive = false;
 
@@ -103,6 +116,9 @@ export class FlyByWire {
     this.decel = 0;
     this.alphaFloor = false;
     this.alphaFloorActive = false;
+    this.derotating = false;
+    this.wasAirborne = false;
+    this.lastElevator = 0;
   }
 
   step(ctx: ControlLawContext, out: SurfaceCommand, sys: SystemsState, report: AirbusControls) {
@@ -125,7 +141,12 @@ export class FlyByWire {
     const normal = sys.adirsAligned && sys.dcEssPowered && hyd >= 2;
     const law = normal ? 'normal' : 'direct';
     if (Number.isNaN(this.ths)) {
-      // The first step after a reset: in the air the flight law is already flying.
+      // The first step after a reset: in the air the flight law is already flying; on the
+      // ground the crew has set the take-off trim (unless the wheel was set otherwise).
+      if (onGround && ctx.controls.pitchTrim === 0) {
+        const tt = TAKEOFF_TRIM;
+        ctx.controls.pitchTrim = tt >= 0 ? tt / c.trimUp : tt / c.trimDown;
+      }
       this.ths = this.trimWheel(ctx);
       if (!onGround) this.groundBlend = 1;
       this.nCommand = 1;
@@ -152,17 +173,48 @@ export class FlyByWire {
     report.highSpeedProtection = false;
     report.pitchLimit = false;
     const direct = pitch >= 0 ? pitch * c.elevatorUp : pitch * c.elevatorDown;
-    if (blend <= 0 || !inFlight) {
+    // Touch-down: the law lowers the nose at about 2°/s (the pilot's stick adds or takes
+    // away), so the nose gear is put on the runway rather than dropped.
+    if (onGround && !this.derotating && this.wasAirborne && t.pitch > 1 * DEG && law === 'normal') {
+      this.derotating = true;
+      this.derotationIntegral = this.lastElevator;
+    }
+    if (!onGround) this.wasAirborne = this.airTime > 1;
+    if (
+      this.derotating &&
+      (!onGround || t.pitch < 0.3 * DEG || this.groundTime > 10 || law !== 'normal')
+    )
+      this.derotating = false;
+    if (this.derotating) {
+      const qTarget = -2 * DEG + pitch * 4 * DEG;
+      const e = qTarget - w.y;
+      this.derotationIntegral = clamp(
+        this.derotationIntegral + 3 * gain * e * dt,
+        -c.elevatorDown,
+        c.elevatorUp,
+      );
+      elevator = this.derotationIntegral + 1.5 * gain * e;
+      this.integral = 0;
+      this.nCommand = t.loadFactor;
+      this.flare = false;
+      this.alphaMode = false;
+      this.wasAirborne = false;
+    } else if (blend <= 0 || !inFlight) {
       elevator = direct;
-      this.integral = direct;
+      // At lift-off the flight law starts from the trimmed elevator and the attitude flown.
+      this.integral = 0;
+      this.attitudeHold = t.pitch;
       this.nCommand = t.loadFactor;
       this.alphaMode = false;
       this.flare = false;
       // On the ground and in direct law the trim wheel sets the stabiliser.
       this.ths = this.trimWheel(ctx);
     } else {
-      const law = this.pitchLaw(ctx, config, pitch, ias, apEngaged, gain, report);
-      elevator = blend * law + (1 - blend) * direct;
+      // The blend after lift-off (about 5 s): the stick's own deflection fades out of the
+      // elevator while the law takes over its load factor demand. Hands off, the law holds
+      // the attitude at first and the flight path by the end; it never lets the nose fall.
+      const law = this.pitchLaw(ctx, config, pitch * blend, ias, apEngaged, gain, report, blend);
+      elevator = law + (1 - blend) * direct;
       protectedBank = report.alphaProtection || report.highSpeedProtection;
       // Automatic trim: the stabiliser takes over what the elevator holds.
       const trimmable =
@@ -181,6 +233,7 @@ export class FlyByWire {
       }
     }
     out.elevator = clamp(elevator, -c.elevatorDown, c.elevatorUp);
+    this.lastElevator = out.elevator;
     out.stabiliser = this.ths;
     // The trim wheels turn with the stabiliser.
     ctx.controls.pitchTrim = this.ths >= 0 ? this.ths / c.trimUp : this.ths / c.trimDown;
@@ -278,6 +331,7 @@ export class FlyByWire {
     apEngaged: boolean,
     gain: number,
     report: AirbusControls,
+    blend: number,
   ): number {
     const t = ctx.telemetry;
     const c = this.def.controls;
@@ -332,6 +386,13 @@ export class FlyByWire {
     if (this.alphaMode && (stick < -0.5 || (alpha < prot - 2 * DEG && stick <= 0.05)))
       this.alphaMode = false;
     let nTarget = nRef + dn;
+    // In the blend after lift-off, hands off: the attitude memorised (as the stick last left
+    // it), going over to the flight path as the blend ends.
+    if (Math.abs(stick) > 0.02 || blend >= 1) this.attitudeHold = theta;
+    else {
+      const hold = Math.cos(gamma) + ((V / G) * (this.attitudeHold - theta)) / 2;
+      nTarget = blend * nTarget + (1 - blend) * hold;
+    }
     // Lift per angle of attack, in g per rad: what an angle error costs in load factor.
     const mass = this.def.mass + t.fuel;
     const nAlpha = (5.2 * ctx.q * 122.6) / (mass * G);
