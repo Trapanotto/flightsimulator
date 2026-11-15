@@ -57,9 +57,7 @@ def main(col, mats, parts, side, sfx):
     ax = turn_axis(pv, (1.0, 0, 0), knee, np.array([0, 1.0, -0.2]))
     gear = M.empty(f"MainGear_{sfx}", col, M.P(*pv), props={"axis": M.model_axis(*ax), "retractDeg": D.MAIN_RETRACT_DEG})
     leg = [M.cylinder(pv - np.array([side * 0.12, 0, 0]), pv + np.array([side * 0.10, 0, 0]), 0.06, 14),
-           M.tube_path([pv, knee + np.array([0, 0, 0.05])], [0.085, 0.075], 16),
-           # The folded side brace along the leg (it lies flat with the leg in the well).
-           M.tube_path([knee + np.array([-side * 0.06, 0.0, 0.30]), pv + np.array([-side * 0.08, 0.06, -0.12])], 0.028, 10)]
+           M.tube_path([pv, knee + np.array([0, 0, 0.05])], [0.085, 0.075], 16)]
     o = M.make_object(f"MainLeg_{sfx}", *M.merge(leg), col, mats["gear_paint"], sharp_angle=40, origin=M.P(*pv))
     M.parent_keep(o, gear)
     strut = (knee - axle_strut) / np.linalg.norm(knee - axle_strut)
