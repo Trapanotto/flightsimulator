@@ -93,6 +93,8 @@ export interface AutopilotTelemetry {
   autothrottle?: { engaged: boolean; mode: 'speed' | 'thrust' | 'idle' | 'off' };
   /** Phase 4: go-around mode: wings level and the go-around pitch on the flight director. */
   goAround?: boolean;
+  /** F/A-18 block: the modes as the HUD annunciates them ('ATT', 'HSEL', 'BALT', 'RALT', 'CPL WYPT', 'CPL TCN', 'CPL ILS', 'ATC'). */
+  annunciations?: string[];
 }
 
 export interface GpsTelemetry {
