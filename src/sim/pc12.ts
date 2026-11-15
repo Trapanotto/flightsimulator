@@ -491,7 +491,13 @@ export const PC12: AircraftDefinition = {
     flapRate: (40 * DEG) / 14,
     surfaceRate: 3,
     holdLimitPressure: 9000,
-    aileronRigging: 0,
+    // The PT6's shaft torque at take-off power (about 5000 N m) rolls the aircraft left; the
+    // slipstream swirl straightened by the wing roots gives back only a fifth of it. A
+    // single turboprop is rigged so that neutral aileron trim (its take-off mark) leaves
+    // nothing to hold in the climb at Vy and maximum power with the ball centred: about 1°
+    // of aileron. Slower, the same torque needs more aileron than the rigging gives (the
+    // torque roll after lift-off); at cruise power the aileron trim takes out the excess.
+    aileronRigging: 0.058,
     rudderRigging: 0.06,
     stallShift: 0.2,
     flapDrag: 0.12,
@@ -535,6 +541,10 @@ export const PC12: AircraftDefinition = {
       // CS 23.473 designs the gear for a 10 ft/s sink at landing mass; it breaks only well
       // beyond that (ultimate 1.5 times the limit, and the nose strut takes a nose-low arrival).
       breakingForce: 120_000,
+      // Oleo struts: orifice damping sized for that 10 ft/s, gentle below it, and a recoil
+      // orifice that does not throw the aircraft back off a firm touch-down.
+      orificeSpeed: 3,
+      rebound: 3,
     },
     {
       name: 'left',
@@ -545,6 +555,8 @@ export const PC12: AircraftDefinition = {
       brake: 'left',
       brakeForce: 2_900,
       breakingForce: 180_000,
+      orificeSpeed: 3,
+      rebound: 3,
     },
     {
       name: 'right',
@@ -555,6 +567,8 @@ export const PC12: AircraftDefinition = {
       brake: 'right',
       brakeForce: 2_900,
       breakingForce: 180_000,
+      orificeSpeed: 3,
+      rebound: 3,
     },
   ],
   contacts: [

@@ -37,6 +37,17 @@ export interface TurbofanData {
   temperatureLapse: number;
   /** Thrust lapse with Mach at full power, F ∝ (1 - k √M) (0.49 for a high-bypass fan, 0 low bypass). */
   machLapse: number;
+  /**
+   * Thrust lost where the air at the engine face is thin and cold: below a Reynolds number
+   * index RNI = δ / θ^1.2 (total conditions, 1 at sea level static) of `index`, the full-power
+   * thrust falls in proportion to (1 - RNI / index), by `loss` at RNI 0. The blades' boundary
+   * layers thicken at a low Reynolds number and the compressors lose flow and efficiency
+   * (P. P. Walsh and P. Fletcher, Gas Turbine Performance, 2nd ed., 2004, section 7.4); the
+   * fixed power and bleed taken off the engine also weigh more on its smaller thrust. The
+   * pressure-ratio lapse above leaves both out, which is why it carries a fighter too high at
+   * low speed (reconstructed against the published ceiling where no engine deck is in hand).
+   */
+  reynolds?: { index: number; loss: number };
   /** Fan speed at 100 %, rpm (for `rpm`), and the spools' speeds at full and idle power, per cent. */
   n1Rpm: number;
   n1Max: number;
@@ -187,6 +198,11 @@ export class TurbofanPowerplant implements Powerplant {
     const d = this.def.engine;
     let a = deltaT * (1 - d.machLapse * Math.sqrt(Math.max(0, input.mach)));
     if (thetaT > d.throttleRatio) a *= 1 - (k * (thetaT - d.throttleRatio)) / thetaT;
+    const re = d.reynolds;
+    if (re) {
+      const index = deltaT / thetaT ** 1.2;
+      if (index < re.index) a *= 1 - re.loss * (1 - index / re.index);
+    }
     return Math.max(0, a);
   }
 

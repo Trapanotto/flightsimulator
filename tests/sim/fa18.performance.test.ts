@@ -74,17 +74,15 @@ describe('F/A-18C published performance', () => {
     between('time to 30 000 ft (s)', P.timeToClimb(30_000).seconds, 50, 80);
   }, 60_000);
 
-  it('has a service ceiling above the published 50 000 ft, within 11 % (100 ft/min of excess power)', () => {
-    // Outside the 5 % target: the model's ceiling is about 55 000 ft. Bringing it down needs
-    // drag due to lift that grows with Mach (Korn's divergence falling with lift coefficient)
-    // or an engine lapse at high altitude beyond the pressure ratio; the core has neither,
-    // and every drag setting of this type's own data that would do it costs the sea-level
-    // climb or the sustained turn instead. (50 000 ft may also be the operating limit.)
-    const a = P.excessPower(50_000, 0.9).ps;
-    const b = P.excessPower(55_000, 0.9).ps;
+  it('has the published service ceiling of 50 000 ft (100 ft/min of excess power)', () => {
+    // Full afterburner at Mach 0.9, the best subsonic climb up there; the ceiling interpolated
+    // between 45 000 and 50 000 ft. The pressure-ratio lapse alone carried it to 55 300 ft:
+    // the F404's Reynolds number loss at altitude (src/sim/fa18.ts) brings it down.
+    const a = P.excessPower(45_000, 0.9).ps;
+    const b = P.excessPower(50_000, 0.9).ps;
     const fpm = (ps: number) => (ps * 60) / 0.3048;
-    const ceiling = 50_000 + (5000 * (fpm(a) - 100)) / (fpm(a) - fpm(b));
-    between('service ceiling (ft)', ceiling, 50_000, 55_500);
+    const ceiling = 45_000 + (5000 * (fpm(a) - 100)) / (fpm(a) - fpm(b));
+    within('service ceiling (ft)', ceiling, 50_000, 0.04);
   }, 60_000);
 
   it('has the specific excess power of its class (reconstructed)', () => {
