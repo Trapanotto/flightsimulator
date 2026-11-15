@@ -1995,6 +1995,8 @@ export class FlightModel implements SimAircraft {
     const x = [4 * DEG, 0, 0.6];
     const r = [0, 0, 0];
     const r2 = [0, 0, 0];
+    const limit = [3 * DEG, 3 * DEG, 0.3];
+    const last = [0, 0, 0];
     for (let iter = 0; iter < 30; iter++) {
       residual(x, r);
       if (Math.abs(r[0]!) + Math.abs(r[1]!) + Math.abs(r[2]!) < 1e-7) break;
@@ -2007,8 +2009,14 @@ export class FlightModel implements SimAircraft {
         for (let i = 0; i < 3; i++) J[i]![j] = (r2[i]! - r[i]!) / steps[j]!;
       }
       const dx = solve3(J, r);
-      const limit = [3 * DEG, 3 * DEG, 0.3];
-      for (let j = 0; j < 3; j++) x[j]! -= clamp(dx[j]!, -limit[j]!, limit[j]!);
+      for (let j = 0; j < 3; j++) {
+        const step = clamp(dx[j]!, -limit[j]!, limit[j]!);
+        // A kinked response (an engine control's lever detent) makes Newton jump to and fro
+        // across the kink: each reversal halves the step allowed from then on.
+        if (step * last[j]! < 0) limit[j] = Math.min(limit[j]!, Math.abs(last[j]!) / 2);
+        last[j] = step;
+        x[j]! -= step;
+      }
       x[0] = clamp(x[0]!, -10 * DEG, 25 * DEG);
       x[1] = clamp(x[1]!, trimLo, trimHi);
     }

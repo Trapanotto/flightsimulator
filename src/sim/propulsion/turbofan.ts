@@ -359,7 +359,9 @@ export class TurbofanPowerplant implements Powerplant {
     }
     this.output(input, thetaT, deltaT, sq);
     const asked = this.lit ? this.dryLever(input) : 0;
-    const got = (this.n1For(this.n2) - d.n1Idle) / (d.n1Max - d.n1Idle);
+    // The control holds a corrected fan speed: compare corrected with corrected, or a cold
+    // high altitude (θ below 1) looks like a shortfall that is not there.
+    const got = (this.n1For(this.n2) / Math.min(sq, 1.05) - d.n1Idle) / (d.n1Max - d.n1Idle);
     this.shortfall = Math.max(0, asked - got);
     this.finish();
   }
