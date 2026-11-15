@@ -511,6 +511,7 @@ export const PC12: AircraftDefinition = {
     pusher: [8.9 * DEG, 6.5 * DEG, 4.8 * DEG, 3.6 * DEG],
     push: 0.8,
     release: 4 * DEG,
+    inhibit: 3,
   },
   yawDamper: { gain: 0.9, washout: 2 },
   limits: {
@@ -529,9 +530,11 @@ export const PC12: AircraftDefinition = {
       position: v(4.4, 0, 1.95),
       travel: 0.22,
       spring: 70_000,
-      damper: 8_000,
+      damper: 12_000,
       steering: 15 * DEG,
-      breakingForce: 60_000,
+      // CS 23.473 designs the gear for a 10 ft/s sink at landing mass; it breaks only well
+      // beyond that (ultimate 1.5 times the limit, and the nose strut takes a nose-low arrival).
+      breakingForce: 120_000,
     },
     {
       name: 'left',
@@ -541,7 +544,7 @@ export const PC12: AircraftDefinition = {
       damper: 20_000,
       brake: 'left',
       brakeForce: 2_900,
-      breakingForce: 130_000,
+      breakingForce: 180_000,
     },
     {
       name: 'right',
@@ -551,7 +554,7 @@ export const PC12: AircraftDefinition = {
       damper: 20_000,
       brake: 'right',
       brakeForce: 2_900,
-      breakingForce: 130_000,
+      breakingForce: 180_000,
     },
   ],
   contacts: [
@@ -597,8 +600,23 @@ export const PC12: AircraftDefinition = {
       reason: 'ground',
       skid: true,
     },
-    { name: 'left-wingtip', position: v(-0.2, -HALF_SPAN, 0.12), crashSpeed: 0, reason: 'wing' },
-    { name: 'right-wingtip', position: v(-0.2, HALF_SPAN, 0.12), crashSpeed: 0, reason: 'wing' },
+    // A wing tip that touches the runway gently scrapes its fairing; hit hard, it is a wreck.
+    {
+      name: 'left-wingtip',
+      position: v(-0.2, -HALF_SPAN, 0.12),
+      crashSpeed: 4,
+      maxDepth: 0.5,
+      reason: 'wing',
+      skid: true,
+    },
+    {
+      name: 'right-wingtip',
+      position: v(-0.2, HALF_SPAN, 0.12),
+      crashSpeed: 4,
+      maxDepth: 0.5,
+      reason: 'wing',
+      skid: true,
+    },
     { name: 'tail', position: v(-6.4, 0, 1.0), crashSpeed: 6, maxDepth: 0.8, reason: 'tail' },
     { name: 'fin-top', position: v(-7.8, 0, -2.6), crashSpeed: 0, reason: 'ground' },
   ],

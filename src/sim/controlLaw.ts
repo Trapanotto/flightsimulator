@@ -90,7 +90,8 @@ export function trimAngle(def: AircraftDefinition, trim: number): number {
 export class DirectLaw implements ControlLaw {
   shaker = false;
   pusher = false;
-  private pushTime = 0;
+  /** Seconds since the wheels left the ground (the pusher waits). */
+  private airborne = Infinity;
   private yawRateLow = 0;
 
   constructor(readonly def: AircraftDefinition) {}
@@ -98,7 +99,8 @@ export class DirectLaw implements ControlLaw {
   reset() {
     this.shaker = false;
     this.pusher = false;
-    this.pushTime = 0;
+    // A start in the air is long past its lift-off; a ground start resets it on the wheels.
+    this.airborne = Infinity;
     this.yawRateLow = 0;
   }
 
@@ -137,7 +139,9 @@ export class DirectLaw implements ControlLaw {
   private stallProtection(ctx: ControlLawContext, out: SurfaceCommand) {
     const sp = this.def.stallProtection;
     if (!sp) return;
-    const on = ctx.stallProtection && !ctx.telemetry.onGround;
+    const ground = ctx.telemetry.onGround;
+    this.airborne = ground ? 0 : this.airborne + ctx.dt;
+    const on = ctx.stallProtection && !ground;
     const detents = sp.pusher.length - 1;
     const x = clamp(ctx.telemetry.flaps, 0, 1) * detents;
     const i = Math.min(Math.floor(x), detents - 1);
@@ -146,18 +150,17 @@ export class DirectLaw implements ControlLaw {
     const push = sp.pusher[i]! + (sp.pusher[i + 1]! - sp.pusher[i]!) * f;
     const a = ctx.vaneAlpha;
     this.shaker = on && a > shake;
-    if (on && a > push) {
-      this.pusher = true;
-      this.pushTime = 0;
-    } else if (this.pusher) {
-      this.pushTime += ctx.dt;
-      // Held for at least a second, until the angle is well back.
-      if (!on || (a < push - sp.release && this.pushTime > 1)) this.pusher = false;
-    }
+    // Inhibited on the ground and just after lift-off: a rotation's pitch rate must not fire
+    // it a few feet above the runway.
+    const armed = on && this.airborne > sp.inhibit;
+    if (armed && a > push) this.pusher = true;
+    else if (!armed || a < push - sp.release) this.pusher = false;
     if (this.pusher) {
-      // The pusher's servo overpowers the pilot's pull.
+      // It pushes as hard as the angle over its release point asks, up to its full force,
+      // which overpowers the pilot's pull: enough to unload the wing, never a dive.
+      const share = clamp((a - (push - sp.release)) / sp.release, 0, 1);
       const down = -sp.push * this.def.controls.elevatorDown;
-      out.elevator = Math.min(out.elevator, down);
+      out.elevator = Math.min(out.elevator, out.elevator + (down - out.elevator) * share);
     }
   }
 

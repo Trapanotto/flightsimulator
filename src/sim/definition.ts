@@ -137,6 +137,8 @@ export interface StallProtection {
   /** Elevator share of nose-down travel the pusher drives to. */
   push: number;
   /** It lets go once the vane angle is this much below the pusher angle, rad. */
+  /** Seconds after lift-off before it is armed (it is always off on the ground). */
+  inhibit: number;
   release: number;
 }
 
