@@ -1,5 +1,5 @@
 // Optimises the Blender export for the web: dedupe, prune, meshopt geometry compression.
-// Usage: node tools/aircraft/optimize.mjs [in=build/aircraft/c172_raw.glb] [out=public/assets/aircraft/c172.glb]
+// Usage: node tools/aircraft/optimize.mjs [in=build/aircraft/c172_raw.glb] [out=public/assets/aircraft/c172.glb] [limit MB=4]
 // Run by tools/aircraft/build_c172.py after the export.
 import { statSync } from 'node:fs';
 import { NodeIO } from '@gltf-transform/core';
@@ -7,10 +7,13 @@ import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { dedup, meshopt, prune } from '@gltf-transform/functions';
 import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 
-const [input = 'build/aircraft/c172_raw.glb', output = 'public/assets/aircraft/c172.glb'] =
-  process.argv.slice(2);
-/** The aircraft budget (phase 1 brief): about 4 MB including textures. */
-const LIMIT_MB = 4.0;
+const [
+  input = 'build/aircraft/c172_raw.glb',
+  output = 'public/assets/aircraft/c172.glb',
+  limit = '4',
+] = process.argv.slice(2);
+/** The aircraft budget (phase 1 brief): about 4 MB including textures; a type may set less. */
+const LIMIT_MB = Number(limit);
 
 await MeshoptEncoder.ready;
 await MeshoptDecoder.ready;

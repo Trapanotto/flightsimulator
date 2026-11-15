@@ -42,12 +42,20 @@ def copy_tree(src, parent, suffix, col, keep, ratio_of):
     return dst
 
 
-def build_lods(lod0_root, col):
-    """LOD1: exterior and a token cabin, decimated. LOD2: one static mesh per material."""
+CABIN_KEEP = ("Cockpit", "CabinLining", "Cabin_fabric", "Cabin_panel", "Cabin_glareshield")
+DROP1 = ("Fittings", "Antennas", "Lens_", "Glow_", "Eye", "Exhaust")
+
+
+def build_lods(lod0_root, col, cabin_keep=CABIN_KEEP, drop1=DROP1, ratio1=None, ratio2=0.20,
+               lod2_movable=(), lod2_ratio=0.35, glass2=0.4):
+    """
+    LOD1: exterior and a token cabin, decimated. LOD2: one static mesh per material, plus the
+    subtrees named in `lod2_movable` (gear legs that retract) copied as their own nodes with
+    the suffix _lod2, so they can still move.
+    """
     report = {}
     cockpit = bpy.data.objects["Cockpit"]
-    cabin_keep = {"Cockpit", "CabinLining", "Cabin_fabric", "Cabin_panel", "Cabin_glareshield"}
-    drop1 = ("Fittings", "Antennas", "Lens_", "Glow_", "Eye", "Exhaust")
+    cabin_keep = set(cabin_keep)
 
     def under_cockpit(o):
         p = o
@@ -64,7 +72,7 @@ def build_lods(lod0_root, col):
             return o.name in cabin_keep
         return True
 
-    def ratio1(o):
+    def default_ratio1(o):
         n = M.tri_count(o)
         if o.name in ("PropDisc",) or o.name.startswith("Lamp_"):
             return 1.0
@@ -74,13 +82,25 @@ def build_lods(lod0_root, col):
             return 0.35
         return 0.5
 
-    lod1 = copy_tree(lod0_root, None, "_lod1", col, keep1, ratio1)
+    lod1 = copy_tree(lod0_root, None, "_lod1", col, keep1, ratio1 or default_ratio1)
     lod1.name = "LOD1"
     # LOD2: merge the static exterior (surfaces frozen), keep the propeller disc as its own
     # node so it can still turn.
+    movable1 = [bpy.data.objects[n + "_lod1"] for n in lod2_movable]
+
+    def in_movable(o):
+        q = o
+        while q is not None:
+            if any(q is m for m in movable1):
+                return True
+            q = q.parent
+        return False
+
     statics = []
     for o in lod1.children_recursive:
         if o.type != "MESH" or o.name.startswith(("PropDisc", "PropBlades", "Lamp_")) or under_cockpit(o):
+            continue
+        if in_movable(o):
             continue
         if o.name.startswith(("Cabin", "Glass")):
             continue
@@ -96,7 +116,7 @@ def build_lods(lod0_root, col):
                                    selected_editable_objects=[body]):
         bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
     body.data.validate()
-    _decimate(body, 0.20)
+    _decimate(body, ratio2)
     body.data.validate()
     body.parent = lod2
     glass = bpy.data.objects["Glass_lod1"].copy()
@@ -105,7 +125,11 @@ def build_lods(lod0_root, col):
     glass.name = "Glass_lod2"
     glass.matrix_world = bpy.data.objects["Glass_lod1"].matrix_world.copy()
     glass.parent = lod2
-    _decimate(glass, 0.4)
+    _decimate(glass, glass2)
+    for name in lod2_movable:
+        src = bpy.data.objects[name]
+        copy_tree(src, lod2, "_lod2", col, lambda o: not o.name.startswith(("Lamp_", "Lens_", "Glow_")),
+                  lambda o: lod2_ratio)
     prop = M.empty("Prop_lod2", col, bpy.data.objects["Prop"].matrix_world.translation, parent=lod2,
                    props={"axis": [0.0, 0.0, 1.0]})
     disc = bpy.data.objects["PropDisc"].copy()

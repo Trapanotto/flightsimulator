@@ -10,6 +10,9 @@ export interface AircraftLights {
   strobe: boolean;
   landing: boolean;
   taxi: boolean;
+  /** Phase 4, on types that have them: recognition lights and the wing-inspection light. */
+  recognition?: boolean;
+  ice?: boolean;
 }
 
 /**
@@ -62,6 +65,14 @@ export const PANEL_DAY_FILL = 0.04;
 export function panelGlow(exposure: number, panelLight: number): number {
   const lamp = Math.min(POST_LIGHT * exposure, 0.45) * Math.min(Math.max(panelLight, 0), 1);
   return lamp + PANEL_DAY_FILL * (1 - darkness(exposure));
+}
+
+/**
+ * Cabin and flood lighting (dome lights, the glareshield's flood lights): like the post
+ * lights a lamp of fixed brightness that only shows in the dark, without the day fill.
+ */
+export function cabinGlow(exposure: number, level: number): number {
+  return Math.min(POST_LIGHT * 0.6 * exposure, 0.3) * Math.min(Math.max(level, 0), 1);
 }
 
 /**

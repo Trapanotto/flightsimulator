@@ -1,159 +1,40 @@
 /**
- * The radio stack's displays, the annunciator panel, the marker lamps and the altimeter's
- * setting window, painted into one canvas atlas. Each window is redrawn only when what it
- * shows changes (`content` builds a key from the shown text), and the atlas is uploaded at a
- * few Hz at most: displays are cheap however many frames are drawn.
+ * The Cessna's radio stack displays, the annunciator panel, the marker lamps and the
+ * altimeter's setting window, painted into one canvas atlas (canvasAtlas.ts: a window is
+ * redrawn only when what it shows changes).
  *
- * Formatting is plain functions (tested in Node); the painters need a 2D canvas.
+ * Formatting is plain functions (avionicsFormat.ts, tested in Node); the painters need a 2D
+ * canvas.
  */
-import type { AvionicsTelemetry, Cockpit, SystemsTelemetry, Waypoint } from '@sim';
+import type { AvionicsTelemetry, SystemsTelemetry, Waypoint } from '@sim';
+import {
+  autopilotModes,
+  formatBearing,
+  formatDmeDistance,
+  formatDmeMinutes,
+  formatDmeSpeed,
+  formatFrequency,
+  formatSquawk,
+  formatVerticalSpeed,
+  mapOffsetNm,
+  mapRange,
+} from './avionicsFormat';
+import { CanvasAtlas } from './canvasAtlas';
 import type { DisplayId } from './c172Parts';
 
-// ---- formatting ------------------------------------------------------------------------------
-
-/** A frequency in kHz as a radio shows it: '118.10', '110.50' (25 kHz steps lose their last digit). */
-export function formatFrequency(kHz: number): string {
-  const mhz = Math.floor(kHz / 1000);
-  const hundredths = Math.floor((Math.round(kHz) % 1000) / 10);
-  return `${mhz}.${String(hundredths).padStart(2, '0')}`;
-}
-
-/** Transponder code, always four digits: '7000', '0021'. */
-export function formatSquawk(code: number): string {
-  return String(Math.max(0, Math.min(7777, Math.round(code)))).padStart(4, '0');
-}
-
-/** DME distance: one decimal below 100 NM, whole miles above, dashes without a signal. */
-export function formatDmeDistance(nm: number | undefined): string {
-  if (nm === undefined || !Number.isFinite(nm)) return '--.-';
-  if (nm < 99.95) return nm.toFixed(1);
-  return String(Math.min(Math.round(nm), 389));
-}
-
-export function formatDmeSpeed(kt: number | undefined): string {
-  if (kt === undefined || !Number.isFinite(kt)) return '---';
-  return String(Math.min(Math.max(Math.round(kt), 0), 999)).padStart(3, ' ');
-}
-
-export function formatDmeMinutes(min: number | undefined): string {
-  if (min === undefined || !Number.isFinite(min)) return '--';
-  return String(Math.min(Math.max(Math.round(min), 0), 99));
-}
-
-/** Degrees as a navigator writes them: '005°'. */
-export function formatBearing(deg: number | undefined): string {
-  if (deg === undefined || !Number.isFinite(deg)) return '---°';
-  const d = ((Math.round(deg) % 360) + 360) % 360;
-  return `${String(d === 0 ? 360 : d).padStart(3, '0')}°`;
-}
-
-/** Selected vertical speed with its sign: '+500', '-1200', '0'. */
-export function formatVerticalSpeed(fpm: number): string {
-  const v = Math.round(fpm / 100) * 100;
-  return v > 0 ? `+${v}` : String(v);
-}
-
-/** The autopilot's mode annunciations (KAP 140 style). */
-export function autopilotModes(ap: AvionicsTelemetry['autopilot']): {
-  lateral: string;
-  lateralArmed: string;
-  vertical: string;
-  verticalArmed: string;
-} {
-  if (!ap.engaged) return { lateral: '', lateralArmed: '', vertical: '', verticalArmed: '' };
-  const lat = { roll: 'ROL', hdg: 'HDG', nav: 'NAV', apr: 'APR' } as const;
-  const ver = { pitch: '', vs: 'VS', alt: 'ALT', gs: 'GS', flc: 'FLC' } as const;
-  return {
-    lateral: lat[ap.lateral],
-    lateralArmed: ap.lateralArmed ? `${lat[ap.lateralArmed]} ARM` : '',
-    vertical: ver[ap.vertical],
-    verticalArmed: ap.verticalArmed ? `${ver[ap.verticalArmed]} ARM` : '',
-  };
-}
-
-/**
- * Without the avionics (not connected yet) the stack still shows what the knobs set, powered
- * by the master and avionics switches; nothing is received.
- */
-export function avionicsFromCockpit(c: Cockpit | undefined): AvionicsTelemetry | undefined {
-  if (!c) return undefined;
-  const nav = (n: 1 | 2) => ({
-    frequency: c.get(`nav${n}Active`),
-    standby: c.get(`nav${n}Standby`),
-    valid: false,
-    ident: '',
-    localizer: false,
-    course: c.get(`obs${n}`),
-    deviation: 0,
-    toFrom: 'off' as const,
-    bearing: undefined,
-    glideSlope: undefined,
-  });
-  const modes = ['off', 'standby', 'on', 'alt'] as const;
-  return {
-    powered: c.get('battery') >= 0.5 && c.get('avionics') >= 0.5,
-    com1: { active: c.get('com1Active'), standby: c.get('com1Standby') },
-    com2: { active: c.get('com2Active'), standby: c.get('com2Standby') },
-    nav1: nav(1),
-    nav2: nav(2),
-    dme: {
-      source: c.get('dmeSource') >= 0.5 ? 'nav2' : 'nav1',
-      distanceNm: undefined,
-      groundSpeedKt: undefined,
-      minutes: undefined,
-    },
-    adf: { frequency: c.get('adfFrequency'), valid: false, ident: '', relativeBearing: undefined },
-    transponder: {
-      code: c.get('xpdrCode'),
-      mode: modes[Math.round(c.get('xpdrMode'))] ?? 'off',
-      ident: false,
-      reply: false,
-    },
-    markers: { outer: false, middle: false, inner: false },
-    autopilot: {
-      engaged: false,
-      lateral: 'roll',
-      lateralArmed: undefined,
-      vertical: 'pitch',
-      verticalArmed: undefined,
-      selectedAltitude: c.get('apAltitude'),
-      selectedVerticalSpeed: 0,
-      disconnectWarning: false,
-    },
-    gps: {
-      plan: [],
-      active: -1,
-      distanceNm: undefined,
-      bearing: undefined,
-      desiredTrack: undefined,
-      crossTrackNm: undefined,
-      groundSpeedKt: 0,
-      track: 0,
-      lon: 0,
-      lat: 0,
-    },
-  };
-}
-
-/** The GPS map's range (NM across its width) that shows the next waypoint. */
-export function mapRange(distanceNm: number | undefined): number {
-  const ranges = [2, 5, 10, 20, 50, 100];
-  const d = distanceNm ?? 10;
-  return ranges.find((r) => r >= d * 1.6) ?? 100;
-}
-
-/** Position of a point on a north-up map around the aircraft, NM east and north. */
-export function mapOffsetNm(
-  lon0: number,
-  lat0: number,
-  lon: number,
-  lat: number,
-): { east: number; north: number } {
-  return {
-    east: (lon - lon0) * 60 * Math.cos((lat0 * Math.PI) / 180),
-    north: (lat - lat0) * 60,
-  };
-}
+export {
+  autopilotModes,
+  avionicsFromCockpit,
+  formatBearing,
+  formatDmeDistance,
+  formatDmeMinutes,
+  formatDmeSpeed,
+  formatFrequency,
+  formatSquawk,
+  formatVerticalSpeed,
+  mapOffsetNm,
+  mapRange,
+} from './avionicsFormat';
 
 // ---- what each window shows -------------------------------------------------------------------
 
@@ -511,64 +392,22 @@ function paintGps(c: Ctx, w: number, h: number, d: PanelData, cdi: string) {
   txt(c, cdi, mapW * 0.1, h * 0.94, h * 0.08, '#081018', 'center', SANS);
 }
 
-/**
- * The atlas: one canvas, a window redrawn when its key changes, the texture flagged for
- * upload at most `maxHz` times a second.
- */
-export class DisplayAtlas {
-  readonly canvas: HTMLCanvasElement;
-  private readonly ctx: Ctx;
-  private readonly keys = new Map<DisplayId, string>();
-  private dirty = false;
-  private sinceUpload = Infinity;
-
-  constructor(
-    readonly scale: number,
-    private readonly maxHz = 6,
-  ) {
-    this.canvas = document.createElement('canvas');
-    this.canvas.width = Math.round(ATLAS_W * scale);
-    this.canvas.height = Math.round(ATLAS_H * scale);
-    this.ctx = this.canvas.getContext('2d')!;
-    clear(this.ctx, this.canvas.width, this.canvas.height, '#030303');
-  }
-
-  /** UV rectangle of a window (u0, v0 at the top left; flipY is off). */
-  uvRect(id: DisplayId): { u0: number; v0: number; u1: number; v1: number } {
-    const r = REGIONS[id];
-    return {
-      u0: r.x / ATLAS_W,
-      v0: r.y / ATLAS_H,
-      u1: (r.x + r.w) / ATLAS_W,
-      v1: (r.y + r.h) / ATLAS_H,
-    };
-  }
-
-  /** Repaints what changed; true when the texture should be uploaded now. */
-  update(dt: number, data: PanelData): boolean {
-    this.sinceUpload += dt;
-    for (const id of Object.keys(REGIONS) as DisplayId[]) {
-      const key = content(id, data);
-      if (this.keys.get(id) === key) continue;
-      // The GPS map moves continuously: it waits for the next upload slot.
-      if (id === 'GPS' && this.keys.has(id) && this.sinceUpload < 1 / this.maxHz) continue;
-      this.keys.set(id, key);
-      const r = REGIONS[id];
-      const c = this.ctx;
-      c.save();
-      c.translate(r.x * this.scale, r.y * this.scale);
-      c.beginPath();
-      c.rect(0, 0, r.w * this.scale, r.h * this.scale);
-      c.clip();
-      paint(c, id, r.w * this.scale, r.h * this.scale, key, data);
-      c.restore();
-      this.dirty = true;
-    }
-    if (this.dirty && this.sinceUpload >= 1 / this.maxHz) {
-      this.dirty = false;
-      this.sinceUpload = 0;
-      return true;
-    }
-    return false;
+/** The Cessna's display atlas: its windows, repainted when their text changes. */
+export class DisplayAtlas extends CanvasAtlas<DisplayId, PanelData> {
+  constructor(scale: number, maxHz = 6) {
+    super(
+      {
+        width: ATLAS_W,
+        height: ATLAS_H,
+        regions: REGIONS,
+        content,
+        paint,
+        // The GPS map moves continuously: it waits for the next upload slot.
+        throttled: ['GPS'],
+        background: '#030303',
+      },
+      scale,
+      maxHz,
+    );
   }
 }

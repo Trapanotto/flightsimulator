@@ -15,6 +15,9 @@ import numpy as np
 
 from . import mesh as M
 
+# Half the extent (m) of the box the position bake encodes; a type larger than 16 m sets more.
+POS_RANGE = [8.0]
+
 
 def unwrap(objs, margin=0.0035):
     bpy.ops.object.select_all(action="DESELECT")
@@ -65,10 +68,11 @@ def _bake_material(kind, image):
     nt.links.new(emit.outputs[0], out.inputs["Surface"])
     geo = nt.nodes.new("ShaderNodeNewGeometry")
     if kind == "position":
-        # Positions span about +-8 m; store (p + 8) / 16 so the emission stays positive.
+        # Positions span about +-POS_RANGE; store (p + R) / 2R so the emission stays positive.
         add = nt.nodes.new("ShaderNodeVectorMath")
         add.operation = "MULTIPLY_ADD"
-        add.inputs[1].default_value = (1 / 16, 1 / 16, 1 / 16)
+        k = 1 / (2 * POS_RANGE[0])
+        add.inputs[1].default_value = (k, k, k)
         add.inputs[2].default_value = (0.5, 0.5, 0.5)
         nt.links.new(geo.outputs["Position"], add.inputs[0])
         nt.links.new(add.outputs[0], emit.inputs["Color"])
@@ -154,7 +158,7 @@ def bake_maps(objs, size, ao_samples=64, hide=()):
     for o in hidden:
         o.hide_render = False
     cov = out["id"][..., 3] > 0.5
-    pos = (out["position"][..., :3] - 0.5) * 16 + M.REF
+    pos = (out["position"][..., :3] - 0.5) * (2 * POS_RANGE[0]) + M.REF
     nrm = out["normal"][..., :3] * 2 - 1
     nrm /= np.maximum(np.linalg.norm(nrm, axis=-1, keepdims=True), 1e-6)
     pid = np.rint(out["id"][..., 0] * 64).astype(int) - 1
