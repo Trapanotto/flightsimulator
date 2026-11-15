@@ -78,6 +78,10 @@ export interface PfdData {
   dh: number | undefined;
   fma: string[][];
   boxes: boolean[];
+  /** LAND, FLARE, ROLL OUT span the vertical and lateral columns. */
+  fmaCombined: boolean;
+  /** Column 5's A/THR armed (blue) rather than active (white). */
+  athrArmed: boolean;
   vls: number;
   vAlphaProt: number;
   vAlphaMax: number;
@@ -125,6 +129,8 @@ export function pfdKey(d: PfdData): string {
       : 0,
     JSON.stringify(d.fma),
     d.boxes.join(''),
+    d.fmaCombined,
+    d.athrArmed,
     q(d.vls, 1),
     q(d.vmax, 1),
     q(d.f, 1),
@@ -160,21 +166,30 @@ export function paintPfd(c: Ctx, w: number, h: number, d: PfdData) {
 
 function fma(c: Ctx, d: PfdData) {
   const xs = [0, 166, 316, 466, 606, 768];
-  for (let i = 1; i < 5; i++) line(c, xs[i]!, 6, xs[i]!, 92, 2, AB.grey);
+  for (let i = 1; i < 5; i++)
+    if (!(d.fmaCombined && i === 2)) line(c, xs[i]!, 6, xs[i]!, 92, 2, AB.grey);
+  const box = (text: string, cx: number) => {
+    c.font = `600 23px "Segoe UI", Arial, sans-serif`;
+    const tw = c.measureText(text).width;
+    rect(c, cx - tw / 2 - 6, 8, tw + 12, 28, AB.white, 2);
+  };
   d.fma.forEach((col, i) => {
-    const cx = (xs[i]! + xs[i + 1]!) / 2;
+    // A combined mode is written once across the vertical and lateral columns.
+    if (d.fmaCombined && i === 2) return;
+    const cx = d.fmaCombined && i === 1 ? (xs[1]! + xs[3]!) / 2 : (xs[i]! + xs[i + 1]!) / 2;
     col.forEach((t, l) => {
       if (!t) return;
-      txt(c, t, cx, 22 + l * 28, 23, FMA_COLOR[fmaColor(i, l, t)]);
+      const color =
+        i === 4 && l === 2 && d.athrArmed
+          ? AB.blue
+          : i === 0 && l === 1
+            ? AB.amber
+            : FMA_COLOR[fmaColor(i, l, t)];
+      txt(c, t, cx, 22 + l * 28, 23, color);
     });
-    if (d.boxes[i] && col[0]) {
-      c.font = `600 23px ${'"Segoe UI", Arial, sans-serif'}`;
-      const tw = c.measureText(col[0]).width;
-      rect(c, cx - tw / 2 - 6, 8, tw + 12, 28, AB.white, 2);
-    }
+    if (d.boxes[i] && col[0]) box(col[0], cx);
   });
 }
-
 function attitude(c: Ctx, d: PfdData) {
   c.save();
   // The Airbus sphere: a rectangle with rounded top and bottom.

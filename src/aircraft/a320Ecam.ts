@@ -239,7 +239,7 @@ function slatsFlaps(c: Ctx, d: EwdData) {
   const moving = d.config === '';
   const col = moving ? AB.blue : AB.green;
   const s = along(slatPts, [0, 18, 22, 27], d.slats);
-  const f = along(flapPts, [0, 10, 15, 20, 40], d.flaps);
+  const f = along(flapPts, [0, 10, 15, 20, 35], d.flaps);
   poly(
     c,
     [

@@ -3,122 +3,262 @@
  * mode annunciator's colours, speeds and limits of the tapes, the engine and fuel figures of
  * the E/WD. Plain TypeScript, tested in Node.
  *
- * The A320's flight guidance reports through an optional block of the avionics telemetry,
- * `telemetry.avionics.a320` (being added to src/sim/avionicsTypes.ts at the same time). Until
- * it exists the shape is defined here and read defensively; `readA320` keeps only what has the
- * right type, so a missing or partial block falls back to what the cockpit derives itself.
+ * The A320's flight guidance, flight control and system computers report through
+ * `telemetry.avionics.autopilot.airbus` (AirbusTelemetry in src/sim/avionicsTypes.ts). The
+ * displays read it defensively through `readA320`: only fields of the right type survive, NaN
+ * means hidden, and a missing or partial block falls back to what the cockpit derives itself.
  */
 import type { AvionicsTelemetry } from '@sim';
 
-/** The A320 block of the avionics telemetry, as the displays read it. Every field optional. */
+/** What the displays take from the Airbus block, flattened. Every field optional. */
 export interface A320Avionics {
   /**
    * Flight mode annunciator: five columns (1 autothrust, 2 vertical, 3 lateral, 4 approach
-   * capability and minimums, 5 engagement), up to three lines each. Columns 2 and 3 put the
-   * engaged mode in line 1 and the armed one in line 2 (drawn blue); column 1 green, except
-   * thrust lever messages ('MAN TOGA', 'LVR CLB', ...) which are white; column 5 white.
-   * Common texts: ['SPEED'|'MACH'|'THR CLB'|'THR IDLE'|'MAN TOGA'|'MAN FLX 68', ...],
-   * ['SRS'|'CLB'|'OP CLB'|'ALT*'|'ALT'|'ALT CST'|'V/S +1200'|'DES'|'G/S*'|'G/S'|'LAND'|'FLARE'|
-   * 'ROLL OUT', 'ALT'|'G/S'|'CLB'], ['RWY'|'NAV'|'HDG'|'LOC*'|'LOC', 'NAV'|'LOC'],
-   * ['CAT 3', 'DUAL', 'DH 100'], ['AP1+2', '1 FD 2', 'A/THR'].
+   * capability and minimum, 5 engagement), up to three lines each; the armed modes in line 2.
    */
   fma?: readonly (readonly string[])[];
-  /** Characteristic speeds, knots indicated. */
+  /** LAND, FLARE and ROLL OUT span columns 2 and 3. */
+  fmaCombined?: boolean;
+  /** A mode has just changed in a column (the white box). */
+  fmaChanged?: readonly boolean[];
+  /** Column 5's A/THR is armed (blue) rather than active (white). */
+  athrArmed?: boolean;
+  /** Characteristic speeds, knots indicated (absent = hidden). */
   speeds?: {
-    /** Minimum flap and slat retraction speeds, green dot (best lift to drag clean). */
     f?: number;
     s?: number;
     greenDot?: number;
-    /** Lowest selectable speed, approach speed, the alpha protection and alpha max speeds. */
     vls?: number;
     vapp?: number;
     vAlphaProt?: number;
     vAlphaMax?: number;
-    /** VMO or VFE of the configuration (the red and black strip). */
     vmax?: number;
-    /** Take-off speeds while on the ground. */
     v1?: number;
     vr?: number;
+    vfeNext?: number;
   };
-  /** The flight control law in force. */
+  /** The speed target (kt, or Mach when `mach`), managed or selected, and the 10 s trend (kt). */
+  target?: { speed: number; managed: boolean; mach: boolean; trend?: number };
+  /** The FCU's windows: undefined values show dashes. */
+  fcu?: {
+    speed?: number;
+    mach: boolean;
+    heading?: number;
+    altitude?: number;
+    verticalSpeed?: number;
+    speedDot: boolean;
+    headingDot: boolean;
+    altitudeDot: boolean;
+  };
   law?: 'normal' | 'alternate' | 'direct' | 'mechanical';
-  /** Autobrake mode armed, and DECEL (the deceleration is reached). */
+  config?: string;
   autobrake?: { mode: 'off' | 'low' | 'medium' | 'max'; decel?: boolean };
-  /** The ground spoilers are armed. */
   spoilersArmed?: boolean;
-  /** ECAM: red warnings, amber cautions (first line the title), green memo lines. */
+  groundSpoilers?: boolean;
+  speedbrake?: number;
+  /** Stabiliser, degrees (positive nose up). */
+  stabiliser?: number;
+  /** ECAM: red warnings, amber cautions, green memo lines; the master lights. */
   warnings?: readonly string[];
   cautions?: readonly string[];
   memo?: readonly string[];
-  /** Slat and flap positions reached, degrees (slats 0..27, flaps 0..40). */
+  masterWarning?: boolean;
+  masterCaution?: boolean;
+  /** Slat and flap positions reached, degrees (slats 0..27, flaps 0..35). */
   slats?: number;
   flaps?: number;
-  /** Engagement, when the FMA does not say it: autopilots, autothrust, armed approach modes. */
+  /** Engagement lights of the FCU. */
   ap1?: boolean;
   ap2?: boolean;
   athr?: 'off' | 'armed' | 'active';
   loc?: boolean;
   appr?: boolean;
   exped?: boolean;
-  /** Thrust limit mode and its N1 (per cent): 'TOGA' | 'FLX' | 'MCT' | 'CLB' | 'IDLE'. */
+  /** Thrust limit mode and its N1 (not reported yet: the cockpit derives it). */
   thrustLimit?: { mode: string; n1: number; flexTemp?: number };
-  /** The managed targets: speed (kt or Mach below 1), and the FMS's next altitude constraint (ft). */
-  managedSpeed?: number;
-  constraintAltitude?: number;
+  /** The flight guidance's altitude target (ft) and whether it is a constraint (magenta). */
+  altitudeTarget?: { feet: number; constraint: boolean };
+  /** System page values as the computers report them. */
+  systems?: {
+    apu?: {
+      master?: boolean;
+      n?: number;
+      egt?: number;
+      available?: boolean;
+      bleed?: boolean;
+      generator?: boolean;
+    };
+    hydraulics?: [number, number, number];
+    fuel?: { tanks?: [number, number, number]; used?: number; crossfeed?: boolean };
+    air?: { cabinAltitude?: number; cabinRate?: number; differential?: number };
+    batteryVolts?: [number, number];
+    grossMass?: number;
+    brakesParking?: boolean;
+  };
 }
 
 const num = (v: unknown): number | undefined =>
   typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 const bool = (v: unknown): boolean | undefined => (typeof v === 'boolean' ? v : undefined);
+const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const strings = (v: unknown): readonly string[] | undefined =>
   Array.isArray(v) && v.every((s) => typeof s === 'string') ? (v as string[]) : undefined;
+const obj = (v: unknown): Record<string, unknown> | undefined =>
+  v && typeof v === 'object' ? (v as Record<string, unknown>) : undefined;
+const triple = (v: unknown): [number, number, number] | undefined =>
+  Array.isArray(v) && v.length >= 3 && v.slice(0, 3).every((x) => num(x) !== undefined)
+    ? [v[0] as number, v[1] as number, v[2] as number]
+    : undefined;
 
-/** The A320 block, or an empty object: only fields of the right type survive. */
+/** The Airbus block flattened for the displays, or an empty object without one. */
 export function readA320(av: AvionicsTelemetry | undefined): A320Avionics {
-  const raw = (av as unknown as { a320?: Record<string, unknown> } | undefined)?.a320;
-  if (!raw || typeof raw !== 'object') return {};
+  const raw = obj((av?.autopilot as unknown as { airbus?: unknown } | undefined)?.airbus);
+  if (!raw) return {};
   const out: A320Avionics = {};
-  const fma = raw.fma;
-  if (Array.isArray(fma)) out.fma = fma.map((c) => strings(c) ?? []);
-  const sp = raw.speeds as Record<string, unknown> | undefined;
-  if (sp && typeof sp === 'object') {
+  const fma = obj(raw.fma);
+  if (fma) {
+    const cap = str(fma.capability);
+    // 'CAT 3 DUAL' reads 'CAT 3' over 'DUAL' on the display.
+    const capLines = /^CAT 3 /.test(cap) ? ['CAT 3', cap.slice(6)] : [cap];
+    const athr = str(fma.autothrust);
+    out.fma = [
+      [str(fma.thrust), str(fma.thrustCaution)],
+      [str(fma.vertical), str(fma.verticalArmed)],
+      [str(fma.lateral), str(fma.lateralArmed)],
+      [...capLines, str(fma.minimum)].filter((s, i) => s !== '' || i === 0),
+      [
+        str(fma.autopilot),
+        str(fma.flightDirectors),
+        athr === 'active' || athr === 'armed' ? 'A/THR' : '',
+      ],
+    ];
+    out.fmaCombined = bool(fma.combined) ?? false;
+    const ch = fma.changed;
+    if (Array.isArray(ch)) out.fmaChanged = ch.map((b) => b === true);
+    out.athrArmed = athr === 'armed';
+    out.athr = athr === 'active' || athr === 'armed' ? athr : 'off';
+    out.ap1 = /AP1/.test(str(fma.autopilot));
+    out.ap2 = /AP2|AP1\+2/.test(str(fma.autopilot));
+  }
+  const sp = obj(raw.speeds);
+  if (sp) {
     out.speeds = {};
-    for (const k of [
-      'f',
-      's',
-      'greenDot',
-      'vls',
-      'vapp',
-      'vAlphaProt',
-      'vAlphaMax',
-      'vmax',
-      'v1',
-      'vr',
-    ] as const) {
-      const v = num(sp[k]);
+    const map = [
+      ['f', 'f'],
+      ['s', 's'],
+      ['greenDot', 'greenDot'],
+      ['vls', 'vls'],
+      ['vapp', 'vapp'],
+      ['vAlphaProt', 'alphaProt'],
+      ['vAlphaMax', 'alphaMax'],
+      ['vmax', 'vmax'],
+      ['v1', 'v1'],
+      ['vr', 'vr'],
+      ['vfeNext', 'vfeNext'],
+    ] as const;
+    for (const [k, from] of map) {
+      const v = num(sp[from]);
       if (v !== undefined) out.speeds[k] = v;
     }
+    const mach = bool(sp.mach) ?? false;
+    const target = num(mach ? sp.targetMach : sp.target);
+    if (target !== undefined)
+      out.target = {
+        speed: target,
+        managed: bool(sp.managed) ?? false,
+        mach,
+        trend: num(sp.trend),
+      };
   }
-  if (typeof raw.law === 'string') out.law = raw.law as A320Avionics['law'];
-  const ab = raw.autobrake as { mode?: unknown; decel?: unknown } | undefined;
-  if (ab && typeof ab.mode === 'string')
-    out.autobrake = { mode: ab.mode as 'off', decel: bool(ab.decel) ?? false };
-  for (const k of ['spoilersArmed', 'ap1', 'ap2', 'loc', 'appr', 'exped'] as const) {
-    const v = bool(raw[k]);
-    if (v !== undefined) out[k] = v;
+  const fcu = obj(raw.fcu);
+  if (fcu) {
+    out.fcu = {
+      speed: num(fcu.speed),
+      mach: bool(fcu.mach) ?? false,
+      heading: num(fcu.heading),
+      altitude: num(fcu.altitude),
+      verticalSpeed: num(fcu.verticalSpeed),
+      speedDot: bool(fcu.speedDot) ?? false,
+      headingDot: bool(fcu.headingDot) ?? false,
+      altitudeDot: bool(fcu.altitudeDot) ?? false,
+    };
+    for (const k of ['loc', 'appr', 'exped', 'ap1', 'ap2'] as const) {
+      const v = bool(fcu[k]);
+      if (v !== undefined) out[k] = v;
+    }
   }
-  if (typeof raw.athr === 'string') out.athr = raw.athr as A320Avionics['athr'];
-  for (const k of ['warnings', 'cautions', 'memo'] as const) {
-    const v = strings(raw[k]);
-    if (v) out[k] = v;
+  const g = obj(raw.guidance);
+  const alt = num(g?.altitudeTarget);
+  if (alt !== undefined)
+    out.altitudeTarget = { feet: alt, constraint: bool(g?.altitudeConstraint) ?? false };
+  const fc = obj(raw.controls);
+  if (fc) {
+    const law = str(fc.law);
+    if (law) out.law = law as A320Avionics['law'];
+    if (str(fc.config) || typeof fc.config === 'string') out.config = str(fc.config);
+    out.slats = num(fc.slats);
+    out.flaps = num(fc.flaps);
+    out.stabiliser = num(fc.stabiliser);
+    out.spoilersArmed = bool(fc.spoilersArmed);
+    out.groundSpoilers = bool(fc.groundSpoilers);
+    out.speedbrake = num(fc.speedbrake);
+    const ab = str(fc.autobrake);
+    if (ab) out.autobrake = { mode: ab as 'off', decel: bool(fc.autobrakeDecel) ?? false };
+    if (out.slats === undefined) delete out.slats;
+    if (out.flaps === undefined) delete out.flaps;
   }
-  for (const k of ['slats', 'flaps', 'managedSpeed', 'constraintAltitude'] as const) {
-    const v = num(raw[k]);
-    if (v !== undefined) out[k] = v;
+  const ec = obj(raw.ecam);
+  if (ec) {
+    const w = strings(ec.warnings);
+    const master = bool(ec.masterWarning) ?? false;
+    // One list, red warnings first: with the master warning on they are red, else amber.
+    if (w) {
+      if (master) out.warnings = w;
+      else out.cautions = w;
+    }
+    const m = strings(ec.memo);
+    if (m) out.memo = m;
+    out.masterWarning = master;
+    out.masterCaution = bool(ec.masterCaution) ?? false;
   }
-  const tl = raw.thrustLimit as { mode?: unknown; n1?: unknown; flexTemp?: unknown } | undefined;
-  if (tl && typeof tl.mode === 'string' && num(tl.n1) !== undefined)
-    out.thrustLimit = { mode: tl.mode, n1: num(tl.n1)!, flexTemp: num(tl.flexTemp) };
+  const sy = obj(raw.systems);
+  if (sy) {
+    const apu = obj(sy.apu);
+    const hyd = obj(sy.hydraulics);
+    const fuel = obj(sy.fuel);
+    const air = obj(sy.air);
+    const el = obj(sy.electrical);
+    const bv = el?.batteryVolts;
+    out.systems = {
+      apu: apu
+        ? {
+            master: bool(apu.master),
+            n: num(apu.n),
+            egt: num(apu.egt),
+            available: bool(apu.available),
+            bleed: bool(apu.bleed),
+            generator: bool(apu.generator),
+          }
+        : undefined,
+      hydraulics: hyd ? triple([hyd.green, hyd.blue, hyd.yellow]) : undefined,
+      fuel: fuel
+        ? { tanks: triple(fuel.tanks), used: num(fuel.used), crossfeed: bool(fuel.crossfeed) }
+        : undefined,
+      air: air
+        ? {
+            cabinAltitude: num(air.cabinAltitude),
+            cabinRate: num(air.cabinRate),
+            differential: num(air.differential),
+          }
+        : undefined,
+      batteryVolts:
+        Array.isArray(bv) && num(bv[0]) !== undefined && num(bv[1]) !== undefined
+          ? [bv[0] as number, bv[1] as number]
+          : undefined,
+      grossMass: num(sy.grossMass),
+      brakesParking: bool(obj(sy.brakes)?.parking),
+    };
+  }
   return out;
 }
 

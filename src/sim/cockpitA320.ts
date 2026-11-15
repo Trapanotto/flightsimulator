@@ -99,8 +99,19 @@ export const A320_CONTROLS: readonly ControlSpec[] = [
   /** The red button on the sidestick: autopilot off (and sidestick priority). */
   button('apDisconnect'),
   // ---- flight control unit ----
-  /** Speed window, knots (or hundredths of Mach while `fcuMach` is on). */
-  { id: 'fcuSpeed', kind: 'knob', min: 100, max: 399, step: 1, initial: 250 },
+  /**
+   * Each FCU knob is pushed (managed) and pulled (selected): by these buttons, or by
+   * flipping the knob's `...Managed` toggle below, which the flight guidance sets back to
+   * show the state (the dot beside the window).
+   */
+  button('fcuSpeedPush'),
+  button('fcuSpeedPull'),
+  button('fcuHeadingPush'),
+  button('fcuHeadingPull'),
+  button('fcuAltitudePush'),
+  button('fcuAltitudePull'),
+  /** Speed window, knots 100..399 (or hundredths of Mach, 10..99, while `fcuMach` is on). */
+  { id: 'fcuSpeed', kind: 'knob', min: 10, max: 399, step: 1, initial: 250 },
   /** Pushed in: managed speed (the plan's); pulled: the selected one. 1 = managed. */
   toggle('fcuSpeedManaged', 1),
   button('fcuMach'),

@@ -287,9 +287,16 @@ def fcu(P):
     s = GLARE_S
     for wid, bl in (("FCU_SPD", 0.205), ("FCU_HDG", 0.085), ("FCU_ALT", -0.072), ("FCU_VS", -0.150)):
         P.display(wid, gg(bl, 0.030, s + 0.0004), *WINDOWS[wid], frame=GLARE_R)
-    pushpull(P, "fcuSpeed", gg(0.205, -0.016, s), GLARE_R, [("fcuSpeedManaged", -1)])
-    pushpull(P, "fcuHeading", gg(0.085, -0.016, s), GLARE_R, [("fcuHeadingManaged", -1)])
-    pushpull(P, "fcuAltitude", gg(-0.072, -0.016, s), GLARE_R, [("fcuAltitudeManaged", -1)])
+    # Speed, heading and altitude knobs: the upper half of the centre pulls (selected), the lower
+    # half pushes (managed); the knob rides in or out with the managed state, which a click on the
+    # managed dot beside the window also flips.
+    for axis, bl, wid, dot in (("Speed", 0.205, "FCU_SPD", 0.015), ("Heading", 0.085, "FCU_HDG", 0.015),
+                               ("Altitude", -0.072, "FCU_ALT", 0.024)):
+        cid = f"fcu{axis}"
+        pushpull(P, cid, gg(bl, -0.016, s), GLARE_R,
+                 [(f"{cid}Pull", 1), (f"{cid}Push", -1), (f"{cid}Managed", -1)],
+                 split=(f"{cid}Pull", f"{cid}Push"))
+        P.hit(f"{cid}Managed", gg(bl - dot, 0.030, s + 0.003), (0.006, 0.006, 0.004), frame=GLARE_R)
     pushpull(P, "fcuVerticalSpeed", gg(-0.165, -0.016, s), GLARE_R, [("fcuVsPull", 1), ("fcuVsPush", -1)],
              split=("fcuVsPull", "fcuVsPush"))
     fcu_button(P, "fcuMach", 0.255, -0.026, "SPD MACH", lit=False)

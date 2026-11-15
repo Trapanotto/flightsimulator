@@ -635,7 +635,9 @@ function fakeStep(dt: number) {
     ui.gearPos >= 0
       ? ui.gearPos
       : t.gear + Math.sign(gearT - t.gear) * Math.min(Math.abs(gearT - t.gear), dt / 10);
-  const flapT = controls.flaps;
+  // telemetry.flaps is the share of 35 degrees; lever 1 is 1+F (10 degrees) at take-off speeds.
+  const lever = Math.round(controls.flaps * 4);
+  const flapT = ([0, t.ias < 210 * KT ? 10 : 0, 15, 20, 35][lever] ?? 0) / 35;
   t.flaps =
     ui.flapPos >= 0
       ? ui.flapPos
@@ -666,6 +668,10 @@ function fakeStep(dt: number) {
     fake.fma[1] = [`V/S ${v('fcuVerticalSpeed') >= 0 ? '+' : ''}${v('fcuVerticalSpeed')}`];
   if (pressed('fcuVsPush')) fake.fma[1] = ['ALT'];
   if (pressed('xpdrIdent')) fake.identUntil = t.time + 18;
+  for (const axis of ['Speed', 'Heading', 'Altitude']) {
+    if (pressed(`fcu${axis}Push`)) panel.set(`fcu${axis}Managed`, 1);
+    if (pressed(`fcu${axis}Pull`)) panel.set(`fcu${axis}Managed`, 0);
+  }
   pressed('fcuHeadingManaged');
   fake.fma[2]![0] = v('fcuHeadingManaged') >= 0.5 ? (st.fma[2]?.[0] ?? 'NAV') : 'HDG';
   const ap = fake.ap[0] && fake.ap[1] ? 'AP1+2' : fake.ap[0] ? 'AP1' : fake.ap[1] ? 'AP2' : '';
@@ -692,7 +698,7 @@ function fakeStep(dt: number) {
   const legN = (wp.lat - prev.lat) * 60;
   const legLen = Math.hypot(legE, legN);
   const ils = st.ils;
-  const conf = Math.round(t.flaps * 4);
+  const conf = Math.round(controls.flaps * 4);
   const cs = CONFIG_SPEEDS[conf]!;
   const hdgErr = ((((v('fcuHeading') - t.headingDeg) % 360) + 540) % 360) - 180;
   const fdBank =
@@ -710,7 +716,7 @@ function fakeStep(dt: number) {
   if (v('lightLanding') >= 0.5 && !t.onGround) memo.push('LDG LT');
   if (stateName === 'approach')
     memo.unshift('LDG MEMO', ' CABIN......READY', ' SPLRS........ARM', ' FLAPS.......FULL');
-  const avionics: AvionicsTelemetry & { a320: unknown } = {
+  const avionics: AvionicsTelemetry = {
     powered,
     com1: { active: v('com1Active'), standby: v('com1Standby') },
     com2: { active: v('com2Active'), standby: v('com2Standby') },
@@ -787,48 +793,169 @@ function fakeStep(dt: number) {
       lon: fake.lon,
       lat: fake.lat,
     },
-    a320: {
-      fma: fake.fma,
-      speeds: {
-        vls: cs.vls,
-        vAlphaProt: Math.round(cs.vls * 0.9),
-        vAlphaMax: Math.round(cs.vls * 0.84),
-        vmax: cs.vmax,
-        f: 160,
-        s: 205,
-        greenDot: 212,
-        vapp: 138,
-        v1: stateName === 'takeoff' ? 141 : undefined,
-        vr: stateName === 'takeoff' ? 145 : undefined,
-      },
-      law: 'normal',
-      autobrake: {
-        mode: (['off', 'low', 'medium', 'max'] as const)[Math.round(v('autobrake'))],
-        decel: stateName === 'rollout',
-      },
-      spoilersArmed: v('spoilersArmed') >= 0.5,
-      memo,
-      warnings: [],
-      cautions: [],
-      thrustLimit:
-        stateName === 'takeoff'
-          ? { mode: 'TOGA', n1: 95.6 }
-          : t.onGround
-            ? { mode: 'TOGA', n1: 95.6 }
-            : { mode: 'CLB', n1: 89.2 },
-      managedSpeed:
-        stateName === 'cruise'
-          ? 0.78
-          : stateName === 'approach'
-            ? 138
-            : stateName === 'landing'
-              ? 133
-              : 250,
-    },
   };
+  (avionics.autopilot as unknown as { airbus: unknown }).airbus = airbusBlock(t, v, cs, memo);
   t.avionics = powered ? avionics : { ...avionics, powered: false };
 }
 
+/** The flight guidance's block (AirbusTelemetry on main) as the fake fills it. */
+const changedAt = [-100, -100, -100, -100, -100];
+const lastFma: string[] = ['', '', '', '', ''];
+function airbusBlock(
+  t: Telemetry,
+  v: (id: string) => number,
+  cs: { vls: number; vmax: number },
+  memo: string[],
+) {
+  const f = fake.fma;
+  const col = (i: number, l: number) => f[i]?.[l] ?? '';
+  const combined = ['LAND', 'FLARE', 'ROLL OUT'].includes(col(1, 0));
+  const changed = [0, 1, 2, 3, 4].map((i) => {
+    const now = col(i, 0);
+    if (now !== lastFma[i]) {
+      if (t.time > 11) changedAt[i] = t.time;
+      lastFma[i] = now;
+    }
+    return t.time - changedAt[i]! < 10;
+  });
+  const lever = Math.round(controls.flaps * 4);
+  const slats = [0, 18, 22, 22, 27][lever] ?? 0;
+  const flaps = t.flaps * 35;
+  const managed = v('fcuSpeedManaged') >= 0.5;
+  const machTarget = stateName === 'cruise';
+  const target =
+    stateName === 'approach' ? 138 : stateName === 'landing' ? 133 : managed ? 250 : v('fcuSpeed');
+  const NaN_ = Number.NaN;
+  return {
+    fma: {
+      thrust: col(0, 0) + (col(0, 1) && col(0, 0) === 'MAN' ? ' ' + col(0, 1) : ''),
+      thrustCaution: '',
+      vertical: col(1, 0),
+      verticalArmed: col(1, 1),
+      lateral: combined ? col(1, 0) : col(2, 0),
+      lateralArmed: col(2, 1),
+      combined,
+      capability: col(3, 0) && col(3, 1) ? col(3, 0) + ' ' + col(3, 1) : col(3, 0),
+      minimum: col(3, 2),
+      autopilot: col(4, 0),
+      flightDirectors: col(4, 1),
+      autothrust: fake.athr,
+      changed,
+    },
+    speeds: {
+      vls: cs.vls,
+      vsw: Math.round(cs.vls * 0.8),
+      vmax: cs.vmax,
+      alphaProt: t.onGround ? NaN_ : Math.round(cs.vls * 0.9),
+      alphaMax: t.onGround ? NaN_ : Math.round(cs.vls * 0.84),
+      f: lever >= 1 && lever <= 2 && !t.onGround ? 160 : NaN_,
+      s: lever === 1 && !t.onGround ? 205 : NaN_,
+      greenDot: lever === 0 && !t.onGround ? 212 : NaN_,
+      vapp: 138,
+      v1: stateName === 'takeoff' ? 141 : NaN_,
+      vr: stateName === 'takeoff' ? 145 : NaN_,
+      v2: stateName === 'takeoff' ? 150 : NaN_,
+      vfeNext: lever < 4 ? [230, 215, 200, 185][lever]! : NaN_,
+      target: machTarget ? NaN_ : target,
+      targetMach: machTarget ? 0.78 : NaN_,
+      managed,
+      mach: machTarget,
+      trend: t.ias / KT,
+      mass: 62000,
+    },
+    fcu: {
+      speed: managed ? NaN_ : v('fcuSpeed'),
+      mach: machTarget,
+      heading: v('fcuHeadingManaged') >= 0.5 ? NaN_ : v('fcuHeading'),
+      altitude: v('fcuAltitude'),
+      verticalSpeed: /^V\/S/.test(col(1, 0)) ? v('fcuVerticalSpeed') : NaN_,
+      speedDot: managed,
+      headingDot: v('fcuHeadingManaged') >= 0.5,
+      altitudeDot: v('fcuAltitudeManaged') >= 0.5,
+      loc: /LOC/.test(col(2, 1)) || /LOC/.test(col(2, 0)),
+      appr: /G\/S/.test(col(1, 1) + col(1, 0)) || combined,
+      exped: /EXP/.test(col(1, 0)),
+      ap1: fake.ap[0],
+      ap2: fake.ap[1],
+      athr: fake.athr !== 'off',
+    },
+    guidance: {
+      altitudeTarget: v('fcuAltitude'),
+      altitudeConstraint: false,
+      lateralTarget: t.headingDeg,
+      verticalSpeedTarget: 0,
+      phase: stateName,
+      callout: '',
+    },
+    controls: {
+      law: 'normal',
+      flareMode: stateName === 'landing',
+      groundMode: t.onGround,
+      alphaProtection: false,
+      alphaFloor: false,
+      highSpeedProtection: false,
+      bankLimit: false,
+      pitchLimit: false,
+      config: ['0', t.ias < 210 * KT ? '1+F' : '1', '2', '3', 'FULL'][lever] ?? '0',
+      slats,
+      flaps,
+      stabiliser: (t.stabiliser ?? 0) / DEG,
+      rudderTrim: (controls.yawTrim ?? 0) * 20,
+      spoilersArmed: v('spoilersArmed') >= 0.5,
+      groundSpoilers: stateName === 'rollout',
+      speedbrake: t.speedbrake ?? 0,
+      autobrake: (['off', 'low', 'medium', 'max'] as const)[Math.round(v('autobrake'))],
+      autobrakeArmed: v('autobrake') >= 1,
+      autobrakeDecel: stateName === 'rollout',
+      steering: 0,
+    },
+    systems: {
+      apu: {
+        master: v('apuMaster') >= 0.5,
+        n: st.apu ? 100 : 0,
+        egt: st.apu ? 410 : 15,
+        available: st.apu,
+        bleed: st.apu && v('apuBleed') >= 0.5,
+        generator: st.apu,
+      },
+      bleed: [st.running ? 42 : st.apu ? 38 : 0, st.running ? 42 : st.apu ? 38 : 0],
+      start: { valve: [false, false], ignition: [false, false], phase: ['', ''] },
+      adirs: { aligned: v('adirs') >= 1, remaining: 0 },
+      electrical: {
+        ac1: st.running,
+        ac2: st.running,
+        acEss: true,
+        dcEss: true,
+        dcBat: true,
+        source: st.running ? ['gen1', 'gen2'] : st.apu ? ['apu', 'apu'] : ['none', 'none'],
+        batteryVolts: [28.2, 28.1],
+      },
+      hydraulics: {
+        green: st.running ? 3000 : 0,
+        blue: st.running ? 3000 : 0,
+        yellow: st.running ? 3000 : 0,
+        ptu: false,
+        rat: false,
+      },
+      fuel: {
+        tanks: [t.fuel * 0.42, t.fuel * 0.16, t.fuel * 0.42],
+        pumps: { left: true, centre: true, right: true },
+        crossfeed: v('fuelCrossfeed') >= 0.5,
+        used: 6400 - t.fuel,
+      },
+      air: {
+        packs: [v('pack1') >= 0.5, v('pack2') >= 0.5],
+        cabinAltitude: Math.min(8000, (t.altitude / FT) * 0.22),
+        cabinRate: (t.verticalSpeed / FT) * 60 * 0.2,
+        differential: Math.min(8.1, t.altitude / FT / 4400),
+      },
+      antiIce: { wing: false, engine: [false, false] },
+      brakes: { pressure: 0, antiSkid: true, parking: v('parkingBrake') >= 0.5 },
+      grossMass: 52000 + t.fuel,
+    },
+    ecam: { warnings: [], memo, masterWarning: false, masterCaution: false },
+  };
+}
 // ---- camera ------------------------------------------------------------------------------------
 const camera = new PerspectiveCamera(40, 1, 0.05, 4000);
 const target = new Vector3(0, ac.object.position.y - 0.4, 0);

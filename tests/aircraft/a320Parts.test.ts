@@ -71,20 +71,21 @@ describe('A320 slats and flaps', () => {
       [18, 0],
       [22, 15],
       [22, 20],
-      [27, 40],
+      [27, 35],
     ]);
-    expect(highLift(0, 250)).toEqual({ slats: 0, flaps: 0, label: '0' });
-    expect(highLift(0.25, 150)).toEqual({ slats: 18, flaps: 10, label: '1+F' });
-    expect(highLift(0.25, 230)).toEqual({ slats: 18, flaps: 0, label: '1' });
-    expect(highLift(0.5, 180)).toEqual({ slats: 22, flaps: 15, label: '2' });
-    expect(highLift(0.75, 150)).toEqual({ slats: 22, flaps: 20, label: '3' });
-    expect(highLift(1, 140)).toEqual({ slats: 27, flaps: 40, label: 'FULL' });
+    // The flaps are where the simulation has them (share of 35 degrees), the slats follow the lever.
+    expect(highLift(0, 0, 250)).toEqual({ slats: 0, flaps: 0, label: '0' });
+    expect(highLift(1, 10 / 35, 150)).toEqual({ slats: 18, flaps: 10, label: '1+F' });
+    expect(highLift(1, 0, 230)).toEqual({ slats: 18, flaps: 0, label: '1' });
+    expect(highLift(2, 15 / 35, 180)).toEqual({ slats: 22, flaps: 15, label: '2' });
+    expect(highLift(3, 20 / 35, 150)).toEqual({ slats: 22, flaps: 20, label: '3' });
+    expect(highLift(4, 1, 140)).toEqual({ slats: 27, flaps: 35, label: 'FULL' });
   });
 
-  it('moves slats and flaps together between the positions, without a label', () => {
-    const h = highLift(0.875, 150);
-    expect(h.slats).toBeCloseTo(24.5, 5);
-    expect(h.flaps).toBeCloseTo(30, 5);
+  it('shows no configuration while the flaps run between the positions', () => {
+    const h = highLift(4, 0.8, 150);
+    expect(h.slats).toBe(27);
+    expect(h.flaps).toBeCloseTo(28, 5);
     expect(h.label).toBe('');
     expect(configLabel(22, 15)).toBe('2');
     expect(configLabel(20, 10)).toBe('');
@@ -171,26 +172,78 @@ describe('A320 display formatting', () => {
     expect(b.update(fma('ALT*'), 15.1)[1]).toBe(false);
   });
 
-  it('reads the A320 block of the avionics defensively', () => {
+  it('reads the Airbus block of the autopilot telemetry defensively', () => {
     const av = {
-      a320: {
-        fma: [['SPEED'], ['G/S'], ['LOC'], ['CAT 3'], ['AP1+2']],
-        speeds: { vls: 128, f: 'x', greenDot: 210 },
-        law: 'normal',
-        autobrake: { mode: 'medium', decel: true },
-        memo: ['SEAT BELTS', 3],
-        slats: 27,
-        flaps: 40,
+      autopilot: {
+        airbus: {
+          fma: {
+            thrust: 'SPEED',
+            thrustCaution: '',
+            vertical: 'G/S',
+            verticalArmed: '',
+            lateral: 'LOC',
+            lateralArmed: '',
+            combined: false,
+            capability: 'CAT 3 DUAL',
+            minimum: 'DH 100',
+            autopilot: 'AP1+2',
+            flightDirectors: '1 FD 2',
+            autothrust: 'armed',
+            changed: [false, true, false, false, false],
+          },
+          speeds: {
+            vls: 128,
+            f: NaN,
+            greenDot: 'x',
+            alphaProt: 118,
+            target: 133,
+            managed: true,
+            mach: false,
+          },
+          fcu: {
+            speed: NaN,
+            mach: false,
+            heading: 137,
+            altitude: 5000,
+            verticalSpeed: NaN,
+            speedDot: true,
+          },
+          controls: {
+            law: 'normal',
+            config: 'FULL',
+            slats: 27,
+            flaps: 35,
+            autobrake: 'medium',
+            autobrakeDecel: true,
+          },
+          ecam: {
+            warnings: ['ENG 1 FAIL'],
+            memo: ['SEAT BELTS', 3],
+            masterWarning: true,
+            masterCaution: false,
+          },
+        },
       },
     } as unknown as AvionicsTelemetry;
     const a = readA320(av);
-    expect(a.fma?.[1]).toEqual(['G/S']);
-    expect(a.speeds).toEqual({ vls: 128, greenDot: 210 });
+    expect(a.fma?.[1]).toEqual(['G/S', '']);
+    expect(a.fma?.[3]).toEqual(['CAT 3', 'DUAL', 'DH 100']);
+    expect(a.fma?.[4]).toEqual(['AP1+2', '1 FD 2', 'A/THR']);
+    expect(a.athrArmed).toBe(true);
+    expect(a.fmaChanged).toEqual([false, true, false, false, false]);
+    // NaN hides a speed; a wrong type is dropped.
+    expect(a.speeds).toEqual({ vls: 128, vAlphaProt: 118 });
+    expect(a.target).toEqual({ speed: 133, managed: true, mach: false, trend: undefined });
+    expect(a.fcu?.speed).toBeUndefined();
+    expect(a.fcu?.heading).toBe(137);
+    expect(a.ap1 && a.ap2).toBe(true);
     expect(a.autobrake).toEqual({ mode: 'medium', decel: true });
+    expect(a.config).toBe('FULL');
+    expect(a.flaps).toBe(35);
+    expect(a.warnings).toEqual(['ENG 1 FAIL']);
     expect(a.memo).toBeUndefined();
-    expect(a.slats).toBe(27);
     expect(readA320(undefined)).toEqual({});
-    expect(readA320({} as AvionicsTelemetry)).toEqual({});
+    expect(readA320({ autopilot: {} } as AvionicsTelemetry)).toEqual({});
   });
 
   it('gives engine and thrust figures in the E/WD units', () => {

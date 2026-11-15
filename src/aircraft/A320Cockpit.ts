@@ -7,14 +7,14 @@
  *
  * What feeds the displays (for checking the real aircraft against the demo's fakes):
  * - PFD: telemetry.instruments when present, else the plain telemetry; the FMA from
- *   avionics.a320.fma (else built from avionics.autopilot); speeds from avionics.a320.speeds
+ *   avionics.autopilot.airbus.fma (else built from avionics.autopilot); speeds from .speeds
  *   (else rules of thumb for the configuration); avionics.autopilot.flightDirector with the FD
  *   button; avionics.nav1 (the ILS) with the LS button; telemetry.agl as radio altitude; the
- *   FCU's values for the targets (managed targets from avionics.a320.managedSpeed or
+ *   FCU's values for the targets (avionics.autopilot.airbus.speeds.target, else
  *   autopilot.selectedSpeed)
  * - ND: avionics.gps (plan, position), nav1/nav2 and the DME, the EFIS mode and range
  * - E/WD: engines[i].n1, n2, turbineTemperature (EGT), fuelFlow, reversing, starting; the
- *   thrust levers; avionics.a320.thrustLimit, slats, flaps, warnings, cautions, memo (else
+ *   thrust levers; the Airbus block's controls (slats, flaps, config) and ecam (else
  *   derived from the switches); telemetry.fuel
  * - SD: systems (fuel tanks, hydraulics, cabin pressure) when they report it, else derived
  *   here from the switches and the engines; the page from `ecamPage`
@@ -393,7 +393,10 @@ export class A320Cockpit extends CockpitCore {
         ? 100
         : 0
       : s.apuN + Math.sign(apuTarget - s.apuN) * Math.min(Math.abs(apuTarget - s.apuN), dt * 2.6);
-    const apuAvail = s.apuN > 95;
+    const apuSys = a3.systems?.apu;
+    if (apuSys?.n !== undefined) s.apuN = apuSys.n;
+    if (apuSys?.egt !== undefined) s.apuEgt = apuSys.egt;
+    const apuAvail = apuSys?.available ?? s.apuN > 95;
     s.apuEgt = lag(
       s.apuEgt,
       s.apuN > 5 ? (s.apuN < 60 ? 600 + s.apuN * 2 : 420) : 15,
@@ -432,20 +435,32 @@ export class A320Cockpit extends CockpitCore {
     const ap = av?.autopilot;
     const lift =
       a3.slats !== undefined && a3.flaps !== undefined
-        ? { slats: a3.slats, flaps: a3.flaps, label: configLabel(a3.slats, a3.flaps) }
-        : highLift(t.flaps, ias);
-    const confIdx = Math.round(Math.min(Math.max(t.flaps, 0), 1) * 4);
-    const sp = { ...defaultSpeeds(confIdx), ...a3.speeds };
+        ? { slats: a3.slats, flaps: a3.flaps, label: a3.config ?? configLabel(a3.slats, a3.flaps) }
+        : highLift(value('flaps'), t.flaps, ias);
+    const confIdx = Math.round(Math.min(Math.max(value('flaps'), 0), 4));
+    // With the flight guidance's speeds, a missing one is hidden; without them, rules of thumb.
+    const own = defaultSpeeds(confIdx);
+    const sp = a3.speeds ? { ...own, ...a3.speeds } : own;
     const fma = fmaLines(a3.fma ?? fallbackFma(av, value, alt));
-    const boxes = this.fmaBoxes.update(fma, t.time);
+    const mine = this.fmaBoxes.update(fma, t.time);
+    const boxes = a3.fmaChanged ? fma.map((_c, i) => !!a3.fmaChanged![i]) : mine;
     const dhMatch = fma[3]?.join(' ').match(/DH (\d+)/);
     const ils = av?.nav1;
     const ilsValid = !!ils?.valid && ils.localizer;
     const radioAlt = t.agl === undefined ? undefined : t.agl * M_TO_FT;
-    const speedManaged = on('fcuSpeedManaged');
+    const speedManaged = a3.target?.managed ?? on('fcuSpeedManaged');
     const selSpeed = this.mach ? value('fcuSpeed') / 100 : value('fcuSpeed');
-    const managedSpeed = a3.managedSpeed ?? ap?.selectedSpeed;
-    const speedTarget = speedManaged ? managedSpeed : this.mach ? undefined : selSpeed;
+    // The tape shows knots: a Mach target sits where that Mach is at the present ratio.
+    const speedTarget = a3.target
+      ? a3.target.mach
+        ? a3.target.speed * (ias / Math.max(mach, 0.1))
+        : a3.target.speed
+      : speedManaged
+        ? ap?.selectedSpeed
+        : this.mach
+          ? undefined
+          : selSpeed;
+    if (a3.target?.trend !== undefined) s.trend = a3.target.trend - ias;
     const pfd: PfdData = {
       on: dispOn,
       pitch,
@@ -483,13 +498,15 @@ export class A320Cockpit extends CockpitCore {
       dh: dhMatch ? Number(dhMatch[1]) : undefined,
       fma,
       boxes,
+      fmaCombined: !!a3.fmaCombined,
+      athrArmed: !!a3.athrArmed,
       vls: sp.vls,
       vAlphaProt: sp.vAlphaProt,
       vAlphaMax: sp.vAlphaMax,
       vmax: sp.vmax,
-      f: confIdx >= 1 && confIdx <= 2 ? sp.f : undefined,
-      s: confIdx === 1 ? sp.s : undefined,
-      greenDot: confIdx === 0 ? sp.greenDot : undefined,
+      f: a3.speeds ? a3.speeds.f : confIdx >= 1 && confIdx <= 2 ? sp.f : undefined,
+      s: a3.speeds ? a3.speeds.s : confIdx === 1 ? sp.s : undefined,
+      greenDot: a3.speeds ? a3.speeds.greenDot : confIdx === 0 ? sp.greenDot : undefined,
       v1: a3.speeds?.v1,
       vr: a3.speeds?.vr,
       onGround: t.onGround,
@@ -594,18 +611,19 @@ export class A320Cockpit extends CockpitCore {
       slats: lift.slats,
       flaps: lift.flaps,
       config: lift.label,
-      warnings: a3.warnings ?? derivedWarnings(t, value),
+      warnings: a3.warnings ?? (a3.cautions ? [] : derivedWarnings(t, value)),
       cautions: a3.cautions ?? [],
       memo,
       time: t.time,
     };
     // --- system display ---
-    const tanks = sys?.fuelTanks;
+    const sy = a3.systems;
+    const tanks = sy?.fuel?.tanks ?? sys?.fuelTanks;
     const fuel: [number, number, number] =
       tanks && tanks.length >= 3
         ? [tanks[0]!, tanks[1]!, tanks[2]!]
         : [Math.min(t.fuel / 2, 5440), Math.max(0, t.fuel - 10880), Math.min(t.fuel / 2, 5440)];
-    const hydPsi = sys?.hydraulics;
+    const hydPsi = sy?.hydraulics ?? sys?.hydraulics;
     const psi = (i: number, src: boolean) =>
       hydPsi?.[i] !== undefined ? hydPsi[i]! : src ? 3000 : 0;
     const gl = gearLights(t.gear);
@@ -617,11 +635,13 @@ export class A320Cockpit extends CockpitCore {
     const ambientPsi = 14.696 * Math.pow(Math.max(1 - 6.8756e-6 * alt, 0.05), 5.2559);
     const packsOn = on('pack1') || on('pack2');
     const cabTarget =
-      sys?.cabinAltitude !== undefined
-        ? sys.cabinAltitude * M_TO_FT
-        : packsOn
-          ? Math.min(alt, Math.max(alt * 0.2, Math.min(8000, alt - 30000)))
-          : alt;
+      sy?.air?.cabinAltitude !== undefined
+        ? sy.air.cabinAltitude
+        : sys?.cabinAltitude !== undefined
+          ? sys.cabinAltitude * M_TO_FT
+          : packsOn
+            ? Math.min(alt, Math.max(alt * 0.2, Math.min(8000, alt - 30000)))
+            : alt;
     s.cabinAlt = first ? cabTarget : lag(s.cabinAlt, cabTarget, dt, 30);
     if (!first && dt > 0)
       s.cabinRate = lag(s.cabinRate, ((s.cabinAlt - s.lastCabin) / dt) * 60, dt, 2);
@@ -648,11 +668,11 @@ export class A320Cockpit extends CockpitCore {
         avail: apuAvail,
         n: s.apuN,
         egt: s.apuEgt,
-        bleed: on('apuBleed'),
-        gen: on('apuGenerator'),
+        bleed: apuSys?.bleed ?? on('apuBleed'),
+        gen: apuSys?.generator ?? on('apuGenerator'),
       },
       elec: {
-        bat: [on('battery') ? 28.1 : 25.6, on('battery2') ? 28.2 : 25.6],
+        bat: sy?.batteryVolts ?? [on('battery') ? 28.1 : 25.6, on('battery2') ? 28.2 : 25.6],
         batOn: [on('battery'), on('battery2')],
         gen: [on('generator1'), on('generator2')],
         ext: extAvail,
@@ -675,13 +695,13 @@ export class A320Cockpit extends CockpitCore {
       fuel: {
         tanks: fuel,
         pumps: [on('fuelPumpsLeft'), on('fuelPumpsCenter'), on('fuelPumpsRight')],
-        xfeed: on('fuelCrossfeed'),
-        used: s.fuelUsed[0]! + s.fuelUsed[1]!,
+        xfeed: sy?.fuel?.crossfeed ?? on('fuelCrossfeed'),
+        used: sy?.fuel?.used ?? s.fuelUsed[0]! + s.fuelUsed[1]!,
       },
       press: {
         cabinAlt: s.cabinAlt,
-        diff: Math.max(-0.5, cabinPsi - ambientPsi),
-        rate: s.cabinRate,
+        diff: sy?.air?.differential ?? Math.max(-0.5, cabinPsi - ambientPsi),
+        rate: sy?.air?.cabinRate ?? s.cabinRate,
       },
       wheel: {
         gear: t.gear,
@@ -689,7 +709,7 @@ export class A320Cockpit extends CockpitCore {
         transit: gl.transit,
         brakes: s.brakes,
         autobrake: ab === 'off' ? '' : ab === 'low' ? 'LO' : ab === 'medium' ? 'MED' : 'MAX',
-        parking: on('parkingBrake'),
+        parking: sy?.brakesParking ?? on('parkingBrake'),
       },
       fctl: {
         aileronL: t.aileron,
@@ -697,7 +717,7 @@ export class A320Cockpit extends CockpitCore {
         elevator: t.elevator,
         rudder: t.rudder,
         spoilers: spoilerFlags(t),
-        trim: (t.stabiliser ?? value('trim') * 0.1) * RAD_TO_DEG,
+        trim: a3.stabiliser ?? (t.stabiliser ?? value('trim') * 0.1) * RAD_TO_DEG,
         law: a3.law ?? 'normal',
       },
       status:
@@ -706,7 +726,7 @@ export class A320Cockpit extends CockpitCore {
           : [],
       tat: 15 - alt * 0.00198 + (tas * tas) / 7592,
       sat: 15 - alt * 0.00198,
-      gw: 52000 + t.fuel,
+      gw: sy?.grossMass ?? 52000 + t.fuel,
       time: t.time,
     };
     // --- MCDU ---
@@ -746,24 +766,46 @@ export class A320Cockpit extends CockpitCore {
       av,
       fma,
       ab,
-      warn: ewd.warnings.length > 0,
-      caution: ewd.cautions.length > 0,
+      warn: a3.masterWarning ?? ewd.warnings.length > 0,
+      caution: a3.masterCaution ?? ewd.cautions.length > 0,
       time: t.time,
     });
     const xm = ['OFF', 'STBY', 'ON', 'ALT'][Math.round(value('xpdrMode'))] ?? 'STBY';
+    // The FCU's windows: what the flight guidance shows (NaN = dashes), else the knobs.
+    const fcu = a3.fcu;
+    const spdMach = fcu ? fcu.mach : this.mach;
     const panel: PanelData = {
       powered: busOn,
-      spd: {
-        text: fcuSpeedText(value('fcuSpeed'), this.mach, speedManaged),
-        mach: this.mach,
-        managed: speedManaged,
-      },
-      hdg: {
-        text: fcuHeadingText(value('fcuHeading'), on('fcuHeadingManaged')),
-        managed: on('fcuHeadingManaged'),
-      },
-      alt: { text: fcuAltitudeText(value('fcuAltitude')), managed: on('fcuAltitudeManaged') },
-      vs: { text: fcuVsText(ap?.selectedVerticalSpeed ?? value('fcuVerticalSpeed'), vsEngaged) },
+      spd: fcu
+        ? {
+            text: fcuSpeedText(
+              fcu.speed === undefined ? 0 : spdMach && fcu.speed < 1 ? fcu.speed * 100 : fcu.speed,
+              spdMach,
+              fcu.speed === undefined,
+            ),
+            mach: spdMach,
+            managed: fcu.speedDot,
+          }
+        : {
+            text: fcuSpeedText(value('fcuSpeed'), this.mach, speedManaged),
+            mach: this.mach,
+            managed: speedManaged,
+          },
+      hdg: fcu
+        ? {
+            text: fcuHeadingText(fcu.heading ?? 0, fcu.heading === undefined),
+            managed: fcu.headingDot,
+          }
+        : {
+            text: fcuHeadingText(value('fcuHeading'), on('fcuHeadingManaged')),
+            managed: on('fcuHeadingManaged'),
+          },
+      alt: fcu
+        ? { text: fcuAltitudeText(fcu.altitude ?? value('fcuAltitude')), managed: fcu.altitudeDot }
+        : { text: fcuAltitudeText(value('fcuAltitude')), managed: on('fcuAltitudeManaged') },
+      vs: fcu
+        ? { text: fcuVsText(fcu.verticalSpeed ?? 0, fcu.verticalSpeed !== undefined) }
+        : { text: fcuVsText(ap?.selectedVerticalSpeed ?? value('fcuVerticalSpeed'), vsEngaged) },
       baro: { text: baroText(setting, this.std), std: this.std },
       rmp: {
         com1: [freqText(value('com1Active')), freqText(value('com1Standby'))],

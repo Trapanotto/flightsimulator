@@ -279,7 +279,11 @@ class A320 extends AircraftModel {
     const hl =
       a3.slats !== undefined && a3.flaps !== undefined
         ? { slats: a3.slats, flaps: a3.flaps }
-        : highLift(t.flaps, t.ias / 0.514444);
+        : highLift(
+            cockpit?.has('flaps') ? cockpit.get('flaps') : Math.round(c.flaps * 4),
+            t.flaps,
+            t.ias / 0.514444,
+          );
     s.slats = this.follow(s.slats, hl.slats, dt, 0.25);
     s.flaps = this.follow(s.flaps, hl.flaps, dt, 0.25);
     for (const side of ['L', 'R']) {
@@ -291,7 +295,11 @@ class A320 extends AircraftModel {
         this.slideBy(`${f}_${side}`, Math.min(1, s.flaps / 22));
       }
     }
-    const sp = spoilerPose(t.speedbrake ?? 0, a, t.onGround);
+    const sp = spoilerPose(
+      a3.groundSpoilers ? 1 : (t.speedbrake ?? 0),
+      a,
+      t.onGround || !!a3.groundSpoilers,
+    );
     const target = [...sp.left, ...sp.right];
     ['L', 'R'].forEach((side, w) => {
       ['Spoiler1', 'Spoiler234', 'Spoiler5'].forEach((name, i) => {

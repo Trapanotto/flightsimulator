@@ -291,18 +291,21 @@ export function gearLights(gear: number): { down: boolean; transit: boolean; up:
 
 // ---- slats and flaps ---------------------------------------------------------------------------
 
-/** Slat and flap angles (degrees) of each flap lever position of the A320 (FCOM 1.27.50). */
+/**
+ * Slat and flap angles (degrees) of each flap lever position, as the simulation flies them
+ * (A320 FCOM 1.27.50; FULL is 35 degrees of flap, 	elemetry.flaps is the share of 35).
+ */
 export const CONFIGS = [
   { label: '0', slats: 0, flaps: 0 },
   { label: '1', slats: 18, flaps: 0 },
   { label: '2', slats: 22, flaps: 15 },
   { label: '3', slats: 22, flaps: 20 },
-  { label: 'FULL', slats: 27, flaps: 40 },
+  { label: 'FULL', slats: 27, flaps: 35 },
 ] as const;
 /** CONF 1+F: lever 1 with the flaps at 10 for take-off (they retract above 210 kt). */
 export const CONF_1F = { label: '1+F', slats: 18, flaps: 10 } as const;
 export const SLAT_MAX = 27;
-export const FLAP_MAX = 40;
+export const FLAP_MAX = 35;
 
 export interface HighLift {
   slats: number;
@@ -312,24 +315,17 @@ export interface HighLift {
 }
 
 /**
- * Slats and flaps for the flap position the simulation reports (`telemetry.flaps`, the lever's
- * share 0..1 in five steps, lagged): between positions they move together; lever 1 means 1+F
- * below 210 kt.
+ * Slats and flaps when the flight controls do not report them: the flaps where the
+ * simulation has them (	elemetry.flaps, the share of 35 degrees), the slats where the flap
+ * lever (0..4) sends them; lever 1 means 1+F below 210 kt.
  */
-export function highLift(share: number, iasKt: number): HighLift {
-  const k = Math.min(Math.max(share, 0), 1) * 4;
-  const i = Math.min(Math.floor(k), 3);
-  const f = k - i;
-  const one = iasKt < 210 ? CONF_1F : CONFIGS[1];
-  const at = (n: number) => (n === 1 ? one : CONFIGS[n]!);
-  const a = at(i);
-  const b = at(i + 1);
-  const slats = a.slats + (b.slats - a.slats) * f;
-  const flaps = a.flaps + (b.flaps - a.flaps) * f;
-  const near = Math.abs(k - Math.round(k)) < 0.02 ? at(Math.round(k)).label : '';
-  return { slats, flaps, label: near };
+export function highLift(lever: number, flapShare: number, iasKt: number): HighLift {
+  const n = Math.min(Math.max(Math.round(lever), 0), 4);
+  const conf = n === 1 && iasKt < 210 ? CONF_1F : CONFIGS[n]!;
+  const flaps = Math.min(Math.max(flapShare, 0), 1) * FLAP_MAX;
+  const slats = conf.slats;
+  return { slats, flaps, label: configLabel(slats, flaps) };
 }
-
 /** The label of the configuration slats and flaps are in, '' while they move between. */
 export function configLabel(slats: number, flaps: number): string {
   for (const c of [...CONFIGS, CONF_1F])
