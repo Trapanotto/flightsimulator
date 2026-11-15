@@ -389,6 +389,12 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
   };
   const input = new PilotInput();
   const assist = new RudderAssist();
+  /**
+   * 1 on the ground, fading to 0 in the seconds after lift-off. On the ground the roll keys
+   * steer: nobody without pedals reaches for Q and E to keep a take-off run straight, and
+   * ailerons held over at rotation speed lay a fighter on its wing tip the moment it flies.
+   */
+  let groundHandling = 1;
   const keyboard = new Keyboard();
   const events: InputEvents = { flapsDown: 0, flapsUp: 0, gearToggle: 0 };
   let flight: Flight | undefined;
@@ -834,6 +840,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
         flight.aircraft.controls.gearDown,
       );
       assist.reset();
+      groundHandling = 1;
       env.heightOffset = 0;
       game.screen.value = 'flight';
     },
@@ -1196,6 +1203,21 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
         if (!flying || aircraft.telemetry.crashed) return;
         input.update(stepDt, keyboard.down, pad, touch, events, options, aircraft.controls);
         events.flapsDown = events.flapsUp = events.gearToggle = events.speedbrake = 0;
+        {
+          const t = aircraft.telemetry;
+          const c = aircraft.controls;
+          groundHandling = t.onGround ? 1 : Math.max(0, groundHandling - stepDt / 2.5);
+          if (groundHandling > 0) {
+            // Left and right steer the wheels and the rudder, gently at speed (what turns
+            // the aircraft round on the apron swings it off the runway at 100 knots).
+            if (t.onGround) {
+              const share = Math.min(1, Math.max(0.1, 10 / Math.max(t.groundSpeed, 1)));
+              c.yaw = Math.min(1, Math.max(-1, c.yaw + c.roll * share));
+            }
+            // A little aileron stays for a crosswind; all of it comes back once airborne.
+            c.roll *= 1 - 0.8 * groundHandling;
+          }
+        }
         assist.apply(stepDt, aircraft.telemetry, aircraft.controls);
       });
       // The menu's aircraft is not simulated: it follows its loop, and so does the camera.

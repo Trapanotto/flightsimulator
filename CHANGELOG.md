@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.3 (2026-11-15)
+
+- **Lenken am Boden:** Links und rechts (A/D, Pfeiltasten, Steuerknüppel) lenken am Boden
+  das Flugzeug, bei hoher Geschwindigkeit sanft. Das Querruder setzt erst nach dem Abheben
+  allmählich ein. Vorher legte sich vor allem die F/A-18 beim Abheben schlagartig auf die
+  Seite, wenn man im Startlauf mit A/D korrigierte.
+
 ## 1.0.2 (2026-11-15)
 
 - **Steigflug freihändig:** Cessna und PC-12 drehen nach dem Start nicht mehr nach links weg.
