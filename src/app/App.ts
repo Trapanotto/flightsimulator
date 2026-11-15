@@ -75,6 +75,10 @@ const KT = 0.514444;
 function keyAuthority(aircraft: SimAircraft): number {
   const { info, telemetry } = aircraft;
   if (!info.category || info.category === 'piston') return keyAuthorityAt(telemetry.ias, info.vs);
+  // Fly-by-wire in the air: the stick asks for load factor and the computers protect the
+  // aircraft, so the keys may have (nearly) all of it; cut down they fly like treacle.
+  if (!telemetry.onGround && info.category === 'fighter') return 1;
+  if (!telemetry.onGround && info.category === 'airliner') return 0.7;
   return 0.6 * keyAuthorityAt(telemetry.ias, info.vs0);
 }
 

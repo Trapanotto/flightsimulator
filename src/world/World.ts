@@ -53,6 +53,11 @@ export interface WorldQuality {
   detail: boolean;
   /** Lakes and rivers as a water surface. */
   water: boolean;
+  /**
+   * Single trees standing in the woods. Off for now: they do not look good enough yet next to
+   * the orthophoto, which already shows the woods.
+   */
+  trees: boolean;
 }
 
 /** Presets per device class; the app picks one. */
@@ -71,6 +76,7 @@ export const WORLD_QUALITY: Record<'desktop' | 'mobile', WorldQuality> = {
     anisotropy: 8,
     detail: true,
     water: true,
+    trees: false,
   },
   mobile: {
     device: 'mobile',
@@ -86,6 +92,7 @@ export const WORLD_QUALITY: Record<'desktop' | 'mobile', WorldQuality> = {
     anisotropy: 4,
     detail: true,
     water: true,
+    trees: false,
   },
 };
 
@@ -179,7 +186,7 @@ export class World {
     this.object.name = 'World';
     this.materials = new TerrainMaterials({ detail: quality.detail, water: quality.water });
     this.layers = [
-      createTreeLayer(frame, quality.device),
+      ...(quality.trees ? [createTreeLayer(frame, quality.device)] : []),
       createBuildingLayer(frame, quality.device),
       createAirportLayer(frame, quality.device),
     ];

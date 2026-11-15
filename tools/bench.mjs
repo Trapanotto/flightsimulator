@@ -6,6 +6,7 @@
 //   --only=<name>   one scene
 //   --seconds=<n>   measuring time per scene (default 20)
 //   --size=<w>x<h>  another window size for every scene
+//   --weather=<w>   another weather for every scene (clear, fair, cloudy, overcast, lowStratus)
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
@@ -80,6 +81,7 @@ const only = arg('only');
 const seconds = +(arg('seconds') ?? 20);
 const save = process.argv.includes('--save');
 // --size=1280x720 measures every scene at another size (is it the pixels or the processor?).
+const weather = arg('weather');
 const size = arg('size')?.split('x').map(Number);
 const baselineFile = path.resolve('tools/bench-baseline.json');
 const baseline = existsSync(baselineFile) ? JSON.parse(readFileSync(baselineFile, 'utf8')) : {};
@@ -121,7 +123,10 @@ try {
     // A fixed date: the same sun and the same season every run.
     await page.goto(`${base}?t=2026-06-21T09:00:00Z${scene.query ? '&' + scene.query : ''}`);
     await page.waitForFunction(() => window.__app?.ready, null, { timeout: 120_000 });
-    await page.evaluate((plan) => window.__app.startFlight(plan), scene.plan);
+    await page.evaluate((plan) => window.__app.startFlight(plan), {
+      ...scene.plan,
+      ...(weather ? { weather } : {}),
+    });
     await page.waitForFunction(() => window.__app.game.screen.value === 'flight', null, {
       timeout: 120_000,
     });
