@@ -119,9 +119,9 @@ function panelArea(y0: number, y1: number) {
   return a;
 }
 
-const SLAT: StripControl = { kind: 'slat', effectiveness: 0.5 };
-const INNER_FLAP: StripControl = { kind: 'flap', effectiveness: 0.85, extension: 0.3 };
-const OUTER_FLAP: StripControl = { kind: 'flap', effectiveness: 0.8, extension: 0.25 };
+const SLAT: StripControl = { kind: 'slat', effectiveness: 0.45 };
+const INNER_FLAP: StripControl = { kind: 'flap', effectiveness: 0.68, extension: 0.3 };
+const OUTER_FLAP: StripControl = { kind: 'flap', effectiveness: 0.63, extension: 0.25 };
 
 function wingStrips(): StripDef[] {
   const strips: StripDef[] = [];
@@ -253,15 +253,15 @@ const CFM56_5B4: TurbofanDef['engine'] = {
   ratedThrust: 27_000 * LBF,
   throttleRatio: 1.052,
   temperatureLapse: 3.5,
-  machLapse: 0.4,
+  machLapse: 0.35,
   n1Rpm: 5000,
   n1Max: 0.95,
   n1Idle: 0.195,
   n2Max: 0.99,
   n2Idle: 0.585,
   thrust: [
-    [0.2, 0.03],
-    [0.4, 0.12],
+    [0.2, 0.06],
+    [0.4, 0.14],
     [0.6, 0.3],
     [0.75, 0.5],
     [0.85, 0.7],
@@ -513,7 +513,7 @@ export const A320: AircraftDefinition = {
     holdLimitPressure: Infinity,
     aileronRigging: 0,
     rudderRigging: 0,
-    stallShift: 0.25,
+    stallShift: 0.35,
     flapDrag: 0.07,
     spoilerDrag: 0.12,
     spoilerRate: 1.5,

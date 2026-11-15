@@ -16,7 +16,7 @@
  * Euler, which keeps the phugoid and the gear oscillation from gaining energy.
  */
 import type { Avionics, AvionicsInput, AvionicsUnit } from './avionicsTypes';
-import { C172_CONTROLS, CockpitPanel } from './cockpit';
+import { C172_CONTROLS, CockpitPanel, type ControlSpec } from './cockpit';
 import {
   createControlLaw,
   newSurfaceCommand,
@@ -524,40 +524,45 @@ export class FlightModel implements SimAircraft {
     const c = this.controls;
     const n = this.engines.length;
     const detents = this.def.controls.flapDetents.length - 1;
-    const bindLever = (
-      id: string,
-      arr: () => number[] | undefined,
-      spec = p.specs.find((s) => s.id === id),
-    ) => {
-      if (!spec) return;
-      // A selector's positions spread over 0..1 (cut-off, ground idle, flight idle).
-      const last = spec.kind === 'selector' ? (spec.positions?.length ?? 1) - 1 : 0;
-      const toLever = (v: number) => (last > 0 ? v / last : v);
-      const fromLever = (v: number) => (last > 0 ? Math.round(clamp(v, 0, 1) * last) : v);
-      p.bind(
-        id,
-        () => fromLever(arr()?.[0] ?? 0),
-        (v) => {
-          const a = arr();
-          if (a) for (let i = 0; i < n; i++) a[i] = toLever(v);
-        },
-      );
+    // A selector's positions spread over 0..1 (cut-off, ground idle, flight idle).
+    const positions = (spec: ControlSpec) =>
+      spec.kind === 'selector' ? (spec.positions?.length ?? 1) - 1 : 0;
+    const toLever = (last: number, v: number) => (last > 0 ? v / last : v);
+    const fromLever = (last: number, v: number) =>
+      last > 0 ? Math.round(clamp(v, 0, 1) * last) : v;
+    const bindLever = (id: string, arr: () => number[] | undefined) => {
+      const spec = p.specs.find((s) => s.id === id);
+      if (spec) {
+        const last = positions(spec);
+        p.bind(
+          id,
+          () => fromLever(last, arr()?.[0] ?? 0),
+          (v) => {
+            const a = arr();
+            if (a) for (let i = 0; i < n; i++) a[i] = toLever(last, v);
+          },
+        );
+      }
+      // One lever per engine (`throttle1`, `throttle2`...), also where there is no common one.
       for (let i = 0; i < n; i++) {
         const one = p.specs.find((s) => s.id === `${id}${i + 1}`);
-        if (one)
-          p.bind(
-            one.id,
-            () => fromLever(arr()?.[i] ?? 0),
-            (v) => {
-              const a = arr();
-              if (a) a[i] = toLever(v);
-            },
-          );
+        if (!one) continue;
+        const last = positions(one);
+        p.bind(
+          one.id,
+          () => fromLever(last, arr()?.[i] ?? 0),
+          (v) => {
+            const a = arr();
+            if (a) a[i] = toLever(last, v);
+          },
+        );
       }
     };
     bindLever('throttle', () => c.throttle);
     bindLever('mixture', () => c.mixture);
     bindLever('condition', () => c.condition);
+    // A jet's engine masters are its condition levers.
+    if (!p.has('condition1')) bindLever('engineMaster', () => c.condition);
     // The selector's positions are the flap detents; ControlInput spreads them over 0..1.
     if (p.has('flaps'))
       p.bind(

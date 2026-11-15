@@ -33,8 +33,14 @@ import type {
 import type { LateralGuidance, VerticalGuidance } from '../avionics/autopilot';
 import type { AutopilotComputer, AutopilotContext } from '../avionics/config';
 import { DEG, FPM, FT, KT, NM, wrap180, wrap360 } from '../avionics/geo';
-import { clamp } from '../math';
-import { characteristicSpeeds, deltaNToStick, newSpeeds, type A320Config } from './speeds';
+import { clamp, lookup } from '../math';
+import {
+  CLIMB_RATING,
+  characteristicSpeeds,
+  deltaNToStick,
+  newSpeeds,
+  type A320Config,
+} from './speeds';
 import { newAirbusTelemetry } from './telemetry';
 
 const G = 9.80665;
@@ -211,8 +217,10 @@ export class A320Fmgc implements AutopilotComputer {
     this.calloutTimer = Math.max(0, this.calloutTimer - dt);
     if (this.calloutTimer === 0) this.callout = '';
     this.airTime = input.onGround ? 0 : this.airTime + dt;
-    // The flight guidance computers run on AC.
-    if (!(input.powered && sys.electrical.acEss)) {
+    // The flight guidance computers run on AC (as the system computers reported it at the
+    // end of the last step; before their first report, from the avionics bus alone).
+    const ac = sys.grossMass > 0 ? sys.electrical.acEss : true;
+    if (!(input.powered && ac)) {
       if (this.ap1 || this.ap2) this.disconnect();
       this.athr = 'off';
       this.powered = false;
@@ -331,7 +339,7 @@ export class A320Fmgc implements AutopilotComputer {
 
     this.flyLateral(ctx, input, aglFt);
     this.flyVertical(ctx, input, altFt, aglFt, ias, target, config);
-    this.flyThrust(dt, ias, target, leverMax, aglFt);
+    this.flyThrust(dt, ias, target, leverMax, aglFt, altFt);
     this.out.pitchTrim = cockpit.get('trim');
     this.fill(input, ctx, true, target, mach, ias);
   }
@@ -810,7 +818,14 @@ export class A320Fmgc implements AutopilotComputer {
     } else o.pitch = input.pilotPitch;
   }
 
-  private flyThrust(dt: number, ias: number, target: number, leverMax: number, aglFt: number) {
+  private flyThrust(
+    dt: number,
+    ias: number,
+    target: number,
+    leverMax: number,
+    aglFt: number,
+    altFt: number,
+  ) {
     const o = this.out;
     if (this.athr !== 'active') {
       o.throttle = undefined;
@@ -824,7 +839,7 @@ export class A320Fmgc implements AutopilotComputer {
       this.say('RETARD');
       this.flareRetard = true;
       lever = 0;
-    } else if (mode === 'THR CLB') lever = CLB;
+    } else if (mode === 'THR CLB') lever = lookup(CLIMB_RATING, altFt);
     else if (mode === 'THR IDLE') lever = 0;
     else {
       // SPEED / MACH: proportional and integral on the speed, damped by the acceleration.

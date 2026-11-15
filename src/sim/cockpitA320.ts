@@ -110,8 +110,8 @@ export const A320_CONTROLS: readonly ControlSpec[] = [
   button('fcuHeadingPull'),
   button('fcuAltitudePush'),
   button('fcuAltitudePull'),
-  /** Speed window, knots (or hundredths of Mach while `fcuMach` is on). */
-  { id: 'fcuSpeed', kind: 'knob', min: 100, max: 399, step: 1, initial: 250 },
+  /** Speed window, knots 100..399 (or hundredths of Mach, 10..99, while `fcuMach` is on). */
+  { id: 'fcuSpeed', kind: 'knob', min: 10, max: 399, step: 1, initial: 250 },
   /** Pushed in: managed speed (the plan's); pulled: the selected one. 1 = managed. */
   toggle('fcuSpeedManaged', 1),
   button('fcuMach'),

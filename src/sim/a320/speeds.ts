@@ -39,40 +39,42 @@ export const VLE = 280;
 /** Maximum lift coefficient (on 122.6 m²) at low Mach of each configuration, gear up. */
 export const CL_MAX: Record<A320Config, number> = {
   '0': 1.235,
-  '1': 1.55,
-  '1+F': 1.85,
-  '2': 2.02,
-  '3': 2.2,
-  FULL: 2.71,
+  '1': 1.533,
+  '1+F': 1.793,
+  '2': 2.026,
+  '3': 2.159,
+  FULL: 2.688,
 };
 
 /**
- * Angles of attack (body, rad) of the protections: alpha prot near 87 % of the maximum
- * lift, alpha floor a little above, alpha max at 95 %, all clear of the stall.
+ * Angles of attack (body, rad) of the protections, from this airframe's lift curves (the
+ * stall test of a320.performance.test.ts): alpha prot near 87 % of the maximum lift, alpha
+ * floor a little above, alpha max near 95 %, all clear of the stall. The slatted wing's
+ * lift rises slowly over a wide range of angle, so they lie far apart with slats out.
  */
 export const ALPHA_PROT: Record<A320Config, number> = {
   '0': 10.4 * DEG,
-  '1': 11 * DEG,
-  '1+F': 11.4 * DEG,
-  '2': 10.4 * DEG,
-  '3': 9.8 * DEG,
-  FULL: 8.2 * DEG,
+  '1': 14 * DEG,
+  '1+F': 12.1 * DEG,
+  '2': 12.8 * DEG,
+  '3': 11.8 * DEG,
+  FULL: 13 * DEG,
 };
 export const ALPHA_FLOOR: Record<A320Config, number> = {
-  '0': 11.0 * DEG,
-  '1': 12 * DEG,
-  '1+F': 12.4 * DEG,
-  '2': 11.4 * DEG,
-  '3': 10.8 * DEG,
-  FULL: 9.4 * DEG,
+  '0': 11 * DEG,
+  '1': 15.5 * DEG,
+  '1+F': 13.3 * DEG,
+  '2': 14.5 * DEG,
+  '3': 13.5 * DEG,
+  FULL: 14.5 * DEG,
 };
 export const ALPHA_MAX: Record<A320Config, number> = {
-  '0': 12.0 * DEG,
-  '1': 13.5 * DEG,
-  '1+F': 14.5 * DEG,
-  '2': 12.9 * DEG,
-  '3': 12.1 * DEG,
-  FULL: 10.7 * DEG,
+  '0': 12 * DEG,
+  '1': 18 * DEG,
+  '1+F': 17 * DEG,
+  '2': 18 * DEG,
+  '3': 17.5 * DEG,
+  FULL: 18 * DEG,
 };
 /** Share of the maximum lift at alpha prot and alpha max (what the speeds below use). */
 const CL_PROT = 0.87;
@@ -174,3 +176,16 @@ export const newSpeeds = (): CharacteristicSpeeds => ({
   vmax: 0,
   vfeNext: 0,
 });
+
+/**
+ * The engine control's maximum climb rating as the autothrust flies it (THR CLB), in thrust
+ * lever travel: well below the CLB detent's take-off-like thrust low down, where the climb
+ * rating is a derate, rising to the detent's value aloft where every rating meets the
+ * engine's limits. Tuned to the climb performance (see a320.performance.test.ts).
+ */
+export const CLIMB_RATING: readonly (readonly [number, number])[] = [
+  [0, 0.49],
+  [10_000, 0.51],
+  [20_000, 0.57],
+  [28_000, 0.62],
+];
