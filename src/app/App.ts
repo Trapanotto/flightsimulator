@@ -681,6 +681,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     checkItem: () => deck?.checkItem(),
     setFailure: (id, failed) => deck?.setFailure(id, failed),
     showAircraft(id) {
+      showcase.sideShift = id ? 0.03 : 0.14;
       const next = id ?? 'c172';
       if (next === menuAircraft) return;
       menuAircraft = next;

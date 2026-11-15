@@ -6,7 +6,7 @@ import { type FlightPlan, game, lang, settings } from '@ui';
 import { ATC_WORLD, comFrequency } from './atcWorld';
 import {
   AtcController,
-  C172_CHECKLISTS,
+  checklistsFor,
   ChecklistRunner,
   atcConfigFromPlan,
   atcSituation,
@@ -100,7 +100,11 @@ export class FlightDeck {
     }
     game.atc.value = this.atc ? this.atc.view() : null;
 
-    this.checklists = new ChecklistRunner(C172_CHECKLISTS, aircraft.cockpit.specs, this.language);
+    this.checklists = new ChecklistRunner(
+      checklistsFor(plan.aircraft),
+      aircraft.cockpit.specs,
+      this.language,
+    );
     game.checklists.value = this.checklists.list();
     game.checklist.value = null;
     game.failures.value = [];

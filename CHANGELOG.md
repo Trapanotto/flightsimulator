@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.0-alpha.7 – Phase 4, erster Teil: Pilatus PC-12 und Hangar (2026-11-15)
+
+- **Pilatus PC-12 NG:** einmotoriger Turboprop mit Einziehfahrwerk und Druckkabine. Flugmodell
+  gegen die Handbuchwerte geprüft, Glascockpit mit vier Bildschirmen, alle Bedienelemente
+  anklickbar, Autopilot mit Flight Director, eigene Checklisten und eigener Klang.
+- **Hangar:** jedes Flugzeug fliegend im Bild, mit Beschreibung und Kenndaten.
+- **Flugzeugwahl** in der Flugplanung; Anzeige im Flug je Flugzeugart (Drehmoment und
+  Turbinentemperatur beim Turboprop).
+- **Neue Tasten:** J und M für die Luftbremse, H gehalten für Schubumkehr, G fürs Fahrwerk.
+- **Funk:** Rufzeichen und Sprechweise je Flugzeugtyp, Instrumentenflug mit Freigaben.
+- **Grundlage für weitere Flugzeuge:** Turbinentriebwerke, Einziehfahrwerk, hohe
+  Geschwindigkeiten und mehrere Triebwerke im Flugmodell. A320 und F/A-18 folgen.
+- Die Tastatur steuert schwerere Flugzeuge feinfühliger.
+
 ## 1.0.0-alpha.6 – Phase 3: Tiefe (2026-11-15)
 
 - **Bedienbares Cockpit:** Jeder Schalter, Knopf und Hebel der Cessna 172 lässt sich im

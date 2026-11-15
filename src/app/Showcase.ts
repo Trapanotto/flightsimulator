@@ -29,6 +29,11 @@ export class Showcase {
   s = 0;
   /** Where the aircraft is (degrees, metres above the ellipsoid). */
   readonly geo = { lon: 0, lat: 0, h: 0 };
+  /**
+   * Share of the width the aircraft is moved to the right on wide screens: the menu covers the
+   * left; the hangar has panels on both sides and wants it nearly in the middle.
+   */
+  sideShift = 0.14;
   /** 0..1: how much of the picture shows; dips to 0 around a camera cut. */
   fade = 1;
 
@@ -210,7 +215,7 @@ export class Showcase {
     // On wide screens the menu sits on the left: frame the aircraft in the right part. On
     // upright ones the menu fills the lower half: frame it above.
     const { width: w, height: h } = viewport;
-    const shiftX = w > h * 1.3 ? -Math.round(w * 0.14) : 0;
+    const shiftX = w > h * 1.3 ? -Math.round(w * this.sideShift) : 0;
     const shiftY = w < h ? Math.round(h * 0.2) : 0;
     // Upright screens see little to the sides: a wider angle keeps the aircraft whole.
     if (w < h) fov += 15;

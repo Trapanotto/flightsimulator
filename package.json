@@ -1,7 +1,7 @@
 {
   "name": "trapanotto-flight-simulator",
   "private": true,
-  "version": "1.0.0-alpha.6",
+  "version": "1.0.0-alpha.7",
   "type": "module",
   "description": "Flight simulator in the browser over the real Switzerland (swisstopo data, Three.js on WebGPU).",
   "license": "MIT",
