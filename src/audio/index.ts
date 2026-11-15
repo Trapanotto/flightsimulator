@@ -3,13 +3,63 @@
  * Depends on: sim.
  */
 export { AudioEngine } from './AudioEngine';
+export { AircraftSound, type AircraftSoundInput } from './AircraftSound';
 export {
-  AircraftSound,
+  A320_SOUND,
   C172_SOUND,
-  type AircraftSoundInput,
+  FA18_SOUND,
+  MAX_ENGINES,
+  PC12_SOUND,
+  soundProfileFor,
+  type AirframeSpec,
+  type CabinSpec,
+  type EngineKind,
+  type Position,
   type SoundProfile,
-} from './AircraftSound';
-export { CockpitSound, DISCONNECT_TONE, type CockpitSoundInput } from './CockpitSound';
+  type TurbineSpec,
+  type WarningSpec,
+} from './profiles';
+export {
+  bladePassHz,
+  cabinWeighted,
+  coreFromFan,
+  coreHz,
+  coreTarget,
+  fanFromCore,
+  fanTipMach,
+  featherTarget,
+  jetVelocity,
+  lightOffRumble,
+  readTurbine,
+  roarCornerHz,
+  spoolCore,
+  turbineMode,
+  turbineVoice,
+  voiceLoudness,
+  SOUND_SPEED,
+  type EngineVoice,
+  type TurbineMode,
+  type TurbineReading,
+  type VoiceMemory,
+} from './turbine';
+export {
+  airframeWind,
+  buffetLevel,
+  dopplerFactor,
+  gearRoarLevel,
+  listening,
+  shockLevel,
+  soundSpeedAt,
+  type CameraRelative,
+  type Listening,
+} from './airframe';
+export { CLACKER_HZ, SHAKER_HZ } from './warnings';
+export {
+  CAVALRY_CHARGE,
+  CockpitSound,
+  DISCONNECT_TONE,
+  type CockpitSoundInput,
+} from './CockpitSound';
 export { NavAudio, type NavAudioInput } from './NavAudio';
 export {
   RadioVoice,

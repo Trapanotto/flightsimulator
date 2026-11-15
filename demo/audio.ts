@@ -2,16 +2,22 @@
 // Served by Vite at /flightsimulator/demo/audio.html. Click a scenario to hear it; the browser
 // tests call window.__demo.render(name) to render it offline and analyse the samples.
 import {
+  A320_SOUND,
   AircraftSound,
   AudioEngine,
   CockpitSound,
+  FA18_SOUND,
   NavAudio,
+  PC12_SOUND,
   RadioSquelch,
   RadioVoice,
   browserSpeech,
+  fanFromCore,
   type AircraftSoundInput,
+  type CameraRelative,
+  type SoundProfile,
 } from '@audio';
-import type { AvionicsTelemetry, Cockpit, Telemetry } from '@sim';
+import type { AvionicsTelemetry, Cockpit, EngineTelemetry, Telemetry } from '@sim';
 
 const FS = 48_000;
 /** Frames per second of the fake app loop. */
@@ -105,6 +111,8 @@ const cockpitWith = (values: Record<string, number>): Cockpit => ({
 /** A scenario: built once on an engine, then stepped every frame with the time since start. */
 interface Scenario {
   duration: number;
+  /** Output channels of the offline render (stereo for the twins); mono if not given. */
+  channels?: number;
   build(audio: AudioEngine): Promise<(t: number) => void>;
 }
 
@@ -253,6 +261,253 @@ const SCENARIOS: Record<string, Scenario> = {
   },
 };
 
+// ---- Phase 4: the turbine types, through a whole ground run ----
+
+/**
+ * The phases of a ground run, s: stopped, start (starter, light-off at `lit`), idle, full
+ * power, back to idle, reverse or afterburner, idle, shutdown.
+ */
+const RUN = {
+  start: 1,
+  lit: 5,
+  idle: 9,
+  full: 13,
+  fullEnd: 19,
+  special: 21,
+  specialEnd: 25,
+  shutdown: 27,
+  end: 34,
+};
+
+/** A fake engine model, stepped per frame: enough to drive the sound through every mode. */
+function groundRun(profile: SoundProfile, report: boolean) {
+  const spec = profile.turbine!;
+  const n = profile.engines?.length ?? 1;
+  let core = 0;
+  let prop = 0;
+  let last = 0;
+  let thrust = 0;
+  return (t: number): { engines: EngineTelemetry[]; starters: boolean[] } => {
+    const dt = Math.max(0, t - last);
+    last = t;
+    const starting = t >= RUN.start && t < RUN.idle && core < spec.starterCutout;
+    const running = t >= RUN.lit && t < RUN.shutdown;
+    const full = t >= RUN.full && t < RUN.fullEnd;
+    const special = t >= RUN.special && t < RUN.specialEnd;
+    const fighter = profile.engine === 'afterburning';
+    // The fighter's special phase is the afterburner, the others' reverse.
+    const burner = fighter && special;
+    const reversing = !fighter && special;
+    const power = full || burner ? 1 : reversing ? 0.75 : 0;
+    // Thrust lags the lever a little, the speeds lag more.
+    thrust += (power - thrust) * (1 - Math.exp(-dt / 0.6));
+    let target = 0;
+    if (running) target = spec.idleCore + (100 - spec.idleCore) * power ** 0.5;
+    else if (starting) target = spec.lightOff + 6;
+    const tau = target > core ? (running && core < spec.idleCore ? 1.4 : 1.2) : 2.5;
+    core = target + (core - target) * Math.exp(-dt / tau);
+    if (core < 0.05 && !running && !starting) core = 0;
+    const turboprop = profile.engine === 'turboprop';
+    // The free propeller: unfeathers to about 1000 rpm at idle, governed at 1700 with power.
+    const propTarget =
+      running && core > spec.idleCore - 6 ? 1000 + 700 * Math.min(1, thrust * 2.5) : 0;
+    prop += (propTarget - prop) * (1 - Math.exp(-dt / (propTarget > prop ? 1.5 : 4)));
+    const fan = fanFromCore(spec, core);
+    const engines: EngineTelemetry[] = [];
+    for (let i = 0; i < n; i++) {
+      // The second engine of a pair turns a hair faster.
+      const k = 1 + 0.004 * i;
+      const base = {
+        running,
+        rpm: turboprop ? prop : (fan / 100) * spec.fanRpm100 * k,
+        power: burner ? 1.6 : thrust,
+        fuelFlow: 0,
+      };
+      engines.push(
+        report
+          ? {
+              ...base,
+              n2: core * k,
+              n1: turboprop ? undefined : fan * k,
+              propRpm: turboprop ? prop : undefined,
+              torque: turboprop ? thrust : undefined,
+              afterburner: fighter ? (burner ? 1 : 0) : undefined,
+              reversing,
+              starting,
+            }
+          : // Only what a phase 3 engine reports (a jet not even its fan rpm).
+            { ...base, rpm: turboprop ? base.rpm : 0 },
+      );
+    }
+    return { engines, starters: Array.from({ length: n }, () => starting) };
+  };
+}
+
+const run = (profile: SoundProfile, inside: boolean, report = true): Scenario => ({
+  duration: RUN.end,
+  channels: 2,
+  async build(audio) {
+    const s = new AircraftSound(audio, profile);
+    await s.start();
+    const engine = groundRun(profile, report);
+    return (t) => {
+      const { engines, starters } = engine(t);
+      const reversing = !report && t >= RUN.special && t < RUN.specialEnd;
+      if (reversing) for (const e of engines) e.reversing = true;
+      s.update(telemetry({ time: t, engines }), inside, true, report ? {} : { starters });
+    };
+  },
+});
+
+/** An aircraft in flight with its engines steady; `over` sets the rest per time. */
+const steady = (
+  profile: SoundProfile | undefined,
+  duration: number,
+  inside: boolean,
+  engine: Partial<EngineTelemetry>,
+  over: (t: number) => { t?: Partial<Telemetry>; input?: AircraftSoundInput },
+): Scenario => ({
+  duration,
+  channels: 2,
+  async build(audio) {
+    const s = new AircraftSound(audio, profile);
+    await s.start();
+    const n = profile?.engines?.length ?? 1;
+    const engines = Array.from({ length: n }, () => ({
+      running: true,
+      rpm: 0,
+      power: 0,
+      fuelFlow: 0,
+      ...engine,
+    }));
+    return (t) => {
+      const o = over(t);
+      s.update(
+        telemetry({ time: t, engines, onGround: false, gear: 0, ...o.t }),
+        inside,
+        true,
+        o.input,
+      );
+    };
+  },
+});
+
+const A320_CRUISE = { n1: 82, n2: 92, rpm: 4100, power: 0.5 };
+
+Object.assign(SCENARIOS, {
+  'pc12-out': run(PC12_SOUND, false),
+  'pc12-in': run(PC12_SOUND, true),
+  'a320-out': run(A320_SOUND, false),
+  'a320-in': run(A320_SOUND, true),
+  'fa18-out': run(FA18_SOUND, false),
+  'fa18-in': run(FA18_SOUND, true),
+  // The same runs with only running and power reported: the sound fills the rest.
+  'a320-fallback': run(A320_SOUND, false, false),
+  'pc12-fallback': run(PC12_SOUND, false, false),
+
+  // Cruise inside: the Cessna at 110 kt, the Airbus at 250 kt indicated (and without wind).
+  'c172-cruise-in': steady(undefined, 4, true, { rpm: 2400, power: 0.75 }, () => ({
+    t: { tas: 56.6, ias: 56.6, gear: 1 },
+  })),
+  'a320-cruise-in': steady(A320_SOUND, 4, true, A320_CRUISE, () => ({
+    t: { tas: 200, ias: 128.6 },
+  })),
+  'a320-cruise-in-still': steady(A320_SOUND, 4, true, A320_CRUISE, () => ({ t: {} })),
+
+  // The airliner from the cabin: gear up 1..9 s, flaps 10..14, speed brake 15..19, stall
+  // warning 20..22, overspeed 23..25, altitude alert at 26, gear down 30..38, touch-down at
+  // 40 s at 70 m/s sinking 1.5 m/s, rolling out.
+  'a320-airframe': steady(A320_SOUND, 45, true, { n1: 45, n2: 75, rpm: 2250, power: 0.12 }, (t) => {
+    const gear = t < 1 ? 1 : t < 9 ? 1 - (t - 1) / 8 : t < 30 ? 0 : Math.min(1, (t - 30) / 8);
+    const onGround = t >= 40;
+    const gs = onGround ? Math.max(5, 70 - (t - 40) * 6) : 75;
+    return {
+      t: {
+        gear,
+        flaps: t < 10 ? 0 : Math.min(0.5, ((t - 10) / 4) * 0.5),
+        speedbrake: t >= 15 && t < 19 ? 1 : 0,
+        stallWarning: t >= 20 && t < 22,
+        ias: gs,
+        tas: gs,
+        groundSpeed: gs,
+        onGround,
+        verticalSpeed: onGround ? 0 : -1.5,
+      },
+      input: { overspeed: t >= 23 && t < 25, altitudeAlert: t >= 26 && t < 27 },
+    };
+  }),
+  // The PC-12 cockpit: stick shaker 1..3 s, overspeed 4..6, altitude alert at 7.
+  'pc12-warnings': steady(
+    PC12_SOUND,
+    9,
+    true,
+    { rpm: 1700, propRpm: 1700, n2: 85, torque: 0.6, power: 0.6 },
+    (t) => ({
+      t: { stallWarning: t >= 1 && t < 3, ias: 80, tas: 80 },
+      input: { overspeed: t >= 4 && t < 6, altitudeAlert: t >= 7 },
+    }),
+  ),
+  // The fighter's cockpit accelerating from Mach 0.6 to 1.2 at military power.
+  'fa18-transonic': steady(
+    FA18_SOUND,
+    20,
+    true,
+    { n1: 100, n2: 100, rpm: 13_270, power: 1 },
+    (t) => {
+      const mach = 0.6 + (0.6 * t) / 20;
+      return { t: { mach, tas: mach * 295, ias: mach * 295 * 0.6, altitude: 11_000 } };
+    },
+  ),
+  // A fly-by of the airliner at 80 m/s, 60 m beside the camera, passing at 10 s.
+  'a320-flyby': steady(A320_SOUND, 20, false, { n1: 70, n2: 85, rpm: 3500, power: 0.35 }, (t) => {
+    const camera: CameraRelative = {
+      offset: { x: 800 - 80 * t, y: 60, z: 0 },
+      velocity: { x: -80, y: 0, z: 0 },
+    };
+    return { t: { tas: 80, ias: 80 }, input: { camera } };
+  }),
+
+  // The airliner touching down at 70 m/s sinking 1.5 m/s at 1 s, heard from outside.
+  'a320-touchdown-out': steady(
+    A320_SOUND,
+    4,
+    false,
+    { n1: 22, n2: 60, rpm: 1100, power: 0.02 },
+    (t) => {
+      const onGround = t >= 1;
+      const gs = onGround ? 70 - (t - 1) * 3 : 70;
+      return {
+        t: {
+          gear: 1,
+          onGround,
+          ias: gs,
+          tas: gs,
+          groundSpeed: gs,
+          verticalSpeed: onGround ? 0 : -1.5,
+        },
+      };
+    },
+  ),
+
+  // The Airbus autopilot disconnect: the cavalry charge while the warning stands, 0.5..3.5 s.
+  'a320-disconnect': {
+    duration: 5,
+    async build(audio) {
+      const c = new CockpitSound(audio);
+      c.setAircraft({ id: 'a320', category: 'airliner' });
+      c.start();
+      return (t) => {
+        const av = avionics();
+        av.autopilot.disconnectWarning = t >= 0.5 && t < 3.5;
+        c.update(telemetry({ time: t, avionics: av, systems: systems(28) }), {
+          inside: true,
+          active: true,
+        });
+      };
+    },
+  },
+} satisfies Record<string, Scenario>);
+
 function systems(volts: number): NonNullable<Telemetry['systems']> {
   return {
     busVolts: volts,
@@ -282,10 +537,11 @@ function systems(volts: number): NonNullable<Telemetry['systems']> {
 }
 
 /** Renders a scenario offline; the samples come back as base64 of a Float32Array. */
-async function render(name: string): Promise<{ fs: number; samples: string }> {
+async function render(name: string): Promise<{ fs: number; samples: string; channels: number }> {
   const sc = SCENARIOS[name];
   if (!sc) throw new Error(`no scenario ${name}`);
-  const ctx = new OfflineAudioContext(1, Math.round(sc.duration * FS), FS);
+  const channels = sc.channels ?? 1;
+  const ctx = new OfflineAudioContext(channels, Math.round(sc.duration * FS), FS);
   const audio = new AudioEngine(ctx);
   audio.setVolume(1);
   const step = await sc.build(audio);
@@ -299,11 +555,14 @@ async function render(name: string): Promise<{ fs: number; samples: string }> {
   }
   step(0);
   const buffer = await ctx.startRendering();
-  const bytes = new Uint8Array(buffer.getChannelData(0).buffer);
+  // The channels one after the other.
+  const all = new Float32Array(buffer.length * channels);
+  for (let c = 0; c < channels; c++) all.set(buffer.getChannelData(c), c * buffer.length);
+  const bytes = new Uint8Array(all.buffer);
   let bin = '';
   for (let i = 0; i < bytes.length; i += 0x8000)
     bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return { fs: FS, samples: btoa(bin) };
+  return { fs: FS, samples: btoa(bin), channels };
 }
 
 /** What the platform's speech synthesis offers, and whether a short message gets spoken. */
