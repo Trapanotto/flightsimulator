@@ -1,5 +1,6 @@
 /**
- * Normally aspirated, fuel-injected piston engine driving a fixed-pitch propeller.
+ * Normally aspirated, fuel-injected piston engine driving a fixed-pitch propeller
+ * (propulsion/piston.ts puts it on the airframe).
  *
  * The engine makes torque from the air it breathes (manifold pressure, temperature, rpm) and
  * the mixture; the propeller absorbs torque by advance ratio. The rpm is whatever balances the
@@ -29,13 +30,6 @@ export interface PistonEngineData {
   /** Torque of the starter motor, N m, and the rpm it can turn the engine at. */
   starterTorque: number;
   starterRpm: number;
-}
-
-export interface PropellerData {
-  diameter: number;
-  /** Thrust and power coefficients over advance ratio J = V / (n D). */
-  ct: readonly (readonly [number, number])[];
-  cp: readonly (readonly [number, number])[];
 }
 
 /** Power relative to the best-power mixture, over equivalence ratio. */
@@ -168,39 +162,9 @@ export class PistonEngine {
   }
 }
 
-/** Thrust (N) and torque absorbed (N m) of a fixed-pitch propeller. */
-export interface PropellerOutput {
-  thrust: number;
-  torque: number;
-}
-
-const J_TABLE_END = 3;
-
-/**
- * Thrust and torque of the whole disk turning at n rev/s with axial inflow v (m/s). For
- * large advance ratios (stopped or barely turning propeller) the coefficients are carried on
- * as ~J², which is the same as a drag and a windmilling torque proportional to v².
- */
-export function propellerForces(
-  prop: PropellerData,
-  n: number,
-  v: number,
-  density: number,
-  out: PropellerOutput,
-): PropellerOutput {
-  const D = prop.diameter;
-  const vAxial = Math.max(v, 0);
-  if (n * J_TABLE_END * D > vAxial && n > 1e-3) {
-    const J = vAxial / (n * D);
-    out.thrust = lookup(prop.ct, J) * density * n * n * D ** 4;
-    out.torque = (lookup(prop.cp, J) * density * n * n * D ** 5) / (2 * Math.PI);
-  } else {
-    // n D = v / J_TABLE_END scaled form: coefficient(J) * n² = coefficient(J_end) * (v / (J_end D))²
-    const ctEnd = lookup(prop.ct, J_TABLE_END);
-    const cpEnd = lookup(prop.cp, J_TABLE_END);
-    const nEq = vAxial / (J_TABLE_END * D);
-    out.thrust = ctEnd * density * nEq * nEq * D ** 4;
-    out.torque = (cpEnd * density * nEq * nEq * D ** 5) / (2 * Math.PI);
-  }
-  return out;
-}
+/** The propeller moved to propulsion/propeller.ts; these names stay for existing callers. */
+export {
+  propellerForces,
+  type FixedPitchPropellerData as PropellerData,
+  type PropellerOutput,
+} from './propulsion/propeller';

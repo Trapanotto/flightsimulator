@@ -4,9 +4,9 @@
  * before each evaluation and follows its temperatures after.
  */
 import { clamp } from '../math';
-import type { SystemsData } from './data';
+import type { PistonSystemsData } from './data';
 
-type EngineData = SystemsData['engine'];
+type EngineData = PistonSystemsData;
 
 /** Magneto switch positions as in C172_CONTROLS. */
 export const MAG_OFF = 0;

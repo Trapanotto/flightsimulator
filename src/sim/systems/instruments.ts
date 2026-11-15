@@ -49,6 +49,8 @@ export interface InstrumentInput {
   suction: number;
   turnPowered: boolean;
   lowSuction: number;
+  /** Attitude and heading come from an AHRS slaved to a magnetometer: no drift to adjust. */
+  slaved?: boolean;
   pitotBlocked: boolean;
   /** Altimeter setting, hPa; directional gyro adjustment, degrees. */
   altimeterSetting: number;
@@ -195,10 +197,12 @@ export class Instruments {
     this.bankError = wrapPi(this.bankError);
     // The directional gyro holds a direction in space, so the Earth turns under it: the
     // reading falls by the Earth's rate times the sine of the latitude (11 °/h in Switzerland).
-    const drift = -EARTH_RATE * Math.sin(input.latitude * DEG) * hold;
+    const drift = input.slaved ? 0 : -EARTH_RATE * Math.sin(input.latitude * DEG) * hold;
     this.headingError = wrap180(
       this.headingError - loose * dHeading + drift * dt + tumble * 0.5 * dt,
     );
+    // The magnetometer pulls a slaved heading back to magnetic north.
+    if (input.slaved) this.headingError -= this.headingError * Math.min(1, 0.1 * hold * dt);
   }
 
   /** Heading the compass card would settle on now: magnetic north projected onto the card. */

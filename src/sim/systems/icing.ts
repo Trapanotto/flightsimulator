@@ -25,8 +25,11 @@ export class Icing {
   /** Ice in the pitot tube, 0..1; it blocks at 1 and clears below 0.6. */
   pitot = 0;
   pitotBlocked = false;
+  /** Time into the de-icing boots' cycle, s. */
+  private bootTimer = 0;
 
   reset() {
+    this.bootTimer = 0;
     this.airframe = 0;
     this.pitot = 0;
     this.pitotBlocked = false;
@@ -34,7 +37,9 @@ export class Icing {
 
   /**
    * `speedShare`: true airspeed over a typical cruise (55 m/s): the faster, the more water
-   * the airframe sweeps up. `pitotHeat`: switch on and the bus powered.
+   * the airframe sweeps up. `pitotHeat`: switch on and the bus powered. `bootCycle`: period
+   * of the pneumatic de-icing boots, s (0 off): each inflation cracks off most of the ice
+   * that has built up on the leading edges since the last.
    */
   step(
     dt: number,
@@ -43,11 +48,20 @@ export class Icing {
     speedShare: number,
     pitotHeat: boolean,
     pitotFailed: boolean,
+    bootCycle = 0,
   ) {
     const catchRate = severity * clamp(speedShare, 0, 2);
     // Moderate icing loads a light aircraft heavily in a quarter of an hour.
     if (catchRate > 0 || this.airframe > 0)
       this.airframe = clamp(this.airframe + (catchRate / 900 - melt) * dt, 0, 1);
+    if (bootCycle > 0) {
+      this.bootTimer += dt;
+      if (this.bootTimer >= bootCycle) {
+        this.bootTimer = 0;
+        // What stays is the residual ice between the boots and on the unprotected parts.
+        this.airframe *= 0.2;
+      }
+    } else this.bootTimer = 0;
     // The pitot tube is small and sharp: it ices within a minute, the heater clears it in ten seconds.
     const pitotRate = pitotHeat ? -0.1 : catchRate / 45 - melt * 2;
     if (pitotRate > 0 || this.pitot > 0) this.pitot = clamp(this.pitot + pitotRate * dt, 0, 1);
