@@ -4,10 +4,13 @@ import { useEffect } from 'preact/hooks';
 const FOCUSABLE =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea, [tabindex]:not([tabindex="-1"])';
 
-/** Elements that take Tab focus inside `root`, in document order, skipping hidden ones. */
+/**
+ * Elements that take Tab focus inside `root`, in document order, skipping hidden ones and
+ * the roving members of a radio group (tabindex -1): a group is one Tab stop.
+ */
 export function focusables(root: HTMLElement): HTMLElement[] {
   return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
-    (el) => el.getClientRects().length > 0 && !el.closest('[inert]'),
+    (el) => el.tabIndex >= 0 && el.getClientRects().length > 0 && !el.closest('[inert]'),
   );
 }
 

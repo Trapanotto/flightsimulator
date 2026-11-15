@@ -103,3 +103,68 @@ export function formatPercent(v: number): string {
   if (!Number.isFinite(v)) return '–';
   return `${Math.round(Math.min(1, Math.max(0, v)) * 100)}`;
 }
+
+// --- Published figures (hangar, briefing) -------------------------------------------------------
+
+export const M_TO_NM = 1 / 1852;
+
+/**
+ * What a published figure measures. Lengths (span, take-off roll, a runway) follow the units
+ * like altitudes do: feet under 'aviation', metres otherwise; masses stay kilograms, as on
+ * every European mass and balance sheet.
+ */
+export type SpecKind = 'length' | 'mass' | 'speed' | 'altitude' | 'range' | 'climb';
+
+/**
+ * A figure in the player's units, rounded as a handbook prints it: a value and its unit,
+ * apart, so the interface can set the unit smaller. SI in (m, kg, m/s).
+ */
+export function formatSpec(
+  kind: SpecKind,
+  si: number,
+  units: Units,
+  lang: NumberLang,
+): { value: string; unit: string } {
+  if (!Number.isFinite(si)) return { value: '–', unit: '' };
+  const aviation = units === 'aviation';
+  switch (kind) {
+    case 'length': {
+      if (aviation) {
+        const ft = si * M_TO_FT;
+        return {
+          value: groupThousands(ft < 1000 ? ft : Math.round(ft / 10) * 10, lang),
+          unit: 'ft',
+        };
+      }
+      return {
+        value: si < 100 ? si.toFixed(1) : groupThousands(si, lang),
+        unit: 'm',
+      };
+    }
+    case 'mass':
+      return { value: groupThousands(si, lang), unit: 'kg' };
+    case 'speed':
+      return { value: String(Math.round(convertSpeed(si, units))), unit: speedUnit(units) };
+    case 'altitude': {
+      const v = convertAltitude(si, units);
+      return {
+        value: groupThousands(aviation ? Math.round(v / 100) * 100 : Math.round(v / 10) * 10, lang),
+        unit: altitudeUnit(units),
+      };
+    }
+    case 'range': {
+      const v = aviation ? si * M_TO_NM : si / 1000;
+      return { value: groupThousands(Math.round(v / 10) * 10, lang), unit: aviation ? 'NM' : 'km' };
+    }
+    case 'climb':
+      return aviation
+        ? { value: groupThousands(Math.round((si * MS_TO_FPM) / 10) * 10, lang), unit: 'ft/min' }
+        : { value: si.toFixed(1), unit: 'm/s' };
+  }
+}
+
+/** A Mach number as a pilot reads it: two decimals, 'M 0.82'. */
+export function formatMach(mach: number): string {
+  if (!Number.isFinite(mach)) return '–';
+  return `M ${Math.max(0, mach).toFixed(2)}`;
+}

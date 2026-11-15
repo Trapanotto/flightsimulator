@@ -345,3 +345,137 @@
     transform: none;
   }
 }
+
+/* Phase 4: speed brake and reverse, only on the types that have them --------------------- */
+
+.touch {
+  --pad-rows: 2;
+  --pad-cols: 2;
+}
+
+.touch.has-rev {
+  --pad-rows: 3;
+}
+
+/* The fifth button takes the whole last row: REV reads as one wide lever-like key. */
+.touch.has-rev .pad-rev {
+  grid-column: span 2;
+  width: auto;
+}
+
+.pad-rev.is-on {
+  border-color: var(--c-caution);
+  background: rgb(255 181 58 / 0.28);
+}
+
+.touch :where(.speedbrake-track) {
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Landscape: a short upright lever left of the buttons, as tall as they are. */
+.speedbrake {
+  position: absolute;
+  right: calc(var(--safe-r) + var(--lever-w) + 12px + var(--pad-cols) * var(--pad) + 8px + 12px);
+  bottom: var(--safe-b);
+  width: 48px;
+}
+
+.speedbrake-track {
+  position: relative;
+  width: 100%;
+  height: calc(var(--pad-rows) * var(--pad) + (var(--pad-rows) - 1) * 8px);
+  border: 1.5px solid rgb(255 255 255 / 0.28);
+  border-radius: 14px;
+  background: rgb(10 14 22 / 0.42);
+  -webkit-backdrop-filter: blur(10px) brightness(0.85);
+  backdrop-filter: blur(10px) brightness(0.85);
+  overflow: hidden;
+  --level: 0;
+}
+
+.speedbrake-track.is-active {
+  border-color: var(--c-accent);
+}
+
+.speedbrake-track.is-out {
+  border-color: rgb(255 181 58 / 0.7);
+}
+
+/* Fills from the top down: the lever is pulled towards the pilot to extend. */
+.speedbrake-fill {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgb(255 181 58 / 0.18), rgb(255 181 58 / 0.5));
+  transform: scaleY(var(--level));
+  transform-origin: top center;
+}
+
+.speedbrake-handle {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: 0;
+  height: 28px;
+  border-radius: 9px;
+  background:
+    repeating-linear-gradient(0deg, rgb(11 16 24 / 0.35) 0 2px, transparent 2px 5px) center / 60%
+      12px no-repeat,
+    linear-gradient(180deg, #fff, #c9d2de);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.45);
+  will-change: transform;
+}
+
+/* Portrait: lying down between the stick and the throttle, above the rudder. */
+.speedbrake.is-flat {
+  left: calc(var(--safe-l) + var(--stick) + 8px);
+  right: calc(var(--safe-r) + var(--lever-w) + 8px);
+  bottom: calc(var(--safe-b) + 52px + 28px + 10px);
+  width: auto;
+}
+
+.speedbrake.is-flat .speedbrake-track {
+  height: 44px;
+}
+
+.speedbrake.is-flat .speedbrake-fill {
+  background: linear-gradient(90deg, rgb(255 181 58 / 0.18), rgb(255 181 58 / 0.5));
+  transform: scaleX(var(--level));
+  transform-origin: left center;
+}
+
+.speedbrake.is-flat .speedbrake-handle {
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  right: auto;
+  width: 30px;
+  height: auto;
+  background:
+    repeating-linear-gradient(90deg, rgb(11 16 24 / 0.35) 0 2px, transparent 2px 5px) center / 12px
+      60% no-repeat,
+    linear-gradient(180deg, #fff, #c9d2de);
+}
+
+@media (orientation: portrait) {
+  /* One row of buttons; with REV a fifth, as wide as the others. */
+  .touch.has-rev .pad {
+    grid-template-columns: repeat(5, var(--pad));
+  }
+  .touch.has-rev .pad-rev {
+    grid-column: auto;
+    width: var(--pad);
+    order: 4;
+  }
+}
+
+/* The caption is wider than the upright lever: centred over it on one line. */
+.speedbrake .touch-caption {
+  width: max-content;
+  margin-left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}

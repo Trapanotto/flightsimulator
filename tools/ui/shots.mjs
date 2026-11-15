@@ -101,6 +101,22 @@ for (const [name, query] of [
       vp: SIZES[size],
     });
 
+// Phase 4: the hangar and the other types (the demo's fakes with ?fleet / ?aircraft=).
+for (const [name, query] of [
+  ['p4-hangar', 'screen=hangar&fleet'],
+  ['p4-setup', 'screen=setup&fleet'],
+  ['p4-briefing-a320', 'screen=briefing&progress=0.4&plan=ils&p3&aircraft=a320'],
+  ['p4-hud-fa18', 'screen=flight&still&aircraft=fa18&speedbrake=0.3'],
+  ['p4-hud-pc12-ap', 'screen=flight&still&p3&aircraft=pc12&panel=autopilot&ap'],
+])
+  for (const size of ['hd', 'land', 'port'])
+    for (const lang of ['de', 'en'])
+      scenes.push({
+        name: `${name}-${size}-${lang}`,
+        url: `${base}?${query}&lang=${lang}${SIZES[size].mobile ? '&device=mobile' : ''}&shot`,
+        vp: SIZES[size],
+      });
+
 async function launch() {
   for (const channel of ['msedge', 'chrome']) {
     try {

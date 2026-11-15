@@ -1,4 +1,5 @@
 import { computed, signal } from '@preact/signals';
+import { AIRCRAFT } from '@sim';
 import { type UiActions, game } from './api';
 import { status } from './state';
 
@@ -9,7 +10,7 @@ import { status } from './state';
  */
 export const nav = {
   /** Page of the main menu. */
-  page: signal<'main' | 'setup'>('main'),
+  page: signal<'main' | 'setup' | 'hangar'>('main'),
   /** The settings dialog, over the menu or over the pause screen. */
   settingsOpen: signal(false),
 };
@@ -19,6 +20,11 @@ export const touchSeen = signal(false);
 
 /** On-screen flight controls are shown on phones and tablets and after the first touch. */
 export const showTouch = computed(() => status.device.value === 'mobile' || touchSeen.value);
+
+/** The type of the flight being prepared or flown (its `info`), or undefined. */
+export const flownAircraft = computed(() =>
+  AIRCRAFT.find((a) => a.id === game.plan.value?.aircraft),
+);
 
 /** The flight has ended in a crash (a boolean, so readers re-render only when it flips). */
 export const crashed = computed(() => !!game.telemetry.value?.crashed);

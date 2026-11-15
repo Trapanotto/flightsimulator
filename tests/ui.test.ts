@@ -248,6 +248,8 @@ describe('flight plan', () => {
       lat: 46.9141,
       altitude: 510 + AIR_START_HEIGHTS[0],
       headingDeg: 320,
+      // Phase 4: the speed of the type (100 kt for the Cessna).
+      speed: (100 * 1852) / 3600,
     });
     expect(validatePlan(plan, AIRPORTS, [C172])).toBeNull();
   });

@@ -58,6 +58,15 @@ export function leverValue(y: number, top: number, height: number): number {
   return Math.min(1, Math.max(0, 1 - (y - top) / height));
 }
 
+/**
+ * Speed brake lever: travel along the track from its start, 0..1. Pulled down (landscape) or
+ * to the right (portrait) it extends, like the lever pulled aft in a cockpit.
+ */
+export function travelValue(pos: number, start: number, length: number): number {
+  if (!(length > 0)) return 0;
+  return Math.min(1, Math.max(0, (pos - start) / length));
+}
+
 /** Rudder slider: pointer x within the track → -1 (left) .. 1 (right), with a small dead zone. */
 export function sliderAxis(x: number, left: number, width: number, deadZone = 0.06): number {
   if (!(width > 0)) return 0;

@@ -1,6 +1,16 @@
 import type { AircraftId, AircraftInfo, FailureId } from '@sim';
 import type { AirportOption, FlightPlan, PlannedFailure, SeasonChoice, WeatherChoice } from './api';
+import {
+  type Category,
+  airportEligibility,
+  categoryOf,
+  eligible,
+  homeAirport,
+  nearest,
+  typeDefaults,
+} from './fleet';
 import { runwayHeading } from './format';
+import { sunTimes } from './sun';
 
 export const SEASON_CHOICES: readonly SeasonChoice[] = [
   'now',
@@ -19,11 +29,17 @@ export const WEATHER_CHOICES: readonly WeatherChoice[] = [
   'lowStratus',
 ];
 
-/** Heights above the airport offered for a start in the air, metres (1000, 3000, 6000 ft). */
+/**
+ * Heights above the airport offered for a start in the air, metres (1000, 3000, 6000 ft): the
+ * Cessna's. Every type has its own (`typeDefaults(info).airHeights`), always three.
+ */
 export const AIR_START_HEIGHTS = [304.8, 914.4, 1828.8] as const;
 
-/** Distances out on final offered for an approach start, nautical miles. */
+/** Distances out on final offered for an approach start, nautical miles (the Cessna's). */
 export const APPROACH_DISTANCES = [4, 6, 8, 10, 12] as const;
+
+/** The range every type's approach distances stay within, NM (a stored value outside is junk). */
+export const APPROACH_RANGE = [2, 20] as const;
 
 /** Everything the C172 can be made to fail (`FailureId` of the sim, in the menu's order). */
 export const FAILURE_IDS: readonly FailureId[] = [
@@ -51,9 +67,9 @@ export interface SetupDraft {
   airport: string;
   runway: string;
   start: StartKind;
-  /** Index into AIR_START_HEIGHTS. */
+  /** Index into the type's air start heights (three for every type). */
   airHeight: number;
-  /** One of APPROACH_DISTANCES. */
+  /** One of the type's approach distances. */
   approachNm: number;
   aircraft: AircraftId | '';
   time: 'now' | number;
@@ -81,18 +97,29 @@ export const DRAFT_KEY = 'tfs.setup';
 /** Bern-Belp is the home airport of phase 1; any other airport serves if it is missing. */
 export const HOME_ICAO = 'LSZB';
 
+/** The runway ends of an airport a category may use (all of them for the Cessna). */
+export function usableEnds(a: AirportOption, category: Category): string[] {
+  const e = airportEligibility(a, category);
+  return e.ok ? e.ends : [];
+}
+
 export function defaultDraft(
   airports: readonly AirportOption[],
   aircraft: readonly AircraftInfo[],
 ): SetupDraft {
-  const home = airports.find((a) => a.icao === HOME_ICAO) ?? airports[0];
+  const info = aircraft[0];
+  const category = categoryOf(info);
+  const home =
+    (category === 'piston' ? airports.find((a) => a.icao === HOME_ICAO) : undefined) ??
+    homeAirport(airports, category) ??
+    airports[0];
   return {
     airport: home?.icao ?? '',
-    runway: home?.runways[0] ?? '',
+    runway: (home && usableEnds(home, category)[0]) ?? '',
     start: 'runway',
     airHeight: 1,
-    approachNm: 8,
-    aircraft: aircraft[0]?.id ?? '',
+    approachNm: typeDefaults(info).approachNm,
+    aircraft: info?.id ?? '',
     time: 'now',
     weather: 'live',
     season: 'now',
@@ -115,6 +142,10 @@ function oneOf<T>(v: unknown, options: readonly T[], fallback: T): T {
  * Makes a stored or edited draft fit what is on offer now: an airport or aircraft that is no
  * longer offered falls back to the default, a runway to the airport's first. Anything that is
  * not a sensible value is replaced, so corrupt storage can never block the menu.
+ *
+ * Phase 4: the draft also fits its aircraft. An airport the type may not use gives way to the
+ * type's home (choosing the A320 at Bern moves the setup to Zürich), a runway or destination
+ * it may not use is dropped, the approach distance moves to the nearest the type offers.
  */
 export function sanitizeDraft(
   raw: unknown,
@@ -125,17 +156,30 @@ export function sanitizeDraft(
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return d;
   const o = raw as Record<string, unknown>;
 
-  const airport = airports.find((a) => a.icao === o.airport);
+  const info =
+    aircraft.find((a) => a.id === o.aircraft) ?? aircraft.find((a) => a.id === d.aircraft);
+  const category = categoryOf(info);
+  const defaults = typeDefaults(info);
+
+  const asked = airports.find((a) => a.icao === o.airport);
+  const airport =
+    asked && eligible(asked, category)
+      ? asked
+      : asked
+        ? homeAirport(airports, category)
+        : (airports.find((a) => a.icao === d.airport && eligible(a, category)) ??
+          homeAirport(airports, category));
   const icao = airport?.icao ?? d.airport;
-  const runways = (airport ?? airports.find((a) => a.icao === icao))?.runways ?? [];
+  const runways = airport ? usableEnds(airport, category) : [];
   const runway =
     typeof o.runway === 'string' && runways.includes(o.runway) ? o.runway : (runways[0] ?? '');
 
-  const dest = airports.find((a) => a.icao === o.destination);
+  const dest = airports.find((a) => a.icao === o.destination && eligible(a, category));
+  const destRunways = dest ? usableEnds(dest, category) : [];
   const destRunway =
-    dest && typeof o.destinationRunway === 'string' && dest.runways.includes(o.destinationRunway)
+    dest && typeof o.destinationRunway === 'string' && destRunways.includes(o.destinationRunway)
       ? o.destinationRunway
-      : (dest?.runways[0] ?? '');
+      : (destRunways[0] ?? '');
 
   const time =
     o.time === 'now'
@@ -148,7 +192,7 @@ export function sanitizeDraft(
     typeof o.airHeight === 'number' &&
     Number.isInteger(o.airHeight) &&
     o.airHeight >= 0 &&
-    o.airHeight < AIR_START_HEIGHTS.length
+    o.airHeight < defaults.airHeights.length
       ? o.airHeight
       : d.airHeight;
 
@@ -157,8 +201,14 @@ export function sanitizeDraft(
     runway,
     start: oneOf<StartKind>(o.start, ['runway', 'air', 'approach'], 'runway'),
     airHeight,
-    approachNm: oneOf<number>(o.approachNm, APPROACH_DISTANCES, d.approachNm),
-    aircraft: aircraft.find((a) => a.id === o.aircraft)?.id ?? d.aircraft,
+    // Kept as near as a new type allows; nonsense falls back to the type's default.
+    approachNm:
+      typeof o.approachNm === 'number' &&
+      o.approachNm >= APPROACH_RANGE[0] &&
+      o.approachNm <= APPROACH_RANGE[1]
+        ? nearest(defaults.approachDistances, o.approachNm)
+        : defaults.approachNm,
+    aircraft: info?.id ?? '',
     time,
     weather: oneOf(o.weather, WEATHER_CHOICES, d.weather),
     season: oneOf(o.season, SEASON_CHOICES, d.season),
@@ -177,15 +227,18 @@ export function sanitizeDraft(
 }
 
 /** Why a draft cannot fly yet, or null when it can. */
-export type PlanProblem = 'noAirport' | 'noAircraft';
+export type PlanProblem = 'noAirport' | 'noAircraft' | 'runway';
 
 export function planProblem(
   draft: SetupDraft,
   airports: readonly AirportOption[],
   aircraft: readonly AircraftInfo[],
 ): PlanProblem | null {
-  if (!airports.some((a) => a.icao === draft.airport)) return 'noAirport';
-  if (!aircraft.some((a) => a.id === draft.aircraft)) return 'noAircraft';
+  const airport = airports.find((a) => a.icao === draft.airport);
+  if (!airport) return 'noAirport';
+  const info = aircraft.find((a) => a.id === draft.aircraft);
+  if (!info) return 'noAircraft';
+  if (!eligible(airport, categoryOf(info))) return 'runway';
   return null;
 }
 
@@ -206,17 +259,21 @@ export function draftToPlan(
 ): FlightPlan | null {
   if (planProblem(draft, airports, aircraft)) return null;
   const airport = airports.find((a) => a.icao === draft.airport)!;
-  const runway = airport.runways.includes(draft.runway) ? draft.runway : (airport.runways[0] ?? '');
+  const info = aircraft.find((a) => a.id === draft.aircraft);
+  const defaults = typeDefaults(info);
+  const ends = usableEnds(airport, categoryOf(info));
+  const runway = ends.includes(draft.runway) ? draft.runway : (ends[0] ?? '');
+  const heights = defaults.airHeights;
   const start: FlightPlan['start'] =
     draft.start === 'air' || !runway
       ? {
           kind: 'air',
           lon: airport.lon,
           lat: airport.lat,
-          altitude:
-            airport.elevation + (AIR_START_HEIGHTS[draft.airHeight] ?? AIR_START_HEIGHTS[1]),
+          altitude: airport.elevation + (heights[draft.airHeight] ?? heights[1] ?? 0),
           // Lined up with the chosen runway, so the airport is right ahead after a turn or two.
           headingDeg: runway ? runwayHeading(runway) % 360 : 0,
+          speed: defaults.airSpeed,
         }
       : draft.start === 'approach'
         ? { kind: 'approach', airport: airport.icao, runway, distanceNm: draft.approachNm }
@@ -253,7 +310,9 @@ export function validatePlan(
 ): string | null {
   if (!plan || typeof plan !== 'object') return 'not an object';
   const p = plan as Partial<FlightPlan>;
-  if (!aircraft.some((a) => a.id === p.aircraft)) return 'unknown aircraft';
+  const info = aircraft.find((a) => a.id === p.aircraft);
+  if (!info) return 'unknown aircraft';
+  const category = categoryOf(info);
   if (!WEATHER_CHOICES.includes(p.weather as WeatherChoice)) return 'unknown weather';
   if (p.season !== undefined && !SEASON_CHOICES.includes(p.season)) return 'unknown season';
   if (p.time !== 'now' && !(finite(p.time) && p.time >= 0 && p.time <= 24))
@@ -264,17 +323,29 @@ export function validatePlan(
     const a = airports.find((x) => x.icao === icao);
     if (!a) return 'unknown airport';
     if (!a.runways.includes(rwy)) return 'unknown runway';
+    if (!usableEnds(a, category).includes(rwy)) return 'runway unsuitable for the aircraft';
     return null;
   };
   if (s.kind === 'runway' || s.kind === 'approach') {
     const problem = runwayProblem(s.airport, s.runway);
     if (problem) return problem;
-    if (s.kind === 'approach' && !(finite(s.distanceNm) && s.distanceNm >= 4 && s.distanceNm <= 12))
+    // Within what the type offers: 4 to 12 NM for the Cessna, out to 15 NM for the A320.
+    const offered = typeDefaults(info).approachDistances;
+    if (
+      s.kind === 'approach' &&
+      !(
+        finite(s.distanceNm) &&
+        s.distanceNm >= Math.min(...offered) &&
+        s.distanceNm <= Math.max(...offered)
+      )
+    )
       return 'approach distance out of range';
   } else if (s.kind === 'air') {
     if (!(Math.abs(s.lat) <= 90 && Math.abs(s.lon) <= 180)) return 'position out of range';
     if (!(s.altitude > -500 && s.altitude < 20_000)) return 'altitude out of range';
     if (!(s.headingDeg >= 0 && s.headingDeg < 360)) return 'heading out of range';
+    if (s.speed !== undefined && !(finite(s.speed) && s.speed > 0 && s.speed < 400))
+      return 'speed out of range';
   } else return 'unknown start';
 
   if (p.destination !== undefined) {
@@ -284,6 +355,7 @@ export function validatePlan(
     if (!a) return 'unknown destination';
     if (d.runway !== undefined && !a.runways.includes(d.runway))
       return 'unknown destination runway';
+    if (!eligible(a, category)) return 'destination unsuitable for the aircraft';
   }
   if (p.route !== undefined) {
     if (!Array.isArray(p.route)) return 'bad route';
@@ -313,12 +385,26 @@ export function validatePlan(
 
 // --- Scenarios -----------------------------------------------------------------------------
 
-export type ScenarioId = 'ilsZurich' | 'bernCircuit' | 'alpsSamedan' | 'nightGeneva';
+export type ScenarioId =
+  | 'ilsZurich'
+  | 'bernCircuit'
+  | 'alpsSamedan'
+  | 'nightGeneva'
+  | 'a320Zurich'
+  | 'fa18Meiringen'
+  | 'pc12Samedan';
 
 export interface Scenario {
   id: ScenarioId;
   /** The airports it needs; without them it is not offered. */
   needs: string[];
+  /**
+   * Phase 4: the type it is made for; offered only while that type exists. Without it the
+   * scenario flies the pilot's choice, if that type may use the airports.
+   */
+  aircraft?: AircraftId;
+  /** The time of day is a quarter of an hour after today's sunset at the airport. */
+  dusk?: boolean;
   draft: Partial<SetupDraft>;
 }
 
@@ -338,6 +424,65 @@ export const SCENARIOS: readonly Scenario[] = [
       season: 'autumn',
       destination: 'LSZH',
       destinationRunway: '14',
+      coldStart: false,
+      atc: true,
+      failureMode: 'none',
+    },
+  },
+  {
+    // The A320 on the same runway as the evening wave of arrivals comes in.
+    id: 'a320Zurich',
+    needs: ['LSZH'],
+    aircraft: 'a320',
+    dusk: true,
+    draft: {
+      airport: 'LSZH',
+      runway: '14',
+      start: 'approach',
+      approachNm: 12,
+      weather: 'fair',
+      season: 'autumn',
+      destination: 'LSZH',
+      destinationRunway: '14',
+      coldStart: false,
+      atc: true,
+      failureMode: 'none',
+    },
+  },
+  {
+    // Out of the Haslital and down the valleys, as the Hornets of Meiringen train.
+    id: 'fa18Meiringen',
+    needs: ['LSMM', 'LSMP'],
+    aircraft: 'fa18',
+    draft: {
+      airport: 'LSMM',
+      runway: '28',
+      start: 'runway',
+      weather: 'clear',
+      time: 10,
+      season: 'summer',
+      destination: 'LSMP',
+      destinationRunway: '23',
+      coldStart: false,
+      atc: true,
+      failureMode: 'none',
+    },
+  },
+  {
+    // Samedan, 1707 m: down the Engadine onto runway 21 on a winter morning.
+    id: 'pc12Samedan',
+    needs: ['LSZS'],
+    aircraft: 'pc12',
+    draft: {
+      airport: 'LSZS',
+      runway: '21',
+      start: 'approach',
+      approachNm: 8,
+      weather: 'clear',
+      time: 10,
+      season: 'winter',
+      destination: 'LSZS',
+      destinationRunway: '21',
       coldStart: false,
       atc: true,
       failureMode: 'none',
@@ -398,9 +543,46 @@ export const SCENARIOS: readonly Scenario[] = [
   },
 ];
 
-/** The scenarios this set of airports can fly. */
-export function availableScenarios(airports: readonly AirportOption[]): Scenario[] {
-  return SCENARIOS.filter((s) => s.needs.every((icao) => airports.some((a) => a.icao === icao)));
+/**
+ * The scenarios this set of airports can fly. The ones made for a type come only while that
+ * type is in `aircraft`.
+ */
+export function availableScenarios(
+  airports: readonly AirportOption[],
+  aircraft: readonly AircraftInfo[] = [],
+): Scenario[] {
+  return SCENARIOS.filter(
+    (s) =>
+      s.needs.every((icao) => airports.some((a) => a.icao === icao)) &&
+      (!s.aircraft || aircraft.some((a) => a.id === s.aircraft)),
+  );
+}
+
+/** The type a scenario flies: its own, else the pilot's choice. */
+export function scenarioAircraft(
+  scenario: Scenario,
+  base: SetupDraft,
+  aircraft: readonly AircraftInfo[],
+): AircraftInfo | undefined {
+  return aircraft.find((a) => a.id === (scenario.aircraft ?? base.aircraft));
+}
+
+/**
+ * Why the pilot's type cannot fly a scenario: the first of its airports it may not use (a
+ * circuit at Bern is too short for the A320), or null when it can.
+ */
+export function scenarioBlocker(
+  scenario: Scenario,
+  base: SetupDraft,
+  airports: readonly AirportOption[],
+  aircraft: readonly AircraftInfo[],
+): AirportOption | null {
+  const category = categoryOf(scenarioAircraft(scenario, base, aircraft));
+  for (const icao of [scenario.draft.airport, scenario.draft.destination]) {
+    const a = airports.find((x) => x.icao === icao);
+    if (a && !eligible(a, category)) return a;
+  }
+  return null;
 }
 
 /** The setup of a scenario on top of the pilot's aircraft choice; null when it cannot fly. */
@@ -409,10 +591,27 @@ export function scenarioDraft(
   base: SetupDraft,
   airports: readonly AirportOption[],
   aircraft: readonly AircraftInfo[],
+  today = new Date(),
 ): SetupDraft | null {
-  if (!availableScenarios(airports).includes(scenario)) return null;
-  const d = sanitizeDraft({ ...base, ...scenario.draft }, airports, aircraft);
+  if (!availableScenarios(airports, aircraft).includes(scenario)) return null;
+  if (scenarioBlocker(scenario, base, airports, aircraft)) return null;
+  const patch: Partial<SetupDraft> = { ...scenario.draft };
+  if (scenario.aircraft) patch.aircraft = scenario.aircraft;
+  if (scenario.dusk) patch.time = duskHours(airports, scenario.draft.airport, today);
+  const d = sanitizeDraft({ ...base, ...patch }, airports, aircraft);
   return planProblem(d, airports, aircraft) ? null : d;
+}
+
+/** A quarter of an hour after sunset at the airport, to the quarter hour (18:00 if unknown). */
+export function duskHours(
+  airports: readonly AirportOption[],
+  icao: string | undefined,
+  today: Date,
+): number {
+  const a = airports.find((x) => x.icao === icao);
+  const sun = a ? sunTimes(today, a.lat, a.lon) : null;
+  if (!sun) return 18;
+  return Math.min(24, Math.round((sun.sunset + 0.25) * 4) / 4);
 }
 
 /** Great-circle distance in nautical miles (mean earth radius; the briefing rounds it). */

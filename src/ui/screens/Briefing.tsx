@@ -19,7 +19,9 @@ import {
   IconSun,
   IconWarning,
 } from '../components/icons';
-import { CHECK_KEY, PANEL_KEYS, TUNE_KEY, keyLabel } from '../panels';
+import { approachSpeed, categoryOf, rotateSpeed, typeFeatures } from '../fleet';
+import { KEY_ROWS, flyingKeyRows } from '../fleetText';
+import { positionLabel } from '../cockpitMeta';
 import { routeNm } from '../plan';
 import { formatFrequency } from '../radio';
 import {
@@ -47,46 +49,8 @@ export const WEATHER_ICONS: Record<WeatherChoice, (size?: number) => JSX.Element
   lowStratus: (s) => <IconStratus size={s} />,
 };
 
-/** Keys shown in the briefing: the few that get an aircraft off the ground. */
-export const KEY_ROWS: { label: MessageKey; keys: (string | MessageKey)[][] }[] = [
-  {
-    label: 'keys.pitch',
-    keys: [
-      ['W', 'S'],
-      ['key.up', 'key.down'],
-    ],
-  },
-  {
-    label: 'keys.roll',
-    keys: [
-      ['A', 'D'],
-      ['key.left', 'key.right'],
-    ],
-  },
-  { label: 'keys.yaw', keys: [['Q', 'E']] },
-  {
-    label: 'keys.throttle',
-    keys: [
-      ['key.shift', 'key.ctrl'],
-      ['key.pgup', 'key.pgdn'],
-    ],
-  },
-  { label: 'keys.flapsDown', keys: [['F']] },
-  { label: 'keys.flapsUp', keys: [['V']] },
-  { label: 'keys.gear', keys: [['G']] },
-  { label: 'keys.brake', keys: [['B']] },
-  { label: 'keys.view', keys: [['C']] },
-  { label: 'keys.pause', keys: [['P'], ['key.esc']] },
-  // Phase 3: the panels (see panels.ts).
-  { label: 'keys.radio', keys: [[keyLabel(PANEL_KEYS.radio)]] },
-  { label: 'keys.reply', keys: [['1', '2', '3', '4']] },
-  { label: 'keys.tune', keys: [[keyLabel(TUNE_KEY)]] },
-  { label: 'keys.checklist', keys: [[keyLabel(PANEL_KEYS.checklist)]] },
-  { label: 'keys.check', keys: [[keyLabel(CHECK_KEY)]] },
-  { label: 'keys.stack', keys: [[keyLabel(PANEL_KEYS.stack)]] },
-  { label: 'keys.autopilot', keys: [[keyLabel(PANEL_KEYS.autopilot)]] },
-  { label: 'keys.switches', keys: [[keyLabel(PANEL_KEYS.switches)]] },
-];
+/** Every key, as the settings list them (see fleetText.ts). */
+export { KEY_ROWS };
 
 const ARROWS: Record<string, string> = {
   'key.up': '↑',
@@ -170,7 +134,7 @@ function Fact({ label, value }: { label: string; value: string }) {
   );
 }
 
-function TouchHints() {
+function TouchHints({ features }: { features: ReturnType<typeof typeFeatures> }) {
   return (
     <ul class="touch-hints">
       <li>
@@ -189,9 +153,50 @@ function TouchHints() {
         <span class="hint-glyph hint-glyph--buttons" aria-hidden="true" />
         {t('touch.hint.buttons')}
       </li>
+      {features.speedbrake && (
+        <li>
+          <span class="hint-glyph hint-glyph--lever" aria-hidden="true" />
+          {t('touch.hint.speedbrake')}
+        </li>
+      )}
+      {features.reverse && (
+        <li>
+          <span class="hint-glyph hint-glyph--buttons" aria-hidden="true" />
+          {t('touch.hint.reverse')}
+        </li>
+      )}
     </ul>
   );
 }
+
+/** The flap settings as the lever's notches read: '0° · 15° · 30° · 40°' (or 1 · 2 · 3 · FULL). */
+export function flapText(): string {
+  const flaps = game.controls.value.find((c) => c.id === 'flaps');
+  if (!flaps?.positions?.length) return '';
+  const all = flaps.positions;
+  return all.map((p) => positionLabel('flaps', p, all).toUpperCase()).join(' · ');
+}
+
+/** The tip for the start: by how the flight starts and what kind of aircraft flies it. */
+function startTip(
+  start: FlightPlanStart | undefined,
+  cold: boolean,
+  category: ReturnType<typeof categoryOf>,
+  vr: string,
+  vapp: string,
+): string {
+  if (cold) return t('briefing.tip.cold');
+  if (start?.kind === 'air') return t('briefing.tip.air');
+  if (start?.kind === 'approach')
+    return category === 'piston'
+      ? t('briefing.tip.approach')
+      : t(`briefing.tip.approach.${category}`, { v: vapp || '–' });
+  return category === 'piston'
+    ? t('briefing.tip.runway', { v: vr || '–' })
+    : t(`briefing.tip.runway.${category}`, { v: vr || '–' });
+}
+
+type FlightPlanStart = NonNullable<ReturnType<typeof game.plan.peek>>['start'];
 
 /** The weather to brief: the app's report, or the preset's own values while there is none. */
 function briefedWeather(weather: WeatherChoice): WeatherReport | null {
@@ -226,17 +231,18 @@ export function Briefing() {
     !plan || plan.time === 'now'
       ? t('briefing.time.now', { clock: formatClock(swissNowHours(new Date())) })
       : formatClock(plan.time);
-  // Rotation speed is about 1.15 times the clean stall speed (55 kt for the C172).
-  const vr = info
-    ? `${Math.round(convertSpeed(info.vs * 1.15, units) / 5) * 5} ${speedUnit(units)}`
-    : '';
-  const tip = plan?.coldStart
-    ? t('briefing.tip.cold')
-    : start?.kind === 'air'
-      ? t('briefing.tip.air')
-      : start?.kind === 'approach'
-        ? t('briefing.tip.approach')
-        : t('briefing.tip.runway', { v: vr || '–' });
+  // Speeds a pilot says aloud are rounded to 5 kt (55 kt rotation for the C172).
+  const speedText = (ms: number) =>
+    `${Math.round(convertSpeed(ms, units) / 5) * 5} ${speedUnit(units)}`;
+  const vr = info ? speedText(rotateSpeed(info)) : '';
+  const vapp = info ? speedText(approachSpeed(info)) : '';
+  const category = categoryOf(info);
+  const features = typeFeatures(info);
+  const flaps = flapText();
+  const typeRows = flyingKeyRows(info).filter((r) =>
+    ['keys.gear', 'keys.speedbrake', 'keys.reverse'].includes(r.label),
+  );
+  const tip = startTip(start, !!plan?.coldStart, category, vr, vapp);
 
   // The route: through the plan's waypoints if it has any, else straight.
   const routeText = (() => {
@@ -312,6 +318,24 @@ export function Briefing() {
                       {formatSpeed(info.vne, units)} {speedUnit(units)}
                     </dd>
                   )}
+                  {info && (
+                    <dd class="brief-type">
+                      <span class="brief-type-fact num">
+                        <span class="brief-type-label">{t('briefing.vr')}</span> {vr}
+                      </span>
+                      <span class="brief-type-fact num">
+                        <span class="brief-type-label">{t('briefing.vapp')}</span> {vapp}
+                      </span>
+                      {flaps && (
+                        <span class="brief-type-fact num">
+                          <span class="brief-type-label">{t('briefing.flaps')}</span> {flaps}
+                        </span>
+                      )}
+                      <span class="brief-type-fact">
+                        {t(info.retractableGear ? 'aircraft.gear.retract' : 'aircraft.gear.fixed')}
+                      </span>
+                    </dd>
+                  )}
                 </div>
                 <div class="brief-fact">
                   <dt class="caps">
@@ -319,6 +343,20 @@ export function Briefing() {
                   </dt>
                   <dd class="brief-big num">{time}</dd>
                 </div>
+                {/* What this type has beyond the Cessna, with its keys, where keys are used. */}
+                {info && !showTouch.value && typeRows.length > 0 && (
+                  <div class="brief-fact brief-fact--wide">
+                    <dt class="caps">{t('briefing.typeKeys')}</dt>
+                    <dd class="brief-keys">
+                      {typeRows.map((row) => (
+                        <span class="brief-key" key={row.label}>
+                          {t(row.label)}
+                          <KeyCombo keys={row.keys} />
+                        </span>
+                      ))}
+                    </dd>
+                  </div>
+                )}
                 {routeText && dest && (
                   <div class="brief-fact brief-fact--wide">
                     <dt class="caps">
@@ -405,10 +443,10 @@ export function Briefing() {
             <div class="brief-card glass brief-controls">
               <h2 class="caps brief-card-title">{t('briefing.controls')}</h2>
               {showTouch.value ? (
-                <TouchHints />
+                <TouchHints features={features} />
               ) : (
                 <dl class="key-list key-list--compact">
-                  {KEY_ROWS.slice(0, 8).map((row) => (
+                  {flyingKeyRows(info).map((row) => (
                     <div class="key-row" key={row.label}>
                       <dt>{t(row.label)}</dt>
                       <dd>

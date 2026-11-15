@@ -14,11 +14,17 @@
  *   checklist=approach|start  open a checklist     ap  autopilot engaged     off  avionics off
  *   annun=lowVolts,lowVacuum,…   lit annunciators     plan=ils|alps|cold   briefing plans
  *   collapsed  radio panel collapsed     tools  touch menu open     failures  pause list open
+ *
+ * Phase 4 (several types; see uiFleet.ts):
+ *   fleet                    PC-12, A320 and F/A-18 join the Cessna (and all airports load)
+ *   aircraft=pc12|a320|fa18  the type of the flight or briefing     screen=hangar  the hangar
+ *   speedbrake=0..1  rev  sb and reverse levers     g=<n> alpha=<deg>  fighter readouts
  */
+import { AIRPORTS as GEO_AIRPORTS, isPaved } from '@geo';
 import {
   AIRCRAFT,
+  type AircraftId,
   type AvionicsTelemetry,
-  C172_CONTROLS,
   type FailureId,
   type SystemsTelemetry,
   type Telemetry,
@@ -39,9 +45,11 @@ import {
   status,
   touchInput,
 } from '@ui';
+import { CONTROLS, FLYING, engines, installFleet } from './uiFleet';
 
 const q = new URLSearchParams(location.search);
 const screenParam = q.get('screen') ?? 'loading';
+const fleet = q.has('fleet') || q.has('aircraft');
 
 // --- Stand-ins ---------------------------------------------------------------------------
 
@@ -56,6 +64,12 @@ if (!q.has('noaircraft') && !AIRCRAFT.length)
     maxTakeoffMass: 1111,
     retractableGear: false,
   });
+if (fleet && !q.has('noaircraft')) installFleet();
+/** The type of the demo's flight and briefing. */
+const typeId: AircraftId = (['pc12', 'a320', 'fa18'] as const).includes(q.get('aircraft') as 'pc12')
+  ? (q.get('aircraft') as AircraftId)
+  : 'c172';
+const typeInfo = () => AIRCRAFT.find((a) => a.id === (game.plan.value?.aircraft ?? typeId));
 
 const AIRPORTS: AirportOption[] = [
   {
@@ -102,7 +116,25 @@ status.renderer.value = 'WebGPU';
 status.simHz.value = 120;
 status.fps.value = 60;
 status.resolution.value = [window.innerWidth, window.innerHeight];
-if (!q.has('noairports')) game.airports.value = AIRPORTS;
+// With the fleet, every airport as the app offers them, with their runways (the eligibility
+// of a type needs lengths and surfaces).
+if (!q.has('noairports'))
+  game.airports.value = fleet
+    ? GEO_AIRPORTS.map((a) => ({
+        icao: a.icao,
+        name: a.name,
+        lon: a.lon,
+        lat: a.lat,
+        elevation: a.elevation,
+        runways: a.runways.flatMap((r) => r.ends.map((e) => e.ident)),
+        strips: a.runways.map((r) => ({
+          ends: r.ends.map((e) => e.ident),
+          length: r.length,
+          paved: isPaved(r.surface),
+        })),
+        military: a.military,
+      }))
+    : AIRPORTS;
 if (q.has('shot')) document.body.classList.add('shots');
 
 // --- Painted background ---------------------------------------------------------------------
@@ -235,10 +267,16 @@ function paint() {
     }
   }
 
-  // A light aircraft on the apron, roughly where the app's menu camera shows it.
-  const px = w * 0.68;
-  const py = h * 0.74;
-  const s = Math.min(w, h) / 600;
+  // A light aircraft on the apron, roughly where the app's menu camera shows it. In the
+  // hangar the shown type flies in the free middle of the screen instead.
+  const hangar = shownType !== null;
+  const px = hangar ? w * 0.5 : w * 0.68;
+  const py = hangar ? h * (w < h ? 0.34 : 0.46) : h * 0.74;
+  const s = (Math.min(w, h) / 600) * (shownType === 'a320' ? 1.05 : shownType === 'c172' ? 0.8 : 1);
+  if (shownType && shownType !== 'c172') {
+    drawType(g, px, py, s, shownType, bg === 'night');
+    return;
+  }
   g.fillStyle = 'rgba(0,0,0,0.25)';
   g.beginPath();
   g.ellipse(px, py + 34 * s, 150 * s, 16 * s, 0, 0, Math.PI * 2);
@@ -257,6 +295,71 @@ function paint() {
   g.lineTo(px + 120 * s, py - 6 * s);
   g.fill();
 }
+/** A side view of a type, painted crudely enough to tell the four apart. */
+function drawType(
+  g: CanvasRenderingContext2D,
+  px: number,
+  py: number,
+  s: number,
+  type: AircraftId,
+  night: boolean,
+) {
+  const body = night ? '#30363f' : type === 'fa18' ? '#8d969f' : '#f5f6f8';
+  g.fillStyle = body;
+  if (type === 'pc12') {
+    g.beginPath();
+    g.ellipse(px, py, 120 * s, 15 * s, 0, 0, Math.PI * 2);
+    g.fill();
+    g.fillRect(px - 10 * s, py + 4 * s, 120 * s, 7 * s);
+    g.beginPath();
+    g.moveTo(px - 100 * s, py - 8 * s);
+    g.lineTo(px - 128 * s, py - 62 * s);
+    g.lineTo(px - 112 * s, py - 62 * s);
+    g.lineTo(px - 80 * s, py - 8 * s);
+    g.fill();
+    g.fillRect(px - 150 * s, py - 66 * s, 50 * s, 6 * s);
+    g.fillStyle = '#c8202a';
+    g.fillRect(px - 90 * s, py - 2 * s, 190 * s, 3 * s);
+  } else if (type === 'a320') {
+    g.beginPath();
+    g.ellipse(px, py, 150 * s, 17 * s, 0, 0, Math.PI * 2);
+    g.fill();
+    g.beginPath();
+    g.moveTo(px - 120 * s, py - 6 * s);
+    g.lineTo(px - 150 * s, py - 66 * s);
+    g.lineTo(px - 132 * s, py - 66 * s);
+    g.lineTo(px - 90 * s, py - 6 * s);
+    g.fill();
+    g.fillStyle = night ? '#252a31' : '#d9dde3';
+    g.beginPath();
+    g.ellipse(px + 10 * s, py + 22 * s, 26 * s, 9 * s, 0, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#c8202a';
+    g.fillRect(px - 150 * s, py - 64 * s, 22 * s, 30 * s);
+  } else {
+    g.beginPath();
+    g.moveTo(px + 120 * s, py);
+    g.lineTo(px - 90 * s, py - 12 * s);
+    g.lineTo(px - 120 * s, py - 4 * s);
+    g.lineTo(px - 90 * s, py + 10 * s);
+    g.closePath();
+    g.fill();
+    g.beginPath();
+    g.moveTo(px - 70 * s, py - 10 * s);
+    g.lineTo(px - 104 * s, py - 56 * s);
+    g.lineTo(px - 92 * s, py - 56 * s);
+    g.lineTo(px - 40 * s, py - 10 * s);
+    g.fill();
+    g.beginPath();
+    g.moveTo(px + 30 * s, py + 2 * s);
+    g.lineTo(px - 60 * s, py + 26 * s);
+    g.lineTo(px - 40 * s, py + 4 * s);
+    g.fill();
+  }
+}
+
+/** The type the hangar shows (`actions.showAircraft`), or null outside the hangar. */
+let shownType: AircraftId | null = null;
 paint();
 window.addEventListener('resize', paint);
 
@@ -282,7 +385,8 @@ const still = q.has('still');
 
 let p3 = q.has('p3');
 const cockpit: Record<string, number> = {};
-for (const s of C172_CONTROLS) cockpit[s.id] = s.running ?? s.initial;
+const controls = CONTROLS[typeId];
+for (const s of controls) cockpit[s.id] = s.running ?? s.initial;
 // An ILS approach to Zurich 14 tuned and identified.
 Object.assign(cockpit, {
   com1Active: 125_950,
@@ -299,9 +403,14 @@ const ap = {
   engaged: q.has('ap'),
   lateral: 'hdg' as 'roll' | 'hdg' | 'nav' | 'apr',
   lateralArmed: (q.has('ap') ? 'apr' : undefined) as 'nav' | 'apr' | undefined,
-  vertical: 'alt' as 'pitch' | 'vs' | 'alt' | 'gs',
+  vertical: (typeId === 'c172' ? 'alt' : 'flc') as 'pitch' | 'vs' | 'alt' | 'gs' | 'flc',
   verticalArmed: (q.has('ap') ? 'gs' : undefined) as 'alt' | 'gs' | undefined,
   vs: 500,
+  // Phase 4: on the types that have them.
+  yd: typeId !== 'c172',
+  fd: typeId !== 'c172',
+  athr: typeId === 'a320',
+  speed: typeId === 'pc12' ? 160 : 250,
 };
 let identUntil = 0;
 const failed = new Set<FailureId>();
@@ -311,7 +420,7 @@ function publishCockpit() {
 }
 
 function setControl(id: string, value: number) {
-  const s = C172_CONTROLS.find((c) => c.id === id);
+  const s = controls.find((c) => c.id === id);
   if (!s) return;
   const before = cockpit[id] ?? 0;
   const v = limitControl(s, value);
@@ -337,9 +446,17 @@ function setControl(id: string, value: number) {
       ap.verticalArmed = 'gs';
     }
     if (id === 'apAlt') ap.vertical = 'alt';
+    if (id === 'apVs') ap.vertical = 'vs';
+    if (id === 'apFlc') ap.vertical = 'flc';
+    if (id === 'yawDamper') ap.yd = !ap.yd;
+    if (id === 'flightDirector') ap.fd = !ap.fd;
+    if (id === 'apAthr') ap.athr = !ap.athr;
     if (id === 'apVsUp' || id === 'apVsDown') {
-      ap.vertical = 'vs';
-      ap.vs += id === 'apVsUp' ? 100 : -100;
+      if (ap.vertical === 'flc') ap.speed += id === 'apVsUp' ? -1 : 1;
+      else {
+        ap.vertical = 'vs';
+        ap.vs += id === 'apVsUp' ? 100 : -100;
+      }
     }
   }
   publishCockpit();
@@ -347,7 +464,7 @@ function setControl(id: string, value: number) {
 }
 
 function avionics(): AvionicsTelemetry {
-  const powered = cockpit.battery! >= 1 && cockpit.avionics! >= 1;
+  const powered = (cockpit.battery ?? 1) >= 1 && (cockpit.avionics ?? 1) >= 1;
   const t = sim.time;
   const nav = (n: 1 | 2) => {
     const f = cockpit[`nav${n}Active`]!;
@@ -359,7 +476,7 @@ function avionics(): AvionicsTelemetry {
       valid,
       ident: valid ? (ils ? 'IZH' : 'ZUE') : '',
       localizer: ils,
-      course: cockpit[`obs${n}`]!,
+      course: cockpit[`obs${n}`] ?? 0,
       deviation: valid ? Math.sin(t * 0.3) * 0.32 : 0,
       toFrom: (valid ? 'to' : 'off') as 'to' | 'off',
       bearing: valid ? 137 : undefined,
@@ -379,7 +496,12 @@ function avionics(): AvionicsTelemetry {
       groundSpeedKt: nav1.valid ? 92 : undefined,
       minutes: nav1.valid ? 5 : undefined,
     },
-    adf: { frequency: cockpit.adfFrequency!, valid: false, ident: '', relativeBearing: undefined },
+    adf: {
+      frequency: cockpit.adfFrequency ?? 0,
+      valid: false,
+      ident: '',
+      relativeBearing: undefined,
+    },
     transponder: {
       code: cockpit.xpdrCode!,
       mode: (['off', 'standby', 'on', 'alt'] as const)[cockpit.xpdrMode!] ?? 'off',
@@ -396,6 +518,17 @@ function avionics(): AvionicsTelemetry {
       selectedAltitude: cockpit.apAltitude!,
       selectedVerticalSpeed: ap.vs,
       disconnectWarning: false,
+      ...(typeId === 'c172'
+        ? {}
+        : {
+            yawDamper: controls.some((c) => c.id === 'yawDamper') ? ap.yd : undefined,
+            flightDirector: ap.fd ? { pitch: 0.03, bank: -0.05 } : undefined,
+            selectedSpeed: ap.speed,
+            autothrottle:
+              typeId === 'a320'
+                ? { engaged: ap.athr, mode: ap.athr ? ('speed' as const) : ('off' as const) }
+                : undefined,
+          }),
     },
     gps: {
       plan: [],
@@ -642,7 +775,7 @@ function checklistTick() {
 
 function startP3() {
   p3 = true;
-  game.controls.value = C172_CONTROLS;
+  game.controls.value = controls;
   publishCockpit();
   atcSays(0);
   publishChecklist();
@@ -663,11 +796,20 @@ function stopP3() {
   game.checklist.value = null;
 }
 
+/** Speed brake and reverse of the fake flight: the URL's, then the keys' and the touch levers'. */
+const levers4 = { speedbrake: Number(q.get('speedbrake') ?? 0), reverse: q.has('rev') };
+
 function telemetry(): Telemetry {
   const warn = q.get('warn');
+  const info = typeInfo();
+  const id = info?.id ?? 'c172';
+  const jet = id === 'a320' || id === 'fa18';
+  // Mach follows the airspeed the way it does at the fake flight's height.
+  const machPerMs = (FLYING[id].mach ?? 0) / FLYING[id].ias;
+  const ias = warn === 'overspeed' ? (info?.vne ?? 84) * 1.03 : sim.ias;
   return {
     time: sim.time,
-    ias: warn === 'overspeed' ? 88 : sim.ias,
+    ias,
     tas: sim.ias,
     groundSpeed: sim.ias,
     altitude: sim.altitude,
@@ -677,9 +819,9 @@ function telemetry(): Telemetry {
     trackDeg: sim.heading,
     pitch: 0,
     bank: 0,
-    alpha: 0,
+    alpha: (Number(q.get('alpha') ?? (id === 'fa18' ? 4.2 : 2)) * Math.PI) / 180,
     beta: 0,
-    loadFactor: 1,
+    loadFactor: Number(q.get('g') ?? 1),
     onGround: sim.onGround,
     stallWarning: warn === 'stall' || (!sim.onGround && sim.ias < 24),
     flaps: sim.flaps,
@@ -687,11 +829,11 @@ function telemetry(): Telemetry {
     elevator: 0,
     aileron: 0,
     rudder: 0,
-    engines: [
-      { running: true, rpm: 800 + sim.throttle * 1900, power: sim.throttle, fuelFlow: 0.01 },
-    ],
+    engines: engines(id, sim.throttle, levers4.reverse),
     fuel: 120,
     crashed: sim.crashed,
+    ...(jet || id === 'pc12' ? { mach: ias * machPerMs || ias / 340 } : {}),
+    ...(info?.speedbrake ? { speedbrake: levers4.speedbrake } : {}),
     ...(p3 ? { avionics: avionics(), systems: systems() } : {}),
   };
 }
@@ -704,7 +846,29 @@ function publish() {
     gearDown: sim.gear > 0.5,
     brake: touchInput.brake.value || keys.has('b'),
     parkingBrake: false,
+    ...(typeInfo()?.speedbrake ? { speedbrake: levers4.speedbrake } : {}),
+    ...(typeInfo()?.reverse ? { reverse: levers4.reverse } : {}),
   };
+}
+
+let lastSpeedbrake = touchInput.speedbrake.value;
+let lastGear = touchInput.gearToggle.value;
+let gearAnim = 0;
+
+/** Retractable types move their gear over a few seconds; the Cessna's stays. */
+function toggleGear() {
+  if (!typeInfo()?.retractableGear) return message('msg.gearFixed');
+  const target = sim.gear > 0.5 ? 0 : 1;
+  message(target ? 'msg.gearDown' : 'msg.gearUp');
+  cancelAnimationFrame(gearAnim);
+  const from = sim.gear;
+  const t0 = performance.now();
+  const tick = () => {
+    const f = Math.min(1, (performance.now() - t0) / 6000);
+    sim.gear = from + (target - from) * f;
+    if (f < 1) gearAnim = requestAnimationFrame(tick);
+  };
+  tick();
 }
 
 let lastFlapsUp = touchInput.flapsUp.value;
@@ -733,6 +897,16 @@ function step() {
     lastFlapsDown = touchInput.flapsDown.value;
     sim.flaps = Math.min(1, sim.flaps + 1 / 3);
     message('msg.flapsDown');
+  }
+  // Phase 4 levers: the keys the app will bind (J/M, H held) and the touch controls.
+  if (touchInput.speedbrake.value !== null && touchInput.speedbrake.value !== lastSpeedbrake)
+    levers4.speedbrake = touchInput.speedbrake.value;
+  lastSpeedbrake = touchInput.speedbrake.value;
+  levers4.speedbrake = Math.max(0, Math.min(1, levers4.speedbrake + key('j', 'm') * dt * 0.8));
+  if (!q.has('rev')) levers4.reverse = touchInput.reverse.value || keys.has('h');
+  if (touchInput.gearToggle.value !== lastGear) {
+    lastGear = touchInput.gearToggle.value;
+    toggleGear();
   }
   if (still) {
     publish();
@@ -855,6 +1029,11 @@ const actions: UiActions = {
   preview(plan) {
     console.info('preview', plan);
   },
+  showAircraft(id) {
+    console.info('showAircraft', id);
+    shownType = id;
+    paint();
+  },
 };
 
 // The app's keyboard: Esc and P pause and resume, C changes the view, and flight keys.
@@ -871,7 +1050,7 @@ window.addEventListener('keydown', (e) => {
   if (k === 'c') actions.toggleView();
   if (k === 'f') touchInput.flapsDown.value++;
   if (k === 'v') touchInput.flapsUp.value++;
-  if (k === 'g') message('msg.gearFixed');
+  if (k === 'g') toggleGear();
 });
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 
@@ -881,17 +1060,17 @@ mountUi(document.getElementById('ui')!, actions);
 
 const flying: Partial<typeof sim> = {
   heading: 132,
-  ias: 50.9,
-  altitude: 1524,
+  ias: FLYING[typeId].ias,
+  altitude: FLYING[typeId].altitude,
   vs: 2.6,
-  throttle: 0.78,
-  flaps: 1 / 3,
-  gear: 1,
+  throttle: FLYING[typeId].throttle,
+  flaps: FLYING[typeId].flaps,
+  gear: FLYING[typeId].gear,
   onGround: false,
   time: 754,
 };
 const defaultPlan: FlightPlan = {
-  aircraft: 'c172',
+  aircraft: typeId,
   start: { kind: 'runway', airport: 'LSZB', runway: '14' },
   time: 'now',
   weather: 'fair',
@@ -900,7 +1079,7 @@ const defaultPlan: FlightPlan = {
 
 const BRIEFING_PLANS: Record<string, FlightPlan> = {
   ils: {
-    aircraft: 'c172',
+    aircraft: typeId,
     start: { kind: 'approach', airport: 'LSZH', runway: '14', distanceNm: 10 },
     time: 9,
     weather: 'lowStratus',
@@ -912,7 +1091,7 @@ const BRIEFING_PLANS: Record<string, FlightPlan> = {
     failures: [{ id: 'vacuum', after: 'random' }],
   },
   alps: {
-    aircraft: 'c172',
+    aircraft: typeId,
     start: { kind: 'runway', airport: 'LSZB', runway: '14' },
     time: 9,
     weather: 'clear',
@@ -950,9 +1129,11 @@ switch (screenParam) {
     break;
   case 'menu':
   case 'setup':
+  case 'hangar':
   case 'settings':
     game.screen.value = 'menu';
     if (screenParam === 'setup') nav.page.value = 'setup';
+    if (screenParam === 'hangar') nav.page.value = 'hangar';
     if (screenParam === 'settings') nav.settingsOpen.value = true;
     break;
   case 'briefing':

@@ -490,3 +490,47 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Phase 4: the type's figures for the flight, and keys by type ------------------------------ */
+
+.brief-type {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--s-4);
+  margin-top: 4px;
+  font-size: var(--fs-2);
+  color: var(--c-ink-2);
+}
+
+.brief-type-fact {
+  white-space: nowrap;
+}
+
+.brief-type-label {
+  color: var(--c-ink-3);
+}
+
+.key-types {
+  display: block;
+  margin-top: 1px;
+  color: var(--c-ink-3);
+  font-family: var(--f-display);
+  font-size: var(--fs-1);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.brief-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px var(--s-5);
+  color: var(--c-ink-2);
+  font-size: var(--fs-2);
+}
+
+.brief-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
