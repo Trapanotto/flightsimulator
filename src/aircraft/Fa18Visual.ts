@@ -176,7 +176,10 @@ class Fa18 extends AircraftModel {
     for (const m of this.materials as Set<Material>) {
       const s = m as MeshStandardMaterial;
       if (!lit.test(m.name) || !s.isMeshStandardMaterial) continue;
-      s.emissive = new Color().copy(s.color).multiplyScalar(0.5).add(nvis.clone().multiplyScalar(0.1));
+      s.emissive = new Color()
+        .copy(s.color)
+        .multiplyScalar(0.5)
+        .add(nvis.clone().multiplyScalar(0.1));
       s.emissiveIntensity = 0;
       this.cabinMaterials.push(s);
     }
@@ -269,10 +272,10 @@ class Fa18 extends AircraftModel {
     const u = uv().x;
     // Shock diamonds: bright bands along the plume, fading downstream.
     const diamonds = pow(abs(sin(u.mul(Math.PI * 5.5))), 6).mul(float(1).sub(u));
-    const core = mix(vec3(1.0, 0.82, 0.55), vec3(1.0, 0.38, 0.12), smoothstep(0.0, 0.7, u));
+    const core = mix(vec3(1.0, 0.62, 0.3), vec3(0.95, 0.28, 0.08), smoothstep(0.0, 0.6, u));
     const thick = pow(abs(dot(normalView, positionViewDirection)), 1.4);
     const fade = pow(float(1).sub(u), 1.3).mul(smoothstep(0.0, 0.04, u).mul(0.6).add(0.4));
-    const k = float(0.35).add(diamonds.mul(1.6)).mul(fade).mul(thick).mul(this.flameGain[i]!);
+    const k = float(0.12).add(diamonds.mul(1.1)).mul(fade).mul(thick).mul(this.flameGain[i]!);
     m.colorNode = vec4(core.mul(k), 1);
     return this.track(m);
   }
@@ -291,7 +294,7 @@ class Fa18 extends AircraftModel {
       .mul(0.25)
       .add(0.75);
     const face = float(1).sub(abs(dot(normalView, positionViewDirection)).mul(0.6));
-    const a = along.mul(streak).mul(face).mul(gain).mul(0.55);
+    const a = along.mul(streak).mul(face).mul(gain).mul(0.85);
     m.colorNode = vec4(0.92, 0.94, 0.97, a);
     return this.track(m);
   }
@@ -462,7 +465,7 @@ class Fa18 extends AircraftModel {
       s.ab[i] = lag(s.ab[i]!, afterburnerOf(e), dt, k(0.25));
       this.nozzleR[i]!.value = nozzleExitRadius(s.nozzle[i]!);
       const ab = s.ab[i]!;
-      this.flameGain[i]!.value = ab > 0.01 ? 0.6 + 2.6 * ab : 0;
+      this.flameGain[i]!.value = ab > 0.01 ? 0.5 + 1.3 * ab : 0;
       const side = i === 0 ? 'L' : 'R';
       const r = nozzleExitRadius(s.nozzle[i]!) / 0.3;
       for (const n of [`Flame_${side}`, `Flame_${side}_lod1`]) {

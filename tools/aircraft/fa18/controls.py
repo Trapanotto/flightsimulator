@@ -316,7 +316,7 @@ def left_console(P):
         grip = M.merge([M.rounded_box((0, 0, 0.05), (0.012, 0.03, 0.10), 0.005, 1),
                         M.rounded_box((n == 1 and 0.004 or -0.004, 0.0, 0.112), (0.034, 0.075, 0.04), 0.012, 2)])
         K.attach(P.b, f"Ctl_{cid}_mesh", K.mesh_data(f"throttle_grip_{n}", grip, P.b.mats["plastic_black"]), piv, R)
-        P.hit(cid, cl(bl, idle - travel / 2, s + 0.11), (0.018, travel / 2 + 0.03, 0.025), frame=R,
+        P.hit(cid, cl(bl, idle - travel / 2 - 0.01, s + 0.125), (0.012, travel / 2 + 0.03, 0.012), frame=R,
               side=np.array([0, -1.0, 0]), extra={"lever": 1})
         # Finger lift under the grip's front: lifted, the throttle passes to OFF.
         lift = P.pivot(f"Ctl_fuelCutoff{n}", cl(bl, idle - 0.04, s + 0.075), axis=R[:, 0], props={"detents": [0.0, -30.0]})
@@ -324,23 +324,24 @@ def left_console(P):
                                                                                          0.002, 1),
                                                               P.b.mats["chrome"]), lift, R)
         M.parent_keep(lift, piv)
-        P.hit(f"fuelCutoff{n}", cl(bl, idle - travel / 2 - 0.04, s + 0.072), (0.011, travel / 2 + 0.008, 0.012),
-              frame=R)
+        # The OFF stop behind idle: the finger lift is clicked there (it rides on the grip).
+        P.hit(f"fuelCutoff{n}", cl(bl, idle + 0.05, s + 0.03), (0.012, 0.022, 0.03), frame=R)
     # Speed brake switch on the outboard grip, the autothrottle (ATC) button on the inboard one.
     sb = P.pivot("Ctl_speedbrake", cl(0.404, idle, s + 0.115), axis=np.array([0, 1.0, 0]), props={"detents": [-18.0, 18.0]})
     K.attach(P.b, "Ctl_speedbrake_mesh", K.shared("sb_switch", lambda: K.box(0, 0, 0.003, 0.006, 0.012, 0.006, 0.002, 1),
                                                   P.b.mats["chrome"]),
              sb, np.column_stack([(0, -1.0, 0), (0, 0, 1.0), (1.0, 0, 0)]))
     M.parent_keep(sb, P.b.objects_by_name["Ctl_throttle1"])
-    P.hit("speedbrake", cl(0.41, idle - travel / 2, s + 0.115), (0.007, travel / 2 + 0.03, 0.012), frame=R)
-    atc = P.pivot("Ctl_athr", cl(0.313, idle - 0.02, s + 0.118), slide=np.array([0.0015, 0, 0]))
+    P.hit("speedbrake", cl(0.41, idle - travel / 2, s + 0.125), (0.007, travel / 2 + 0.03, 0.01), frame=R)
+    atc = P.pivot("Ctl_athr", cl(0.335, idle - 0.02, s + 0.133), slide=np.array([0, 0, -0.0015]))
     K.attach(P.b, "Ctl_athr_mesh", K.shared("atc_btn", lambda: K.revolve([(0, 0.004, False), (0.003, 0.004, False),
                                                                            (0.0035, 0.003, False)], 12),
                                             P.b.mats["chrome"]),
-             atc, np.column_stack([(0, -1.0, 0), (0, 0, 1.0), (-1.0, 0, 0)]))
+             atc, R)
     M.parent_keep(atc, P.b.objects_by_name["Ctl_throttle2"])
-    P.hit("athr", cl(0.31, idle - travel / 2 - 0.02, s + 0.118), (0.006, travel / 2 + 0.03, 0.009), frame=R)
+    P.hit("athr", cl(0.335, idle - travel / 2 - 0.02, s + 0.142), (0.008, travel / 2 + 0.03, 0.008), frame=R)
     label(P, "IDLE", cl(0.425, idle, s), 0.003, R)
+    label(P, "OFF", cl(0.425, idle + 0.05, s), 0.003, R)
     label(P, "MIL", cl(0.425, idle - 0.75 * travel, s), 0.003, R)
     label(P, "MAX", cl(0.425, idle - travel, s), 0.003, R)
     # APU and engine crank; FCS reset and take-off trim.

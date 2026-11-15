@@ -336,7 +336,9 @@ export function setup(
   if (q.has('hook')) panel.set('hook', Number(q.get('hook')));
   // ?pages=left,right,mpcd: the display pages by index (FA18_CONTROLS' positions).
   const pages = q.get('pages')?.split(',').map(Number);
-  if (pages?.length === 3) for (const [i, id] of ['ddiLeftPage', 'ddiRightPage', 'mpcdPage'].entries()) panel.set(id, pages[i]!);
+  if (pages?.length === 3)
+    for (const [i, id] of ['ddiLeftPage', 'ddiRightPage', 'mpcdPage'].entries())
+      panel.set(id, pages[i]!);
   if (q.has('canopy')) panel.set('canopy', Number(q.get('canopy')));
   if (name === 'takeoff' || name === 'ramp') panel.set('flaps', 1);
 }

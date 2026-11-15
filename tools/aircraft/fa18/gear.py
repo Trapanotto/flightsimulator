@@ -58,9 +58,8 @@ def main(col, mats, parts, side, sfx):
     gear = M.empty(f"MainGear_{sfx}", col, M.P(*pv), props={"axis": M.model_axis(*ax), "retractDeg": D.MAIN_RETRACT_DEG})
     leg = [M.cylinder(pv - np.array([side * 0.12, 0, 0]), pv + np.array([side * 0.10, 0, 0]), 0.06, 14),
            M.tube_path([pv, knee + np.array([0, 0, 0.05])], [0.085, 0.075], 16),
-           # Drag brace forward and up to the fuselage, the side brace inboard.
-           M.tube_path([knee + np.array([0, -0.02, 0.25]), pv + np.array([0, -0.55, 0.0])], 0.035, 10),
-           M.tube_path([knee + np.array([0, 0.0, 0.35]), pv + np.array([-side * 0.32, 0.1, 0.02])], 0.03, 10)]
+           # The folded side brace along the leg (it lies flat with the leg in the well).
+           M.tube_path([knee + np.array([-side * 0.06, 0.0, 0.30]), pv + np.array([-side * 0.08, 0.06, -0.12])], 0.028, 10)]
     o = M.make_object(f"MainLeg_{sfx}", *M.merge(leg), col, mats["gear_paint"], sharp_angle=40, origin=M.P(*pv))
     M.parent_keep(o, gear)
     strut = (knee - axle_strut) / np.linalg.norm(knee - axle_strut)
@@ -129,8 +128,8 @@ def nose(col, mats, parts):
     upper = [M.cylinder(pv + np.array([-0.11, 0, 0]), pv + np.array([0.11, 0, 0]), 0.045, 12),
              M.cylinder(pv, collar, 0.07, 16),
              M.cylinder(collar - down * 0.02, collar + down * 0.04, 0.085, 16),
-             # Drag brace up and aft to the bay roof.
-             M.tube_path([pv + down * 0.32, pv + np.array([0, 0.45, 0.04])], 0.025, 8)]
+             # Drag brace folded along the leg.
+             M.tube_path([pv + down * 0.32 + np.array([0, 0.07, 0]), pv + np.array([0, 0.09, -0.05])], 0.022, 8)]
     lc = pv + down * 0.30 + np.array([0, -0.085, 0])
     upper.append(M.lathe([(-0.07, 0.0), (-0.07, 0.065), (0.0, 0.07)], lc, (0, -1.0, -0.1), n=16,
                          close_start=True, close_end=False))
