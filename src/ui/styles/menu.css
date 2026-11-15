@@ -510,9 +510,9 @@
   }
   .home-body {
     grid-template-areas:
-      'aircraft start'
+      'airport start'
       'aircraft weather'
-      'airport time';
+      'aircraft time';
     gap: 6px var(--s-5);
   }
   .home-field--aircraft {

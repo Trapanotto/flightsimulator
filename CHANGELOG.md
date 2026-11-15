@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.0 – Ein einfaches Design für alle Bildschirme (2026-11-15)
+
+- **Startseite:** nur noch Flugplatz, Flugzeug, Start (Piste / In der Luft / Anflug), Wetter,
+  Tageszeit (Jetzt / Morgen / Mittag / Abend / Nacht) und «Flug starten». Am Handy passt alles
+  ohne Scrollen auf einen Bildschirm.
+- **Flugplatz wählen:** Ein Feld öffnet die Auswahl mit Karte, Suche und Liste. Die Karte zeigt
+  Ortsnamen statt Kürzel; ein Tipp auf einen Namen wählt diesen Ort.
+- **Im Flug:** oben eine schmale Leiste mit Geschwindigkeit, Kurs und Höhe, daneben Pause und
+  «Mehr». Am Handy dazu nur Steuerknüppel, Gas und Bremse; am Desktop eine kleine Zeile für
+  Gas, Klappen und Fahrwerk. Klappen, Fahrwerk, Luftbremse, Ansicht, Abspringen und die
+  Bedienfelder liegen im «Mehr»-Menü.
+- **Entfernt:** NAV-Leiste, grosse Anzeigekarten, Seitenruder-Regler am Handy (die App lenkt
+  am Boden mit dem Knüppel), Schieberegler für Zeit, Jahreszeit-Wahl (folgt dem Kalender),
+  Luftstart per Klick auf die Karte, «Panne auslösen». Das Funkfenster öffnet nicht mehr von
+  selbst.
+
 ## 1.1.0 – Schlanke Startseite und Absprung (2026-11-15)
 
 - **Startseite ist die Flugplanung:** kein Hauptmenü und kein 3D-Flug im Hintergrund mehr; die

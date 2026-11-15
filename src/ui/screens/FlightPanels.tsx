@@ -195,19 +195,7 @@ export function FlightPanels() {
   const open = panels.open.value.filter((p) => list.includes(p));
   const paused = game.screen.value !== 'flight';
 
-  // The radio opens by itself when a flight with a controller begins (on a large screen).
-  const hadAtc = useRef(false);
-  useSignalEffect(() => {
-    const atc = game.atc.value !== null;
-    if (atc && !hadAtc.current && !showTouch.peek())
-      panels.open.value = togglePanel(
-        panels.open.peek().filter((p) => p !== 'radio'),
-        'radio',
-        false,
-      );
-    hadAtc.current = atc;
-  });
-
+  // No panel opens by itself: the dot on the "more" button says when the radio waits.
   if (!list.length) return null;
   const panel = (id: PanelId) => {
     const onClose = () => close(id);

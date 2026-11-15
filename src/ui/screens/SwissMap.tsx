@@ -321,12 +321,18 @@ export function SwissMap(props: {
     const p = new DOMPoint(clientX, clientY).matrixTransform(m.inverse());
     return [p.x, p.y];
   };
+  /** Where the names stand on the map as drawn, in map units. */
+  const labelBoxes = useRef<{ icao: string; box: [number, number, number, number] }[]>([]);
   /** Map units per CSS pixel at the present zoom. */
   const unitsPerPx = () => {
     const m = svgRef.current?.getScreenCTM();
     return m ? 1 / m.a : 1;
   };
   const nearestAt = (x: number, y: number): AirportOption | null => {
+    // A tap on a name means that place, although another dot may lie nearer to the lettering.
+    for (const { icao, box } of labelBoxes.current)
+      if (x >= box[0] && x <= box[2] && y >= box[1] && y <= box[3])
+        return props.airports.find((a) => a.icao === icao) ?? null;
     const reach = PICK_PX * unitsPerPx();
     let best: AirportOption | null = null;
     let bestD = reach * reach;
@@ -434,6 +440,7 @@ export function SwissMap(props: {
   // Labels: the selected and hovered airport always, then the main ones, then (zoomed in) any
   // that still fit, each only where it does not cover one already placed.
   const labelled = new Set<string>();
+  labelBoxes.current = [];
   {
     const boxes: [number, number, number, number][] = [];
     const rank = (a: AirportOption) =>
@@ -467,6 +474,7 @@ export function SwissMap(props: {
       if (free || rank(a) === 0) {
         boxes.push(box);
         labelled.add(a.icao);
+        labelBoxes.current.push({ icao: a.icao, box });
       }
     }
   }

@@ -473,17 +473,6 @@ export function FlightSetup() {
         </header>
 
         <div class="home-body">
-          <section class="home-field home-field--aircraft" aria-labelledby="home-aircraft">
-            <h2 class="caps home-label" id="home-aircraft">
-              {t('setup.aircraft')}
-            </h2>
-            <AircraftTiles
-              aircraft={aircraft}
-              selected={d.aircraft}
-              onSelect={(id) => set({ aircraft: id })}
-            />
-          </section>
-
           <section class="home-field home-field--airport" aria-labelledby="home-airport">
             <h2 class="caps home-label" id="home-airport">
               {t('phone.airport')}
@@ -507,6 +496,17 @@ export function FlightSetup() {
               )}
               <span class="airport-field-go">{t('phone.change')}</span>
             </button>
+          </section>
+
+          <section class="home-field home-field--aircraft" aria-labelledby="home-aircraft">
+            <h2 class="caps home-label" id="home-aircraft">
+              {t('setup.aircraft')}
+            </h2>
+            <AircraftTiles
+              aircraft={aircraft}
+              selected={d.aircraft}
+              onSelect={(id) => set({ aircraft: id })}
+            />
           </section>
 
           <section class="home-field home-field--start" aria-labelledby="home-start">
@@ -617,7 +617,10 @@ export function FlightSetup() {
           recent={recent}
           onPick={(icao) => {
             set({ airport: icao, runway: '' });
-            picking.value = false;
+            // Closed a moment later: a tap on the map picks when the finger lifts, and the
+            // click that follows would land on whatever lies under the vanished picker
+            // (the airport field, which would open it again).
+            setTimeout(() => (picking.value = false), 60);
           }}
           onClose={() => (picking.value = false)}
         />
