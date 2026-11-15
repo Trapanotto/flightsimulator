@@ -123,6 +123,10 @@ export async function loadAircraftVisual(
       const { loadA320 } = await import('./A320Visual');
       return loadA320(options);
     }
+    case 'fa18': {
+      const { loadFa18 } = await import('./Fa18Visual');
+      return loadFa18(options);
+    }
     default:
       throw new Error(`loadAircraftVisual('${String(id)}'): no model for this type`);
   }

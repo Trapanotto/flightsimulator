@@ -74,6 +74,8 @@ if (q.get('type') === 'a320') {
   await new Promise<void>(() => {});
 }
 const type = q.get('type') === 'pc12' ? 'pc12' : 'c172';
+// The F/A-18 brings its own fakes and loader (demo/aircraftFa18.ts).
+const fa18 = q.get('type') === 'fa18' ? await import('./aircraftFa18') : undefined;
 const pc12 = type === 'pc12';
 const view = q.get('view') ?? 'front-left';
 const stateName = q.get('state') ?? 'climb-turn';
@@ -378,9 +380,11 @@ const STATES_PC12: Record<string, DemoState> = {
   },
 };
 
-const st = pc12
-  ? (STATES_PC12[stateName] ?? STATES_PC12['climb-turn']!)
-  : (STATES[stateName] ?? STATES['climb-turn']!);
+const st = fa18
+  ? fa18.state(stateName)
+  : pc12
+    ? (STATES_PC12[stateName] ?? STATES_PC12['climb-turn']!)
+    : (STATES[stateName] ?? STATES['climb-turn']!);
 const telemetry: Telemetry = {
   time: 0,
   ias: 0,
@@ -425,7 +429,7 @@ const controls: ControlInput = {
   ...(pc12 ? { condition: [1], reverse: false, rollTrim: 0, yawTrim: 0 } : {}),
   ...st.controls,
 };
-if (pc12) controls.gearDown = st.controls.gearDown ?? true;
+if (pc12 || fa18) controls.gearDown = st.controls.gearDown ?? true;
 
 const canvas = document.getElementById('c') as HTMLCanvasElement;
 const renderer = new WebGPURenderer({ canvas, antialias: true, forceWebGL: q.has('webgl') });
@@ -468,7 +472,9 @@ ground.receiveShadow = true;
 scene.add(ground);
 
 const quality = q.get('device') === 'mobile' || q.get('quality') === 'low' ? 'low' : 'high';
-const ac = await loadAircraftVisual(type, { quality, landingLightSpot: night });
+const ac = fa18
+  ? await fa18.load({ quality, landingLightSpot: night })
+  : await loadAircraftVisual(type, { quality, landingLightSpot: night });
 scene.add(ac.object);
 const wheelY = Math.min(...ac.wheelContacts.map((w) => w.y));
 ac.object.position.y = -wheelY + st.height;
@@ -480,7 +486,7 @@ ac.setExposure(night ? 400 : 4.2);
 
 // ---- the cockpit's controls, bound to the control input as the simulation does ----------
 const engineRunning = telemetry.engines[0]!.running;
-const CONTROLS = pc12 ? PC12_CONTROLS : C172_CONTROLS;
+const CONTROLS = fa18 ? fa18.CONTROLS : pc12 ? PC12_CONTROLS : C172_CONTROLS;
 const panel = new CockpitPanel(CONTROLS);
 panel.bind(
   'throttle',
@@ -542,6 +548,7 @@ panel.bind(
     condition: controls.condition ? [...controls.condition] : undefined,
   };
   panel.reset(engineRunning);
+  if (fa18) fa18.bind(panel, controls);
   // The demo state's levers win over the reset.
   Object.assign(controls, keep);
   if (night) for (const id of ['lightPanel']) panel.set(id, 0.8);
@@ -552,6 +559,7 @@ panel.bind(
     if (engineRunning) for (const id of ['lightRecognition', 'lightLanding']) panel.set(id, 1);
     if (engineRunning && stateName === 'landing') panel.set('lightTaxi', 1);
   }
+  if (fa18) fa18.setup(panel, stateName, night, engineRunning, telemetry);
   if (pc12 && engineRunning) {
     // What a crew would have set up by now.
     panel.set('pitotHeat', 1);
@@ -1127,7 +1135,7 @@ function fakeStepPc12(dt: number) {
 // ---- camera ---------------------------------------------------------------------------------
 const camera = new PerspectiveCamera(40, 1, 0.05, 2000);
 /** The PC-12 is about 1.6 times the Cessna: the same framings from further away. */
-const S = pc12 ? 1.6 : 1;
+const S = fa18 ? fa18.SCALE : pc12 ? 1.6 : 1;
 const target = pc12
   ? new Vector3(0, ac.object.position.y - 0.5, 0.9)
   : new Vector3(0, ac.object.position.y - 0.2, 0.4);
@@ -1183,6 +1191,10 @@ if (inCockpit) {
   if (view === 'cockpit') {
     camera.fov = Number(q.get('fov') ?? 55);
     applyLook();
+  } else if (fa18) {
+    camera.up.set(0, 1, 0).applyQuaternion(ac.object.quaternion);
+    camera.fov = Number(q.get('fov') ?? 50);
+    camera.lookAt(ac.object.localToWorld(new Vector3(e.x, e.y - 0.42, e.z + 0.8)));
   } else if (pc12) {
     camera.up.set(0, 1, 0).applyQuaternion(ac.object.quaternion);
     camera.fov = Number(q.get('fov') ?? 47);
@@ -1451,7 +1463,8 @@ const step = () => {
   telemetry.time += DT;
   telemetry.headingDeg = (((startHeading + st.turnRate * telemetry.time) % 360) + 360) % 360;
   telemetry.trackDeg = telemetry.headingDeg;
-  if (pc12) fakeStepPc12(DT);
+  if (fa18) fa18.step(DT, telemetry, controls, panel);
+  else if (pc12) fakeStepPc12(DT);
   else fakeStep(DT);
   ac.update(DT, telemetry, controls, panel);
 };
