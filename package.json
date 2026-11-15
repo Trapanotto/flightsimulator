@@ -15,6 +15,7 @@
     "test": "vitest run",
     "shots": "node tools/shots.mjs",
     "shots:update": "node tools/shots.mjs --update",
+    "bench": "node tools/bench.mjs",
     "check": "npm run typecheck && npm run lint && npm test"
   },
   "dependencies": {
