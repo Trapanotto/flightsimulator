@@ -222,7 +222,7 @@ export class Fa18Fcs implements ControlLaw {
     }
     this.lastNz = t.loadFactor;
     this.lastAlpha = alpha;
-    const nzAhead = t.loadFactor + 0.4 * this.nzRate;
+    const nzAhead = t.loadFactor + 0.15 * this.nzRate;
     const alphaAhead = alpha + 0.35 * this.alphaRate;
     const p = clamp(ctx.pitch, -1, 1);
     const r = clamp(ctx.roll, -1, 1);
@@ -293,7 +293,7 @@ export class Fa18Fcs implements ControlLaw {
         this.nzIntegral = clamp(this.nzIntegral + 1.5 * (nM - nz) * dt, -1.5, 1.5);
       else this.nzIntegral *= 1 - dt;
       // More load factor feedback where the airframe answers it quickly (high dynamic pressure).
-      const kn = 1 + 1.5 * smoothstep(9000, 20000, ctx.q);
+      const kn = 1 + 1.0 * smoothstep(9000, 20000, ctx.q);
       const qG = (G / V) * (nM - gravityNormal + kn * (nM - nzAhead) + this.nzIntegral);
       const qRate = shaped * 0.6 + (G / V) * (nRef - gravityNormal);
       qDes = blend * qG + (1 - blend) * qRate;
@@ -307,7 +307,7 @@ export class Fa18Fcs implements ControlLaw {
       if (alphaLimited) qDes = qAlpha;
       qDes = Math.max(qDes, 1.6 * (FA18_FCS.alphaMin - alphaAhead) + path);
       // The g limiter also holds against what the pilot's pull would overshoot.
-      qDes = Math.min(qDes, path + (G / V) * (3 * (nMax - nzAhead) + Math.max(0, this.nzIntegral)));
+      qDes = Math.min(qDes, path + (G / V) * (2 * (nMax - nzAhead) + Math.max(0, this.nzIntegral)));
       qDes = Math.max(qDes, path + (G / V) * 3 * (FA18_FCS.negativeG - nzAhead));
       // Held by the angle of attack limit: the load factor integrator must not wind up.
       if (alphaLimited && this.nzIntegral > before) this.nzIntegral = before;

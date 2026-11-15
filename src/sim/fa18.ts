@@ -58,7 +58,7 @@ const WING_FOIL: AirfoilData = {
   reattachMargin: 3 * DEG,
   lagChords: 3,
   cd0: 0.0055,
-  cdLift: 0.012,
+  cdLift: 0.008,
   cm0: -0.005,
   plateLift: 1.35,
   plateDrag: 1.3,
@@ -250,12 +250,12 @@ const vane = strips.findIndex((s) => s.name === 'wing-centre');
  * per engine at military power and a little over 17 000 kg/h in full afterburner at sea
  * level (the figures the task gives; published SFCs of 0.8 and 1.8-1.9 lb/lbf/h would give
  * about 4000 and 15 000 kg/h). The thrust lapse with ram follows Mattingly's afterburning
- * low-bypass form with a throttle ratio of 1.04 (reconstructed so the published maximum speeds
+ * low-bypass form with a throttle ratio of 1.05 (reconstructed so the published maximum speeds
  * come out); spool speeds, map and temperatures are typical values, from memory.
  */
 const F404: TurbofanDef['engine'] = {
   ratedThrust: 11_000 * LBF,
-  throttleRatio: 1.04,
+  throttleRatio: 1.05,
   temperatureLapse: 3.5,
   machLapse: 0,
   n1Rpm: 13_270,
@@ -494,7 +494,7 @@ export const FA18: AircraftDefinition = {
     aileronRigging: 0,
     rudderRigging: 0,
     stallShift: 0.1,
-    flapDrag: 0.1,
+    flapDrag: 0.06,
     spoilerRate: 0.5,
   },
   gear: {
