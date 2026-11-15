@@ -609,8 +609,10 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     openDeck();
     sound.setAircraft(aircraft.info);
     cockpitSound.setAircraft(aircraft.info);
-    assist.coordinate =
-      aircraft.info.category !== 'airliner' && aircraft.info.category !== 'fighter';
+    // Propeller aircraft pull to one side and need a foot on the rudder; jets with symmetric
+    // thrust and flight controls that coordinate turns roll and fly straight by themselves,
+    // and a helper on their rudder only swings them from side to side.
+    assist.enabled = aircraft.info.category !== 'airliner' && aircraft.info.category !== 'fighter';
     input.setFlapNotches(
       aircraft.cockpit.specs.find((s) => s.id === 'flaps')?.positions?.length ?? 4,
     );

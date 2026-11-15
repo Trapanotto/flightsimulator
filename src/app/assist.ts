@@ -14,11 +14,6 @@ const headingDiff = (a: number, b: number) => ((a - b + 540) % 360) - 180;
  */
 export class RudderAssist {
   enabled = true;
-  /**
-   * Centre the ball in the air. Off for aircraft whose flight controls do that themselves
-   * (fly-by-wire with turn coordination): two helpers on one rudder fight each other.
-   */
-  coordinate = true;
   private holdHeading: number | undefined;
   private lastHeading = 0;
   private command = 0;
@@ -66,7 +61,7 @@ export class RudderAssist {
       this.holdHeading = undefined;
       this.bias = 0;
       // Centre the ball: rudder towards the side the air comes from.
-      if (this.coordinate) want = clamp(4 * telemetry.beta, -0.6, 0.6);
+      want = clamp(4 * telemetry.beta, -0.6, 0.6);
     }
     // Feet move quickly but not instantly.
     this.command += clamp(want - this.command, -4 * dt, 4 * dt);
