@@ -455,8 +455,10 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
     game.telemetry.value = null;
     game.levers.value = null;
     game.loadProgress.value = 0;
-    // Back to the menu: the loading screen covers the change of place.
-    if (!p) game.screen.value = 'loading';
+    // The menu is there at once, over a plain backdrop; its scene (the flight through the
+    // Oberland) fades in behind it when it has loaded. Nobody waits for scenery to press a button.
+    if (!p) game.screen.value = 'menu';
+    document.documentElement.dataset.scene = 'loading';
     plan = p;
     deck?.dispose();
     deck = undefined;
@@ -710,6 +712,8 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       const next = id ?? 'c172';
       if (next === menuAircraft) return;
       menuAircraft = next;
+      // Still loading the menu's scene: load it with this type instead.
+      if (plan === null && !flight) prepare(null);
       // Only the aircraft changes: the menu's flight goes on where it is.
       if (plan !== null || !flight) return;
       const at = flight.aircraft.state.position;
@@ -876,6 +880,7 @@ export async function startApp(canvas: HTMLCanvasElement, uiRoot: HTMLElement): 
       if (--reveal.frames <= 0) {
         game.loadProgress.value = 1;
         game.screen.value = reveal.screen;
+        delete document.documentElement.dataset.scene;
         reveal = undefined;
       }
     }

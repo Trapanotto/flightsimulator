@@ -26,7 +26,8 @@
   pointer-events: none;
 }
 
-.menu-stage.is-loading .menu-backdrop {
+.menu-stage.is-loading .menu-backdrop,
+:root[data-scene='loading'] .menu-backdrop {
   opacity: 1;
   transition: none;
 }
