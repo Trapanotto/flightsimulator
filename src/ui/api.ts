@@ -160,7 +160,7 @@ export interface UiActions {
   /**
    * In the aircraft: get out (standing on the ground), jump with the parachute (in flight), or
    * fire the ejection seat (the fighter). Outside, standing next to the aircraft: get back in.
-   * Key B. `game.pilot` becomes non-null while the pilot is outside.
+   * Key X. `game.pilot` becomes non-null while the pilot is outside.
    */
   leaveAircraft?(): void;
   /** In free fall: pull the parachute. Under the canopy near the ground: flare. Key Space. */
