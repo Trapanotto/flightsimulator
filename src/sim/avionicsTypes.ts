@@ -235,7 +235,15 @@ export interface AirbusControls {
 
 /** What the system pages of the lower ECAM show. Pressures psi, temperatures °C. */
 export interface AirbusSystems {
-  apu: { master: boolean; n: number; egt: number; available: boolean; bleed: boolean; generator: boolean };
+  apu: {
+    master: boolean;
+    /** Speed and exhaust gas temperature, per cent and °C; AVAIL; bleed and generator on line. */
+    n: number;
+    egt: number;
+    available: boolean;
+    bleed: boolean;
+    generator: boolean;
+  };
   /** Bleed pressure in the left and right ducts. */
   bleed: [number, number];
   /** Engine start: valve open, igniters A/B firing, and the phase of the automatic start. */
@@ -265,6 +273,8 @@ export interface AirbusSystems {
   air: { packs: [boolean, boolean]; cabinAltitude: number; cabinRate: number; differential: number };
   antiIce: { wing: boolean; engine: [boolean, boolean] };
   brakes: { pressure: number; antiSkid: boolean; parking: boolean };
+  /** Gross mass, kg (the weight and balance the computers use). */
+  grossMass: number;
 }
 
 /** ECAM: the upper display's warnings and memo, as plain lines. */
