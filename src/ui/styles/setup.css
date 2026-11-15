@@ -1002,3 +1002,159 @@
     height: 40px;
   }
 }
+
+/* Phase 4: several aircraft ---------------------------------------------------------------- */
+
+/* An airport the chosen type may not use: still readable, plainly not on offer. */
+.apt.is-off {
+  cursor: default;
+  background: transparent;
+  border-style: dashed;
+}
+
+.apt.is-off:hover {
+  background: transparent;
+  border-color: var(--c-line);
+}
+
+.apt.is-off :is(.apt-icao, .apt-name) {
+  color: var(--c-ink-4);
+}
+
+.apt-why {
+  color: var(--c-caution);
+  opacity: 0.85;
+}
+
+.swissmap-apt.is-off {
+  cursor: default;
+}
+
+.swissmap-apt.is-off .swissmap-dot {
+  fill: transparent;
+  stroke: var(--c-ink-3);
+}
+
+.swissmap-apt.is-off .swissmap-label {
+  fill: var(--c-ink-4);
+}
+
+/* The chooser: tiles for the types, the chosen one's card below. */
+.craft-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.craft-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: var(--s-1);
+  padding: var(--s-1);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  background: rgb(0 0 0 / 0.22);
+}
+
+.craft-tile {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    'icon name'
+    'icon kind';
+  align-items: center;
+  column-gap: var(--s-2);
+  min-height: 52px;
+  padding: 6px var(--s-3) 6px var(--s-2);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--c-ink-2);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease-out),
+    color var(--t-fast) var(--ease-out);
+}
+
+.craft-tile .icon {
+  grid-area: icon;
+}
+
+.craft-tile:hover {
+  background: var(--c-fill-hover);
+  color: var(--c-ink);
+}
+
+.craft-tile.is-on {
+  background: var(--c-ink);
+  color: #0b1018;
+  box-shadow: 0 1px 6px rgb(0 0 0 / 0.3);
+}
+
+.craft-tile-name {
+  grid-area: name;
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: var(--fs-4);
+  letter-spacing: 0.03em;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.craft-tile-kind {
+  grid-area: kind;
+  font-size: var(--fs-0);
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.craft--detail {
+  cursor: default;
+  border-color: var(--c-line-strong);
+  background: linear-gradient(135deg, rgb(143 211 255 / 0.1), transparent 60%), var(--c-fill);
+}
+
+.craft--detail .craft-name {
+  font-size: var(--fs-5);
+}
+
+/* Scenarios: one the chosen type cannot fly says why instead of where. */
+.scenario[disabled] {
+  cursor: default;
+  opacity: 0.55;
+  background: transparent;
+}
+
+.scenario[disabled]:hover {
+  border-color: var(--c-line);
+}
+
+.scenario[disabled]:active {
+  transform: none;
+}
+
+.scenario-why {
+  color: var(--c-caution);
+}
+
+.scenario-type {
+  font-family: var(--f-display);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--c-ink-2);
+}
+
+@media (max-height: 560px) {
+  .craft-tile {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 480px) {
+  .craft-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

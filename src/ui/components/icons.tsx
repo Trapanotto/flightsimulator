@@ -311,3 +311,48 @@ export const IconWarning = (p: P) => (
     <path d="M12 10v4.5M12 17.2v.1" />
   </Icon>
 );
+
+// Phase 4: the kinds of aircraft, seen from above, and the levers they bring.
+export const IconPiston = (p: P) => (
+  <Icon {...p}>
+    <path d="M12 3.6c.8 0 1.2.8 1.2 1.8v2.8h7.3v2.4h-7.3v6.1l2.6 1v1.6H8.2v-1.6l2.6-1v-6.1H3.5V8.2h7.3V5.4c0-1 .4-1.8 1.2-1.8z" />
+    <path d="M9.6 2.5h4.8" />
+  </Icon>
+);
+export const IconTurboprop = (p: P) => (
+  <Icon {...p}>
+    <path d="M12 3.4c.7 0 1.1.8 1.1 1.8v4l7.4 2.1v1.8l-7.4-.9v5.4l2.8 1.4v1.5H8.1V19l2.8-1.4v-5.4l-7.4.9v-1.8l7.4-2.1v-4c0-1 .4-1.8 1.1-1.8z" />
+    <path d="M9.6 2.4h4.8" />
+  </Icon>
+);
+export const IconAirliner = IconPlane;
+export const IconFighter = (p: P) => (
+  <Icon {...p}>
+    <path d="M12 2.5l1.2 3.4.3 4.4 6.9 4.9v1.7l-6.9-1.7-.3 2.3 2.7 2v1.6L12 20.2l-3.9.9v-1.6l2.7-2-.3-2.3-6.9 1.7v-1.7l6.9-4.9.3-4.4z" />
+  </Icon>
+);
+export const IconSpeedbrake = (p: P) => (
+  <Icon {...p}>
+    <path d="M3 16h18" />
+    <path d="M7 16l4-6M13 16l4-6" />
+  </Icon>
+);
+export const IconReverse = (p: P) => (
+  <Icon {...p}>
+    <path d="M19 12H6M10 7.5 5.5 12l4.5 4.5" />
+  </Icon>
+);
+
+/** The icon of a kind of aircraft. */
+export function CategoryIcon({ category, size }: { category: string; size?: number }) {
+  switch (category) {
+    case 'turboprop':
+      return <IconTurboprop size={size} />;
+    case 'airliner':
+      return <IconAirliner size={size} />;
+    case 'fighter':
+      return <IconFighter size={size} />;
+    default:
+      return <IconPiston size={size} />;
+  }
+}

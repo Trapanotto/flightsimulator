@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from 'preact/hooks';
 import { type AirportOption, type SeasonChoice, type WeatherChoice, game, settings } from '../api';
 import { Field, Segmented, Slider, Toggle } from '../components/controls';
 import {
+  CategoryIcon,
   IconApproach,
   IconBack,
   IconChevronDown,
@@ -20,6 +21,15 @@ import {
   IconStratus,
   IconSun,
 } from '../components/icons';
+import {
+  type Category,
+  airportEligibility,
+  categoryOf,
+  eligible,
+  shortName,
+  typeDefaults,
+} from '../fleet';
+import { eligibilityText } from '../fleetText';
 import { arrowNav, useDialog } from '../focus';
 import {
   altitudeUnit,
@@ -34,8 +44,6 @@ import { type MessageKey, lang, t } from '../i18n';
 import { actions, nav } from '../nav';
 import { browserStorage, readJson, writeJson } from '../persist';
 import {
-  AIR_START_HEIGHTS,
-  APPROACH_DISTANCES,
   DRAFT_KEY,
   FAILURE_IDS,
   FAILURE_MINUTES,
@@ -50,7 +58,11 @@ import {
   draftToPlan,
   planProblem,
   sanitizeDraft,
+  duskHours,
+  scenarioAircraft,
+  scenarioBlocker,
   scenarioDraft,
+  usableEnds,
 } from '../plan';
 import { dayGradient, sunTimes, swissNowHours } from '../sun';
 import { SwissMap } from './SwissMap';
@@ -76,6 +88,8 @@ function AirportList(props: {
   airports: AirportOption[];
   selected: string;
   onSelect: (icao: string) => void;
+  /** The chosen type: airports it may not use are greyed out with the reason. */
+  info?: AircraftInfo;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   if (!props.airports.length)
@@ -85,6 +99,7 @@ function AirportList(props: {
         <p class="empty-hint">{t('setup.noAirports.hint')}</p>
       </div>
     );
+  const category = categoryOf(props.info);
   const anySelected = props.airports.some((a) => a.icao === props.selected);
   return (
     <div
@@ -92,29 +107,44 @@ function AirportList(props: {
       class="apt-list"
       role="radiogroup"
       aria-label={t('setup.airports')}
-      onKeyDown={(e) => arrowNav(e, ref.current, '[role="radio"]', 'both')?.click()}
+      onKeyDown={(e) =>
+        arrowNav(e, ref.current, '[role="radio"]:not([aria-disabled="true"])', 'both')?.click()
+      }
     >
       {props.airports.map((a, i) => {
         const on = a.icao === props.selected;
+        const e = airportEligibility(a, category);
+        const off = !e.ok;
         return (
           <button
             type="button"
             role="radio"
             aria-checked={on}
+            aria-disabled={off ? 'true' : undefined}
+            title={off ? eligibilityText(e, props.info, 'long') : undefined}
             tabIndex={on || (!anySelected && i === 0) ? 0 : -1}
             data-autofocus={on ? '' : undefined}
-            class={`apt${on ? ' is-on' : ''}`}
+            class={`apt${on ? ' is-on' : ''}${off ? ' is-off' : ''}`}
             key={a.icao}
-            onClick={() => props.onSelect(a.icao)}
+            onClick={() => !off && props.onSelect(a.icao)}
           >
             <span class="apt-icao">{a.icao}</span>
             <span class="apt-name">{a.name}</span>
             <span class="apt-meta num">
-              {heightLabel(a.elevation)}
-              <span class="apt-sep" aria-hidden="true">
-                ·
-              </span>
-              {runwaySummary(a.runways)}
+              {off ? (
+                <span class="apt-why">
+                  <span class="visually-hidden">{eligibilityText(e, props.info, 'long')}</span>
+                  <span aria-hidden="true">{eligibilityText(e, props.info, 'short')}</span>
+                </span>
+              ) : (
+                <>
+                  {heightLabel(a.elevation)}
+                  <span class="apt-sep" aria-hidden="true">
+                    ·
+                  </span>
+                  {runwaySummary(a.runways)}
+                </>
+              )}
             </span>
           </button>
         );
@@ -148,15 +178,8 @@ function runwaySummary(ends: string[]): string {
   return strips.length > 2 ? `${strips.length} ${t('setup.runways')}` : strips.join(' · ');
 }
 
-function AircraftCard({
-  info,
-  on,
-  onSelect,
-}: {
-  info: AircraftInfo;
-  on: boolean;
-  onSelect?: () => void;
-}) {
+/** Name, engines, gear and the three numbers that matter most before a flight. */
+function CraftBody({ info, icon }: { info: AircraftInfo; icon?: boolean }) {
   const units = settings.units.value;
   const stats: [MessageKey, MessageKey, string, string][] = [
     ['aircraft.vs0', 'aircraft.vs0.sub', formatSpeed(info.vs0, units), speedUnit(units)],
@@ -164,16 +187,9 @@ function AircraftCard({
     ['aircraft.mtom', 'aircraft.mtom.sub', groupThousands(info.maxTakeoffMass, lang.value), 'kg'],
   ];
   return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={on}
-      tabIndex={on ? 0 : -1}
-      class={`craft${on ? ' is-on' : ''}`}
-      onClick={onSelect}
-    >
+    <>
       <span class="craft-head">
-        <IconPlane size={22} />
+        {icon !== false && <IconPlane size={22} />}
         <span class="craft-name">{info.name}</span>
         <span class="craft-meta">
           {info.engines === 1
@@ -195,10 +211,15 @@ function AircraftCard({
           </span>
         ))}
       </span>
-    </button>
+    </>
   );
 }
 
+/**
+ * The aircraft: with one type, its card as the only choice; with several, a row of compact
+ * tiles (kind and short name) and the chosen one's card below, so four never crowd and one
+ * never looks lost.
+ */
 function AircraftPicker(props: {
   aircraft: AircraftInfo[];
   selected: string;
@@ -215,22 +236,67 @@ function AircraftPicker(props: {
         </div>
       </div>
     );
+  const keys = (e: KeyboardEvent) => arrowNav(e, ref.current, '[role="radio"]', 'both')?.click();
+  if (props.aircraft.length === 1) {
+    const info = props.aircraft[0]!;
+    const on = info.id === props.selected;
+    return (
+      <div
+        ref={ref}
+        class="craft-list"
+        role="radiogroup"
+        aria-label={t('setup.aircraft')}
+        onKeyDown={keys}
+      >
+        <button
+          type="button"
+          role="radio"
+          aria-checked={on}
+          tabIndex={on ? 0 : -1}
+          class={`craft${on ? ' is-on' : ''}`}
+          onClick={() => props.onSelect(info.id)}
+        >
+          <CraftBody info={info} />
+        </button>
+      </div>
+    );
+  }
+  const chosen = props.aircraft.find((a) => a.id === props.selected);
   return (
-    <div
-      ref={ref}
-      class="craft-list"
-      role="radiogroup"
-      aria-label={t('setup.aircraft')}
-      onKeyDown={(e) => arrowNav(e, ref.current, '[role="radio"]', 'both')?.click()}
-    >
-      {props.aircraft.map((a) => (
-        <AircraftCard
-          key={a.id}
-          info={a}
-          on={a.id === props.selected}
-          onSelect={() => props.onSelect(a.id)}
-        />
-      ))}
+    <div class="craft-chooser">
+      <div
+        ref={ref}
+        class="craft-tiles"
+        role="radiogroup"
+        aria-label={t('setup.aircraft')}
+        onKeyDown={keys}
+      >
+        {props.aircraft.map((a, i) => {
+          const on = a.id === props.selected;
+          const category = categoryOf(a);
+          return (
+            <button
+              type="button"
+              role="radio"
+              key={a.id}
+              aria-checked={on}
+              aria-label={a.name}
+              tabIndex={on || (!chosen && i === 0) ? 0 : -1}
+              class={`craft-tile${on ? ' is-on' : ''}`}
+              onClick={() => props.onSelect(a.id)}
+            >
+              <CategoryIcon category={category} size={24} />
+              <span class="craft-tile-name">{shortName(a)}</span>
+              <span class="craft-tile-kind">{t(`category.${category}`)}</span>
+            </button>
+          );
+        })}
+      </div>
+      {chosen && (
+        <div class="craft craft--detail" aria-live="polite">
+          <CraftBody info={chosen} icon={false} />
+        </div>
+      )}
     </div>
   );
 }
@@ -301,31 +367,46 @@ const SCENARIO_ICON: Record<ScenarioId, () => preact.JSX.Element> = {
   bernCircuit: () => <IconCircuit size={22} />,
   alpsSamedan: () => <IconMountain size={22} />,
   nightGeneva: () => <IconNight size={22} />,
+  a320Zurich: () => <CategoryIcon category="airliner" size={22} />,
+  fa18Meiringen: () => <CategoryIcon category="fighter" size={22} />,
+  pc12Samedan: () => <CategoryIcon category="turboprop" size={22} />,
 };
 
-/** Ready-made flights: one click and the briefing starts. */
-function ScenarioGrid(props: { onStart: (s: Scenario) => void }) {
+/**
+ * Ready-made flights: one click and the briefing starts. A scenario made for a type flies
+ * that type; the others fly the pilot's choice, and say so when it cannot use their airports.
+ */
+function ScenarioGrid(props: {
+  draft: SetupDraft;
+  aircraft: readonly AircraftInfo[];
+  onStart: (s: Scenario) => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
-  const list = availableScenarios(game.airports.value);
   const airports = game.airports.value;
+  const list = availableScenarios(airports, props.aircraft);
+  const today = new Date();
   return (
     <div class="scenarios">
       <p class="field-hint">{t('setup.scenarios.hint')}</p>
       <div
         ref={ref}
         class="scenario-grid"
-        onKeyDown={(e) => arrowNav(e, ref.current, '.scenario', 'both')}
+        onKeyDown={(e) => arrowNav(e, ref.current, '.scenario:not([disabled])', 'both')}
       >
         {list.map((s, i) => {
           const d = s.draft;
           const apt = airports.find((a) => a.icao === d.airport);
           const dest = d.destination && d.destination !== d.airport ? d.destination : null;
+          const info = scenarioAircraft(s, props.draft, props.aircraft);
+          const blocker = scenarioBlocker(s, props.draft, airports, props.aircraft);
+          const time = s.dusk ? duskHours(airports, d.airport, today) : d.time;
           return (
             <button
               type="button"
               key={s.id}
-              class={`scenario${i === 0 ? ' is-featured' : ''}`}
-              data-autofocus={i === 0 ? '' : undefined}
+              class={`scenario${i === 0 ? ' is-featured' : ''}${s.aircraft ? ' is-typed' : ''}`}
+              data-autofocus={i === 0 && !blocker ? '' : undefined}
+              disabled={!!blocker}
               onClick={() => props.onStart(s)}
             >
               <span class="scenario-icon">{SCENARIO_ICON[s.id]()}</span>
@@ -334,17 +415,33 @@ function ScenarioGrid(props: { onStart: (s: Scenario) => void }) {
                 <span class="scenario-sub">{t(`scenario.${s.id}.sub`)}</span>
               </span>
               <span class="scenario-meta num">
-                <span class="scenario-icao">{apt?.icao}</span>
-                {dest && <span aria-hidden="true">→</span>}
-                {dest && <span class="scenario-icao">{dest}</span>}
-                <span class="scenario-dot" aria-hidden="true">
-                  ·
-                </span>
-                {typeof d.time === 'number' && formatClock(d.time)}
-                <span class="scenario-dot" aria-hidden="true">
-                  ·
-                </span>
-                {d.weather && t(`weather.${d.weather}`)}
+                {blocker && info ? (
+                  <span class="scenario-why">
+                    {t('setup.scenario.blocked', { icao: blocker.icao, type: shortName(info) })}
+                  </span>
+                ) : (
+                  <>
+                    <span class="scenario-icao">{apt?.icao}</span>
+                    {dest && <span aria-hidden="true">→</span>}
+                    {dest && <span class="scenario-icao">{dest}</span>}
+                    <span class="scenario-dot" aria-hidden="true">
+                      ·
+                    </span>
+                    {typeof time === 'number' && formatClock(time)}
+                    <span class="scenario-dot" aria-hidden="true">
+                      ·
+                    </span>
+                    {d.weather && t(`weather.${d.weather}`)}
+                    {info && props.aircraft.length > 1 && (
+                      <>
+                        <span class="scenario-dot" aria-hidden="true">
+                          ·
+                        </span>
+                        <span class="scenario-type">{shortName(info)}</span>
+                      </>
+                    )}
+                  </>
+                )}
               </span>
             </button>
           );
@@ -358,10 +455,13 @@ function ScenarioGrid(props: { onStart: (s: Scenario) => void }) {
 function Advanced(props: {
   draft: SetupDraft;
   airports: AirportOption[];
+  category: Category;
   set: (patch: Partial<SetupDraft>) => void;
 }) {
   const open = useSignal(false);
-  const { draft: d, airports, set } = props;
+  const { draft: d, set, category } = props;
+  // Only where the type may land: an A320 is not sent to a grass strip.
+  const airports = props.airports.filter((a) => eligible(a, category));
   const dest = airports.find((a) => a.icao === d.destination);
   const extras = advancedSummary(d);
   return (
@@ -384,10 +484,11 @@ function Advanced(props: {
           <Field label={t('setup.destination')} id="setup-dest">
             <div class="setup-map-wrap adv-map">
               <SwissMap
-                airports={airports}
+                airports={props.airports}
                 selected={d.destination}
                 route={dest ? { from: d.airport, to: d.destination } : undefined}
                 onSelect={(icao) => set({ destination: icao, destinationRunway: '' })}
+                isOff={(a) => !eligible(a, category)}
                 label={t('setup.destination.map')}
               />
             </div>
@@ -401,7 +502,7 @@ function Advanced(props: {
                 ...airports.map((a) => ({ value: a.icao, label: a.icao })),
               ]}
             />
-            {dest && dest.runways.length > 0 && (
+            {dest && usableEnds(dest, category).length > 0 && (
               <div class="sub-field">
                 <span class="sub-label" id="setup-dest-rwy">
                   {t('setup.destination.runway')}
@@ -411,7 +512,7 @@ function Advanced(props: {
                   class="rwy-seg"
                   value={d.destinationRunway}
                   onChange={(v) => set({ destinationRunway: v })}
-                  options={dest.runways.map((r) => ({
+                  options={usableEnds(dest, category).map((r) => ({
                     value: r,
                     label: r,
                     sub: `${String(runwayHeading(r)).padStart(3, '0')}°`,
@@ -520,6 +621,10 @@ export function FlightSetup() {
   const plan = draftToPlan(d, airports, aircraft);
   const problem = planProblem(d, airports, aircraft);
   const airport = airports.find((a) => a.icao === d.airport);
+  const info = aircraft.find((a) => a.id === d.aircraft);
+  const category = categoryOf(info);
+  const defaults = typeDefaults(info);
+  const runways = airport ? usableEnds(airport, category) : [];
 
   // Let the app show the choice in the menu scene; debounced so a dragged slider is cheap.
   const planKey = JSON.stringify(plan);
@@ -548,7 +653,7 @@ export function FlightSetup() {
   const timeText = d.time === 'now' ? t('setup.time.now') : formatClock(d.time);
   const startText =
     d.start === 'air'
-      ? t('briefing.air', { h: heightLabel(AIR_START_HEIGHTS[d.airHeight] ?? 0) })
+      ? t('briefing.air', { h: heightLabel(defaults.airHeights[d.airHeight] ?? 0) })
       : d.start === 'approach'
         ? `${t('briefing.runway', { rwy: d.runway })} · ${t('briefing.approach', { d: t('setup.nm', { n: d.approachNm }) })}`
         : t('briefing.runway', { rwy: d.runway });
@@ -576,7 +681,7 @@ export function FlightSetup() {
         <h1 id="setup-title" class="setup-title">
           {t('setup.title')}
         </h1>
-        {availableScenarios(airports).length > 0 && (
+        {availableScenarios(airports, aircraft).length > 0 && (
           <Segmented<'free' | 'scenarios'>
             label={t('setup.mode')}
             class="setup-mode"
@@ -592,7 +697,7 @@ export function FlightSetup() {
 
       {scenarios ? (
         <div class="setup-body setup-body--scenarios">
-          <ScenarioGrid onStart={startScenario} />
+          <ScenarioGrid draft={d} aircraft={aircraft} onStart={startScenario} />
         </div>
       ) : (
         <div class="setup-body">
@@ -607,6 +712,7 @@ export function FlightSetup() {
                   selected={d.airport}
                   route={d.destination ? { from: d.airport, to: d.destination } : undefined}
                   onSelect={(icao) => set({ airport: icao, runway: '' })}
+                  isOff={(a) => !eligible(a, category)}
                   label={t('setup.map')}
                 />
                 {airport && (
@@ -619,6 +725,7 @@ export function FlightSetup() {
               <AirportList
                 airports={airports}
                 selected={d.airport}
+                info={info}
                 onSelect={(icao) => set({ airport: icao, runway: '' })}
               />
             </Field>
@@ -647,14 +754,14 @@ export function FlightSetup() {
                   ]}
                 />
               </Field>
-              {airport && airport.runways.length > 0 && (
+              {runways.length > 0 && (
                 <Field label={t('setup.runway')} id="setup-runway">
                   <Segmented<string>
                     label={t('setup.runway')}
                     class="rwy-seg"
                     value={d.runway}
                     onChange={(v) => set({ runway: v })}
-                    options={airport.runways.map((r) => ({
+                    options={runways.map((r) => ({
                       value: r,
                       label: r,
                       sub: `${String(runwayHeading(r)).padStart(3, '0')}°`,
@@ -669,7 +776,7 @@ export function FlightSetup() {
                       label={t('setup.height')}
                       value={d.airHeight}
                       onChange={(v) => set({ airHeight: v })}
-                      options={AIR_START_HEIGHTS.map((h, i) => ({
+                      options={defaults.airHeights.map((h, i) => ({
                         value: i,
                         label: heightLabel(h),
                       }))}
@@ -684,7 +791,7 @@ export function FlightSetup() {
                       label={t('setup.approachDistance')}
                       value={d.approachNm}
                       onChange={(v) => set({ approachNm: v })}
-                      options={APPROACH_DISTANCES.map((n) => ({
+                      options={defaults.approachDistances.map((n) => ({
                         value: n,
                         label: t('setup.nm', { n }),
                       }))}
@@ -727,7 +834,7 @@ export function FlightSetup() {
               />
             </Field>
 
-            <Advanced draft={d} airports={airports} set={set} />
+            <Advanced draft={d} airports={airports} category={category} set={set} />
           </div>
         </div>
       )}
@@ -768,7 +875,13 @@ export function FlightSetup() {
         </button>
         {problem && (
           <span id="setup-problem" class="visually-hidden">
-            {t(problem === 'noAirport' ? 'setup.problem.noAirport' : 'setup.problem.noAircraft')}
+            {t(
+              problem === 'noAirport'
+                ? 'setup.problem.noAirport'
+                : problem === 'runway'
+                  ? 'setup.problem.runway'
+                  : 'setup.problem.noAircraft',
+            )}
           </span>
         )}
       </footer>

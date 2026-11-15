@@ -1,4 +1,5 @@
 import { useSignal } from '@preact/signals';
+import { AIRCRAFT } from '@sim';
 import type { VNode } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { game } from '../api';
@@ -17,6 +18,7 @@ import { type Lang, lang, setLang, t } from '../i18n';
 import { nav } from '../nav';
 import { status } from '../state';
 import { FlightSetup } from './FlightSetup';
+import { Hangar } from './Hangar';
 
 /** Wordmark: stays in exactly the same place from the loading screen to the menu. */
 function Brand({ compact }: { compact?: boolean }) {
@@ -126,12 +128,14 @@ function MainMenu() {
         icon={<IconPlane size={22} />}
         onClick={() => (nav.page.value = 'setup')}
       />
+      {/* A hangar of one would only repeat the aircraft the menu already shows. */}
       <MenuItem
         index={1}
-        soon
+        soon={AIRCRAFT.length < 2}
         label={t('menu.hangar')}
         sub={t('menu.hangar.sub')}
         icon={<IconHangar />}
+        onClick={() => (nav.page.value = 'hangar')}
       />
       <MenuItem
         index={2}
@@ -183,11 +187,15 @@ function LanguageSwitch() {
 export function MenuStage() {
   const loading = game.screen.value === 'loading';
   const setup = !loading && nav.page.value === 'setup';
+  const hangar = !loading && nav.page.value === 'hangar';
+  const away = setup || hangar;
   return (
-    <div class={`menu-stage${loading ? ' is-loading' : ''}${setup ? ' is-setup' : ''}`}>
+    <div
+      class={`menu-stage${loading ? ' is-loading' : ''}${setup ? ' is-setup' : ''}${hangar ? ' is-hangar' : ''}`}
+    >
       <div class="menu-backdrop" aria-hidden="true" />
       <div class="menu-scrim" aria-hidden="true" />
-      <div class="menu-col" inert={setup}>
+      <div class="menu-col" inert={away}>
         <Brand />
         <div class="menu-main">{loading ? <LoadingBlock /> : <MainMenu />}</div>
         {!loading && (
@@ -197,7 +205,7 @@ export function MenuStage() {
         )}
       </div>
       {!loading && (
-        <footer class="menu-credits fade-in" inert={setup}>
+        <footer class="menu-credits fade-in" inert={away}>
           <span>{t('menu.attribution')}</span>
           {status.version.value && (
             <span class="menu-version num">{t('menu.version', { v: status.version.value })}</span>
@@ -205,6 +213,7 @@ export function MenuStage() {
         </footer>
       )}
       {setup && <FlightSetup />}
+      {hangar && <Hangar />}
     </div>
   );
 }

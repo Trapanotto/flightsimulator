@@ -4,6 +4,7 @@ import { game } from '../api';
 import {
   controlLabel,
   formatControlValue,
+  groupLabel,
   positionLabel,
   pressControl,
   stepKnob,
@@ -379,6 +380,28 @@ export function autopilotModes(ap: AutopilotTelemetry | undefined): {
   return { active: ['AP', LATERAL[ap.lateral], VERTICAL[ap.vertical]], armed };
 }
 
+/**
+ * What runs beside the autopilot on the types that have it (phase 4): yaw damper, flight
+ * director and autothrottle. They work with the autopilot off too, so they are told apart.
+ */
+export function autopilotHelpers(ap: AutopilotTelemetry | undefined): string[] {
+  if (!ap) return [];
+  const out: string[] = [];
+  if (ap.yawDamper) out.push('YD');
+  if (ap.flightDirector) out.push('FD');
+  if (ap.autothrottle?.engaged) out.push('A/THR');
+  return out;
+}
+
+/** The selected speed of FLC or the autothrottle, as the display shows it, or ''. */
+export function selectedSpeedText(ap: AutopilotTelemetry | undefined): string {
+  if (!ap) return '';
+  const uses = ap.vertical === 'flc' || !!ap.autothrottle?.engaged;
+  if (!uses) return '';
+  if (ap.selectedMach !== undefined) return `M ${ap.selectedMach.toFixed(2)}`;
+  return ap.selectedSpeed !== undefined ? `${Math.round(ap.selectedSpeed)} kt` : '';
+}
+
 function signedFpm(v: number): string {
   const r = Math.round(v / 100) * 100;
   return `${r > 0 ? '+' : r < 0 ? MINUS : ''}${groupThousands(Math.abs(r), lang.value)}`;
@@ -428,13 +451,15 @@ function KnobRow(props: {
 export function AutopilotPanel(props: { onClose: () => void }) {
   const ap = game.telemetry.value?.avionics?.autopilot;
   const modes = autopilotModes(ap);
-  const on = (m: string) => modes.active.includes(m);
+  const helpers = autopilotHelpers(ap);
+  const speed = selectedSpeedText(ap);
+  const on = (m: string) => modes.active.includes(m) || helpers.includes(m);
   const armed = (m: string) => modes.armed.includes(m);
-  const btn = (id: string, text: string, mode?: string) =>
+  const btn = (id: string, text: string, mode?: string, extra = '') =>
     has(id) && (
       <PanelButton
         key={id}
-        class={`ap-btn${mode && armed(mode) ? ' is-armed' : ''}`}
+        class={`ap-btn${mode && armed(mode) ? ' is-armed' : ''}${extra}`}
         label={controlLabel(id)}
         pressed={mode ? on(mode) : undefined}
         onClick={() => press(id)}
@@ -444,6 +469,8 @@ export function AutopilotPanel(props: { onClose: () => void }) {
     );
   const hdg = game.telemetry.value?.instruments?.heading ?? game.telemetry.value?.headingDeg;
   const navSource = spec('navSource');
+  // In FLC the pitch wheel picks a speed (nose down is faster), otherwise a vertical speed.
+  const wheel = ap?.vertical === 'flc' && ap.engaged ? 'SPD' : 'VS';
   return (
     <Panel
       id="autopilot"
@@ -473,6 +500,11 @@ export function AutopilotPanel(props: { onClose: () => void }) {
               {ap?.disconnectWarning ? t('ap.disconnect') : t('ap.off')}
             </span>
           )}
+          {helpers.map((m) => (
+            <span class="ap-mode is-helper" key={`h-${m}`}>
+              {m}
+            </span>
+          ))}
         </span>
         {ap && (
           <span class="ap-sel">
@@ -486,15 +518,31 @@ export function AutopilotPanel(props: { onClose: () => void }) {
                 <small> ft/min</small>
               </span>
             )}
+            {speed && (
+              <span title={t('ap.speed')}>
+                {speed.endsWith(' kt') ? (
+                  <>
+                    {speed.slice(0, -3)}
+                    <small> kt</small>
+                  </>
+                ) : (
+                  speed
+                )}
+              </span>
+            )}
           </span>
         )}
       </div>
       <div class="ap-buttons" role="group" aria-label={t('ap.modes')}>
         {btn('apEngage', 'AP', 'AP')}
+        {btn('yawDamper', 'YD', 'YD')}
+        {btn('flightDirector', 'FD', 'FD')}
         {btn('apHdg', 'HDG', 'HDG')}
         {btn('apNav', 'NAV', 'NAV')}
         {btn('apApr', 'APR', 'APR')}
         {btn('apAlt', 'ALT', 'ALT')}
+        {btn('apVs', 'VS', 'VS')}
+        {btn('apFlc', 'FLC', 'FLC')}
         {has('apVsUp') && (
           <PanelButton
             class="ap-btn"
@@ -502,7 +550,7 @@ export function AutopilotPanel(props: { onClose: () => void }) {
             onClick={() => press('apVsUp')}
           >
             <IconChevronUp size={16} />
-            VS
+            {wheel}
           </PanelButton>
         )}
         {has('apVsDown') && (
@@ -512,9 +560,11 @@ export function AutopilotPanel(props: { onClose: () => void }) {
             onClick={() => press('apVsDown')}
           >
             <IconChevronDown size={16} />
-            VS
+            {wheel}
           </PanelButton>
         )}
+        {btn('goAround', 'GA', undefined)}
+        {btn('apDisconnect', 'AP DISC', undefined, ' is-disc')}
       </div>
       <div class="knob-rows">
         <KnobRow
@@ -535,7 +585,12 @@ export function AutopilotPanel(props: { onClose: () => void }) {
               <button
                 type="button"
                 class="btn knob-sync"
-                onClick={() => set('headingBug', Math.round(hdg) % 360)}
+                // A cockpit with its own sync button presses it; otherwise the bug is set.
+                onClick={() =>
+                  has('headingSync')
+                    ? press('headingSync')
+                    : set('headingBug', Math.round(hdg) % 360)
+                }
               >
                 {t('ap.sync')}
               </button>
@@ -582,17 +637,17 @@ function SelectorStepper({ s }: { s: ControlSpec }) {
   return (
     <span class="sel-step">
       <PanelButton
-        label={`${label}: ${positionLabel(s.id, positions[i - 1] ?? '')}`}
+        label={`${label}: ${positionLabel(s.id, positions[i - 1] ?? '', positions)}`}
         disabled={i <= 0}
         onClick={() => set(s.id, i - 1)}
       >
         <IconBack size={16} />
       </PanelButton>
-      <output class="sel-value">{positionLabel(s.id, positions[i] ?? '')}</output>
+      <output class="sel-value">{positionLabel(s.id, positions[i] ?? '', positions)}</output>
       {momentaryNext ? (
         <PanelButton
           class="is-flip"
-          label={`${label}: ${positionLabel(s.id, next)}`}
+          label={`${label}: ${positionLabel(s.id, next, positions)}`}
           onPress={() => set(s.id, i + 1)}
           onRelease={() => set(s.id, i)}
         >
@@ -601,7 +656,7 @@ function SelectorStepper({ s }: { s: ControlSpec }) {
       ) : (
         <PanelButton
           class="is-flip"
-          label={`${label}: ${positionLabel(s.id, next ?? '')}`}
+          label={`${label}: ${positionLabel(s.id, next ?? '', positions)}`}
           disabled={next === undefined}
           onClick={() => set(s.id, i + 1)}
         >
@@ -636,14 +691,15 @@ function ControlRow({ s }: { s: ControlSpec }) {
   if (s.kind === 'selector') {
     const positions = s.positions ?? [];
     const short =
-      positions.length <= 4 && positions.every((p) => positionLabel(s.id, p).length <= 6);
+      positions.length <= 4 &&
+      positions.every((p) => positionLabel(s.id, p, positions).length <= 6);
     control = short ? (
       <Segmented<number>
         label={label}
         class="seg--compact"
         value={Math.round(v)}
         onChange={(n) => set(s.id, n)}
-        options={positions.map((p, i) => ({ value: i, label: positionLabel(s.id, p) }))}
+        options={positions.map((p, i) => ({ value: i, label: positionLabel(s.id, p, positions) }))}
       />
     ) : (
       <SelectorStepper s={s} />
@@ -727,7 +783,7 @@ export function SwitchesPanel(props: { onClose: () => void }) {
         {groups.map((g) => (
           <section class="switch-group" key={g.group} aria-labelledby={`sw-${g.group}`}>
             <h3 class="caps" id={`sw-${g.group}`}>
-              {t(`group.${g.group}`)}
+              {groupLabel(g.group, game.controls.value)}
             </h3>
             {g.specs.map((s) => (
               <ControlRow s={s} key={s.id} />

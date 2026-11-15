@@ -5,8 +5,20 @@ import type { Weather } from '@sky';
 /** Where a flight starts. */
 export type StartPlace =
   | { kind: 'runway'; airport: string; runway: string }
-  /** `altitude` in metres above sea level; the interface puts it above the chosen airport. */
-  | { kind: 'air'; lon: number; lat: number; altitude: number; headingDeg: number }
+  /**
+   * `altitude` in metres above sea level; the interface puts it above the chosen airport.
+   * `speed` (phase 4, added by the interface): indicated airspeed in m/s that suits the type
+   * (100 kt for the Cessna, 250 kt for the A320). The app turns it into the true airspeed
+   * of the start; without it the app picks its own speed as before.
+   */
+  | {
+      kind: 'air';
+      lon: number;
+      lat: number;
+      altitude: number;
+      headingDeg: number;
+      speed?: number;
+    }
   /**
    * On final approach to a runway, `distanceNm` nautical miles out, at the height of a
    * 3 degree approach path, configured and at approach speed (phase 3).
@@ -64,6 +76,25 @@ export interface AirportOption {
   elevation: number;
   /** Runway ends by designator, e.g. ['14', '32']. The first is the default. */
   runways: string[];
+  /**
+   * Phase 4 (added by the interface): the runways as strips with their length and surface,
+   * so the setup can refuse an airport that is too short for the chosen type (an A320 needs
+   * 1800 m of hard runway). The app fills it from the geo package's `AirportInfo.runways`;
+   * without it the interface looks the airport up in the geo package by ICAO itself.
+   */
+  strips?: RunwayStrip[];
+  /** Phase 4 (added by the interface): a military field (a fighter may use any hard runway). */
+  military?: boolean;
+}
+
+/** One runway strip of an airport (phase 4). */
+export interface RunwayStrip {
+  /** Its two ends by designator, e.g. ['14', '32'] (one entry for a one-way strip). */
+  ends: string[];
+  /** Metres, end to end. */
+  length: number;
+  /** Asphalt or concrete. */
+  paved: boolean;
 }
 
 /** What the interface asks the app to do. The app passes these to mountUi(). */

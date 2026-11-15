@@ -1,5 +1,4 @@
 import { useComputed, useSignal, useSignalEffect } from '@preact/signals';
-import { AIRCRAFT } from '@sim';
 import { useEffect, useRef } from 'preact/hooks';
 import { game, settings } from '../api';
 import { IconExit, IconPause, IconRestart, IconView, IconWarning } from '../components/icons';
@@ -14,9 +13,20 @@ import {
   speedUnit,
   verticalSpeedUnit,
 } from '../format';
+import { categoryOf, overspeedLimit, showsMach } from '../fleet';
+import { throttleLabel } from '../fleetText';
 import { type MessageKey, isMessageKey, lang, t } from '../i18n';
-import { actions, showTouch } from '../nav';
+import { actions, flownAircraft, showTouch } from '../nav';
 import { autopilotModes } from './AvionicsPanels';
+import {
+  EngineBlock,
+  FighterRow,
+  FleetChips,
+  MachRow,
+  SpeedBand,
+  SpeedbrakeRow,
+  useSpeedState,
+} from './HudFleet';
 import { ChecklistHint } from './ChecklistPanel';
 import { FlightPanels, RadioCaption, ToolsButton, showChecklistHint } from './FlightPanels';
 
@@ -84,14 +94,20 @@ function HeadingTape() {
 function SpeedCard() {
   const tel = game.telemetry;
   const units = settings.units.value;
+  const info = flownAircraft.value;
   const ias = useComputed(() =>
     tel.value ? formatSpeed(tel.value.ias, settings.units.value) : '–',
   );
+  const state = useSpeedState(info);
+  const cls = useComputed(() => `hud-card hud-speed${state.value}`);
   return (
-    <div class="hud-card hud-speed">
+    <div class={cls}>
       <span class="hud-label caps">{t('hud.ias')}</span>
       <span class="hud-value num">{ias}</span>
       <span class="hud-unit">{speedUnit(units)}</span>
+      {info && <SpeedBand info={info} />}
+      {showsMach(info) && <MachRow />}
+      {categoryOf(info) === 'fighter' && <FighterRow />}
     </div>
   );
 }
@@ -172,10 +188,33 @@ function Systems() {
   const brakeText = useComputed(() =>
     lev.value?.parkingBrake ? t('hud.parking') : t('hud.brake'),
   );
+  const info = flownAircraft.value;
+  const notches = flapNotches(game.controls.value.find((c) => c.id === 'flaps')?.positions);
+  const wide = categoryOf(info) !== 'piston';
+  // The radio panel above it leaves room for the card as tall as the type makes it.
+  const card = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = card.current;
+    const hud = el?.closest<HTMLElement>('.hud');
+    if (!el || !hud || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() =>
+      hud.style.setProperty('--sys-h', `${Math.ceil(el.offsetHeight) + 10}px`),
+    );
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      hud.style.removeProperty('--sys-h');
+    };
+  }, []);
   return (
-    <div class="hud-systems hud-card" role="group" aria-label={t('hud.flightData')}>
+    <div
+      ref={card}
+      class={`hud-systems hud-card${wide ? ' is-wide' : ''}`}
+      role="group"
+      aria-label={t('hud.flightData')}
+    >
       <div class="sys sys-bar">
-        <span class="sys-label caps">{t('hud.throttle')}</span>
+        <span class="sys-label caps">{throttleLabel(info)}</span>
         <span class="sys-meter">
           <span class="sys-fill" ref={throttleFill} />
         </span>
@@ -186,7 +225,7 @@ function Systems() {
       </div>
       <div class="sys sys-bar">
         <span class="sys-label caps">{t('hud.flaps')}</span>
-        <span class="sys-meter sys-meter--notched">
+        <span class="sys-meter sys-meter--notched" style={notches}>
           <span class="sys-fill" ref={flapsFill} />
         </span>
         <span class="sys-value num">
@@ -194,6 +233,8 @@ function Systems() {
           <small>%</small>
         </span>
       </div>
+      {info?.speedbrake && <SpeedbrakeRow />}
+      {info && <EngineBlock info={info} />}
       <div class="sys-chips">
         <span class={gearClass}>
           <span class="sys-lights" aria-hidden="true">
@@ -210,9 +251,24 @@ function Systems() {
           <span class="sys-lamp" aria-hidden="true" />
           <span class="sys-state">{brakeText}</span>
         </span>
+        {info && <FleetChips info={info} />}
       </div>
     </div>
   );
+}
+
+/**
+ * The flap meter's detents where the lever clicks in. The stylesheet draws the Cessna's four
+ * positions (thirds); another number of positions gets its own, evenly spaced.
+ */
+function flapNotches(positions: readonly string[] | undefined): Record<string, string> | undefined {
+  const n = positions?.length ?? 0;
+  if (n < 2 || n === 4) return undefined;
+  const lines = Array.from({ length: n - 2 }, (_, i) => {
+    const at = ((i + 1) / (n - 1)) * 100;
+    return `linear-gradient(90deg, transparent calc(${at.toFixed(1)}% - 1px), rgb(0 0 0 / 0.7) 0 calc(${at.toFixed(1)}% + 1px), transparent 0)`;
+  });
+  return { '--notches': lines.length ? lines.join(', ') : 'none' };
 }
 
 /** game.message as a short notice; a message key is translated, plain text shown as is. */
@@ -242,8 +298,13 @@ function Warnings() {
   const tel = game.telemetry;
   const stall = useComputed(() => !!tel.value?.stallWarning && !tel.value.crashed);
   const vne = useComputed(() => {
-    const info = AIRCRAFT.find((a) => a.id === game.plan.value?.aircraft);
-    return !!info && !!tel.value && tel.value.ias > info.vne && !tel.value.crashed;
+    const info = flownAircraft.value;
+    return (
+      !!info &&
+      !!tel.value &&
+      tel.value.ias > overspeedLimit(info, tel.value.ias, tel.value.mach) &&
+      !tel.value.crashed
+    );
   });
   return (
     <div class="warnings" role="alert">

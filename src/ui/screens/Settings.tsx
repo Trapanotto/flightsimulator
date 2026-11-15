@@ -1,4 +1,5 @@
 import { useSignal } from '@preact/signals';
+import { AIRCRAFT } from '@sim';
 import { useRef } from 'preact/hooks';
 import { settings } from '../api';
 import { Field, Segmented, Slider, Toggle } from '../components/controls';
@@ -6,7 +7,8 @@ import { IconClose, IconMute, IconSound } from '../components/icons';
 import { arrowNav, useDialog } from '../focus';
 import { type Lang, type MessageKey, lang, setLang, t } from '../i18n';
 import { nav, showTouch } from '../nav';
-import { KEY_ROWS, KeyCombo } from './Briefing';
+import { KEY_ROWS, typeKeyRows } from '../fleetText';
+import { KeyCombo } from './Briefing';
 
 type Tab = 'general' | 'display' | 'sound' | 'controls';
 const TABS: Tab[] = ['general', 'display', 'sound', 'controls'];
@@ -187,6 +189,23 @@ function Controls() {
         </dl>
         <p class="field-hint">{t('settings.keys.hint')}</p>
       </Field>
+      {typeKeyRows(AIRCRAFT).length > 0 && (
+        <Field label={t('settings.keys.types')} id="set-keys-types">
+          <dl class="key-list">
+            {typeKeyRows(AIRCRAFT).map(({ row, types }) => (
+              <div class="key-row" key={row.label}>
+                <dt>
+                  {t(row.label)}
+                  <span class="key-types">{types.join(' · ')}</span>
+                </dt>
+                <dd>
+                  <KeyCombo keys={row.keys} />
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </Field>
+      )}
       <Field label={t('settings.cockpit')} id="set-cockpit">
         {!showTouch.value && (
           <dl class="key-list">

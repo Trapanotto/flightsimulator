@@ -21,6 +21,7 @@ import './styles/hud.css';
 import './styles/touch.css';
 import './styles/panels.css';
 import './styles/dialogs.css';
+import './styles/hangar.css';
 
 export { status } from './state';
 export {

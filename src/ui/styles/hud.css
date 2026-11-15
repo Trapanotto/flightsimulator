@@ -321,12 +321,13 @@
   transition: transform 120ms linear;
 }
 
-/* Flap detents at a third and two thirds. */
+/* Flap detents at a third and two thirds (another type sets its own in --notches). */
 .sys-meter--notched::after {
   content: '';
   position: absolute;
   inset: 0;
-  background:
+  background: var(
+    --notches,
     linear-gradient(
       90deg,
       transparent calc(33.3% - 1px),
@@ -338,7 +339,8 @@
       transparent calc(66.6% - 1px),
       rgb(0 0 0 / 0.7) 0 calc(66.6% + 1px),
       transparent 0
-    );
+    )
+  );
 }
 
 .sys-meter--notched .sys-fill {
@@ -643,4 +645,198 @@
   .hud-alerts {
     top: calc(var(--safe-t) + 60px + 120px);
   }
+}
+
+/* Phase 4: the readouts of each kind of aircraft ---------------------------------------------- */
+
+.hud-speed {
+  grid-template-areas:
+    'label label'
+    'value unit'
+    'band band'
+    'mach mach'
+    'fx fx';
+}
+
+.hud-speed.is-near .hud-value,
+.hud-speed.is-slow .hud-value {
+  color: var(--c-caution);
+}
+
+.hud-speed.is-over .hud-value {
+  color: var(--c-warning);
+}
+
+/* The airspeed against the type's speeds: amber, green, amber, the red line, and a pointer. */
+.hud-band {
+  grid-area: band;
+  justify-self: stretch;
+  position: relative;
+  container-type: inline-size;
+  height: 4px;
+  margin-top: 6px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(
+    90deg,
+    rgb(255 181 58 / 0.5) 0 var(--stall, 30%),
+    rgb(75 213 141 / 0.55) var(--stall, 30%) var(--caution, 82%),
+    rgb(255 181 58 / 0.75) var(--caution, 82%) var(--limit, 89%),
+    var(--c-warning) var(--limit, 89%) calc(var(--limit, 89%) + 2px),
+    rgb(255 255 255 / 0.12) calc(var(--limit, 89%) + 2px)
+  );
+}
+
+.hud-band-pointer {
+  position: absolute;
+  left: 0;
+  top: -3px;
+  width: 2px;
+  height: 10px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--c-ink);
+  box-shadow: 0 0 4px rgb(0 0 0 / 0.7);
+  will-change: transform;
+}
+
+.hud-mach {
+  grid-area: mach;
+  margin-top: 5px;
+  color: var(--c-ink-2);
+  font-size: var(--fs-3);
+  font-weight: 600;
+}
+
+/* Below about Mach 0.4 the number says nothing; its line stays so nothing moves. */
+.hud-mach.is-quiet {
+  visibility: hidden;
+}
+
+.hud-fx {
+  grid-area: fx;
+  display: flex;
+  gap: var(--s-3);
+  margin-top: 4px;
+  font-size: var(--fs-2);
+}
+
+.hud-fx-label {
+  margin-right: 4px;
+  color: var(--c-ink-3);
+  font-weight: 600;
+}
+
+.hud-fx-value {
+  display: inline-block;
+  min-width: 3.4ch;
+  font-weight: 600;
+  text-align: right;
+}
+
+.hud-fx-value small {
+  color: var(--c-ink-3);
+}
+
+.hud-fx-value.is-warn {
+  color: var(--c-warning);
+}
+
+/* Systems of the bigger types: wider for engines, longer names and a third lamp. */
+.hud-systems.is-wide {
+  width: 308px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.hud-systems.is-wide .sys-bar {
+  grid-template-columns: 76px minmax(0, 1fr) 48px;
+}
+
+.hud-systems.is-wide .sys-gear {
+  flex: none;
+}
+
+.hud-systems.is-wide .sys-brake {
+  min-width: 0;
+}
+
+.hud-systems.is-wide .sys-brake .sys-state {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sys-meter.is-lit .sys-fill {
+  background: var(--c-caution);
+}
+
+.sys-meter.is-over .sys-fill {
+  background: var(--c-warning);
+}
+
+.sys-meter.is-ab .sys-fill {
+  background: linear-gradient(90deg, var(--c-ink) 60%, #ff8a3a);
+  box-shadow: 0 0 6px rgb(255 138 58 / 0.7);
+}
+
+.sys-engines {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--c-line);
+}
+
+.sys-n1 {
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 10px;
+}
+
+.sys-n1-pair {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.sys-n1-engine {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4ch;
+  align-items: center;
+  gap: 6px;
+}
+
+.sys-n1-engine .sys-value {
+  font-size: var(--fs-2);
+}
+
+.sys-lampchip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 4px 8px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-1);
+  color: var(--c-ink-3);
+  font-size: var(--fs-2);
+}
+
+.sys-lampchip.is-on {
+  color: var(--c-ink);
+  border-color: rgb(255 181 58 / 0.6);
+}
+
+.sys-lampchip.is-on .sys-lamp {
+  background: var(--c-caution);
+  box-shadow: 0 0 6px rgb(255 181 58 / 0.8);
+}
+
+.sys-lampchip.is-ab.is-on {
+  border-color: rgb(255 138 58 / 0.7);
+}
+
+.sys-lampchip.is-ab.is-on .sys-lamp {
+  background: #ff8a3a;
+  box-shadow: 0 0 8px rgb(255 138 58 / 0.9);
 }

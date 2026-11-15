@@ -225,6 +225,8 @@ export function SwissMap(props: {
   label: string;
   /** A flight from one airport to another: a dashed line and a marker at the far end. */
   route?: { from: string; to: string };
+  /** Airports the chosen type may not use: dimmed, and a click on them does nothing. */
+  isOff?: (a: AirportOption) => boolean;
 }) {
   const sel = props.airports.find((a) => a.icao === props.selected);
   const from = props.airports.find((a) => a.icao === props.route?.from);
@@ -290,12 +292,13 @@ export function SwissMap(props: {
           const end = !on && !!to && (a === to || a === from);
           // Labels go left of dots in the east of the map so they stay inside the frame.
           const left = x > MAP_W * 0.78;
+          const off = !on && !!props.isOff?.(a);
           return (
             <g
               key={a.icao}
-              class={`swissmap-apt${on ? ' is-on' : ''}${end ? ' is-end' : ''}`}
+              class={`swissmap-apt${on ? ' is-on' : ''}${end ? ' is-end' : ''}${off ? ' is-off' : ''}`}
               transform={`translate(${x.toFixed(1)} ${y.toFixed(1)})`}
-              onClick={() => props.onSelect?.(a.icao)}
+              onClick={() => !off && props.onSelect?.(a.icao)}
               aria-hidden="true"
             >
               <circle class="swissmap-hit" r="12" />

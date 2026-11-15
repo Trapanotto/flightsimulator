@@ -250,7 +250,7 @@
   grid-column: 1;
   grid-row: 1;
   /* Room for the systems card. */
-  padding-bottom: 132px;
+  padding-bottom: var(--sys-h, 132px);
 }
 
 .dock--right {
@@ -1458,4 +1458,15 @@
     left: 50%;
     transform: translateX(-50%);
   }
+}
+
+/* Phase 4: what runs beside the autopilot (yaw damper, flight director, autothrottle). */
+.ap-mode.is-helper {
+  color: var(--c-accent);
+  font-size: var(--fs-2);
+  align-self: center;
+}
+
+.ap-btn.is-disc {
+  color: var(--c-warning);
 }
