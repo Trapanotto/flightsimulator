@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0 – Version 1 (2026-11-15)
+
+- Der Stand von 1.0.0-rc.1, unverändert als Version 1.0.0 freigegeben.
+
 ## 1.0.0-rc.1 – Phase 5: Flugschule, Flugbuch, Wiederholung, Fotomodus (2026-11-15)
 
 - **Flugschule:** zwölf geführte Lektionen vom ersten Start über Kurven, Landung, Platzrunde,
