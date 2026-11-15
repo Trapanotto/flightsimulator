@@ -251,4 +251,42 @@ describe('wreck', () => {
     expect(fx.fire.alive).toBe(0);
     wreck.dispose();
   });
+
+  it('keeps a column of smoke over a bad crash to the end, thinning out', () => {
+    const { visual } = boxAircraft();
+    const fx = new WreckFx();
+    const impact: Impact = { reason: 'ground', speed: 70, sink: 20, bank: 0, vStall: 24 };
+    const wreck = new Wreck(visual, { x: 40, y: -20, z: -50 }, { groundY: ground }, fx, impact);
+    const smokeAt = (t: number) => {
+      while (wreck.age < t) wreck.update(1 / 30, { x: 0, y: 100, z: 0 });
+      return fx.smoke.alive;
+    };
+    const early = smokeAt(20);
+    const late = smokeAt(80);
+    expect(late).toBeGreaterThan(20);
+    expect(late).toBeLessThan(early);
+    wreck.dispose();
+  });
+
+  it('lets pieces sink in water, with a splash and no fire', () => {
+    const { visual } = boxAircraft();
+    const fx = new WreckFx();
+    const impact: Impact = { reason: 'propeller', speed: 50, sink: 20, bank: 0, vStall: 24 };
+    const lake = (x: number, z: number) => Math.hypot(x - 100, z + 20) < 2000;
+    const wreck = new Wreck(
+      visual,
+      { x: 30, y: -20, z: -30 },
+      { groundY: () => 50, waterAt: lake },
+      fx,
+      impact,
+    );
+    wreck.update(1 / 60);
+    // The splash: white spray, no sparks.
+    expect(fx.smoke.alive).toBeGreaterThan(10);
+    for (let i = 0; i < 60 * 60; i++) wreck.update(1 / 60);
+    expect(fx.fire.alive).toBe(0);
+    // Everything went under (and out of sight).
+    for (const p of wreck.debugPieces) expect(p.position.y).toBeLessThan(50);
+    wreck.dispose();
+  });
 });

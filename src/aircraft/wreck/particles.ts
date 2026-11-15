@@ -3,12 +3,14 @@
  * motion runs on the CPU (a few hundred particles: cheaper than a compute pass, and the same
  * on WebGPU and WebGL 2); the GPU only places and shades the quads, with node materials.
  *
- * Fire is emissive and additive. Smoke is alpha blended and lit like any surface (sun, sky
+ * Fire is emissive, blended premultiplied (it glows and hides a little). Smoke is alpha blended and lit like any surface (sun, sky
  * environment, the wreck's own fire light), with a sphere's normal across each quad so a puff
  * looks round and is darker on the side away from the light.
  */
 import {
-  AdditiveBlending,
+  CustomBlending,
+  OneFactor,
+  OneMinusSrcAlphaFactor,
   DataTexture,
   DepthTexture,
   FloatType,
@@ -34,6 +36,7 @@ import {
   attribute,
   cameraFar,
   cameraNear,
+  cameraViewMatrix,
   cameraWorldMatrix,
   clamp,
   cos,
@@ -41,9 +44,12 @@ import {
   float,
   floor,
   max,
+  min,
   mod,
   normalize,
   perspectiveDepthToViewZ,
+  viewZToPerspectiveDepth,
+  viewZToReversedPerspectiveDepth,
   positionGeometry,
   positionView,
   screenUV,
@@ -155,6 +161,12 @@ export class ParticleSystem {
   private readonly c: InstancedBufferAttribute;
   private readonly geo: InstancedBufferGeometry;
   private readonly material: Material;
+  /**
+   * The same quads again, into the depth buffer only, after the colour: see hazeMaterial.
+   * Add it to the scene with `mesh`.
+   */
+  readonly hazeMesh: Mesh;
+  private readonly hazeMat: Material;
   private count = 0;
   private readonly order: number[] = [];
   private readonly dist: Float32Array;
@@ -194,6 +206,13 @@ export class ParticleSystem {
     this.mesh.receiveShadow = false;
     // Smoke first, then the glow over it.
     this.mesh.renderOrder = kind === 'fire' ? 12 : 11;
+    this.hazeMat = hazeMaterial(atlas, kind === 'fire');
+    this.hazeMesh = new Mesh(this.geo, this.hazeMat);
+    this.hazeMesh.name = `${this.mesh.name}Haze`;
+    this.hazeMesh.frustumCulled = false;
+    this.hazeMesh.castShadow = false;
+    this.hazeMesh.receiveShadow = false;
+    this.hazeMesh.renderOrder = 13;
   }
 
   get alive() {
@@ -319,6 +338,7 @@ export class ParticleSystem {
   dispose() {
     this.geo.dispose();
     this.material.dispose();
+    this.hazeMat.dispose();
   }
 }
 
@@ -348,35 +368,121 @@ function puff(atlas: DataTexture): Node<'float'> {
 }
 
 /**
- * Soft particles: a quad fades out where it nears the surface behind it (the ground, a house)
- * instead of cutting through it along a hard line, and where it comes close to the camera
- * (inside the smoke the view darkens, it is not hidden by one big puff). Reads the depth of
- * what is drawn so far (a copy made once per frame, WebGPU and WebGL 2 alike).
+ * How much of a puff is in sight at this pixel, 0..1. The puff is taken for what it shows, a
+ * ball of the quad's size: at each pixel the ray runs through it from a front to a back depth,
+ * and the part of that span before the scene's surface (and beyond the near plane) is what
+ * shows. So a puff fades smoothly where it sinks into the ground or a piece of wreckage lies
+ * inside it, with no line where the flat quad would cut the surface, and the depth test is
+ * done here (the materials do not test depth: the flat quad would cut the ball along a line).
+ * Reads a copy of the depth drawn so far, made once per frame, WebGPU and WebGL 2 alike.
  */
 const sceneDepth = new DepthTexture(1, 1);
-const softness = Fn((_: [], builder: NodeBuilder) => {
+/**
+ * One copy node for all the materials: it is copied once per frame, at the first particles
+ * drawn, before the haze passes write their depth into the buffer.
+ */
+let depthCopy: ViewportDepthTextureNode | undefined;
+/** Distance of the scene's surface behind this pixel, m (positive). */
+const surfaceDistance = Fn((_: [], builder: NodeBuilder) => {
   // The copy must have the format of the depth buffer: float with a reversed one.
   sceneDepth.type = builder.renderer.reversedDepthBuffer ? FloatType : UnsignedIntType;
-  const size = attribute('iA', 'vec4').w;
-  const depth = new ViewportDepthTextureNode(screenUV, null, sceneDepth).x;
-  const behind = perspectiveDepthToViewZ(depth, cameraNear, cameraFar);
-  const gap = positionView.z.sub(behind);
-  const ground = clamp(gap.div(size.mul(0.35)), 0, 1);
-  const eye = clamp(positionView.z.negate().sub(cameraNear).div(size.mul(0.6)), 0, 1);
-  return ground.mul(eye);
+  depthCopy ??= new ViewportDepthTextureNode(screenUV, null, sceneDepth);
+  return perspectiveDepthToViewZ(depthCopy.x, cameraNear, cameraFar).negate();
 });
+
+const visible = (glow: boolean) =>
+  Fn(() => {
+    const size = attribute('iA', 'vec4').w;
+    const surface = surfaceDistance();
+    const centre = positionView.z.negate();
+    // Half the ball's depth at this pixel (r = 1 at the rim of the quad's disc).
+    const r = positionGeometry.xy.length().mul(2);
+    const half = size
+      .mul(0.5)
+      .mul(sqrt(max(float(0), float(1).sub(r.mul(r)))))
+      .add(0.01);
+    const front = max(centre.sub(half), cameraNear);
+    // Smoke: the share of the ball before the surface. Fire: a glow is not cut by what lies
+    // inside it (a wing in the fireball would cut it into bands): it shines through a surface
+    // up to half its radius deep, and is fully hidden only by what stands that far in front
+    // of the ball. So wreckage in a fireball shows as a soft shadow, not a hard outline.
+    const share = glow
+      ? clamp(surface.sub(front).add(half).div(half.mul(2)), 0, 1)
+      : clamp(min(centre.add(half), surface).sub(front).div(half.mul(2)), 0, 1);
+    // Inside a puff the view darkens gradually instead of being hidden by it.
+    const eye = clamp(centre.sub(cameraNear).div(size.mul(0.6)), 0, 1);
+    return share.mul(eye);
+  })();
+
+/**
+ * How much a flame or fireball hides what is behind it, as a share of its glow. With purely
+ * additive blending overlapping puffs sum to white; blended this way they converge to their
+ * own colour over glow / OCCLUSION, so a dense fireball keeps a yellow-orange core and shows
+ * its structure, and the dark smoke behind it is partly covered.
+ */
+const OCCLUSION = 0.55;
+
+/** Scale of the haze over distance, m: what the depth written below is blended in. */
+const HAZE_SCALE = 8000;
+
+/**
+ * The haze is added after the scene, from its depth. Particles drawn without depth would take
+ * the haze of what lies far behind them: smoke in front of distant hills washes out to the
+ * colour of the air. This pass writes, where a puff covers geometry, a depth between the puff's
+ * and the background's, weighted by the puff's opacity (blended in haze, 1 - exp(-d / L), not
+ * in metres), so the haze over the smoke is mostly the smoke's own and changes smoothly to the
+ * background's at its thin edges. Over the sky nothing is written: the sky gets no such haze.
+ */
+function hazeMaterial(atlas: DataTexture, glow: boolean): Material {
+  const m = new MeshBasicNodeMaterial();
+  m.transparent = true;
+  m.colorWrite = false;
+  m.depthWrite = true;
+  m.depthTest = false;
+  m.fog = false;
+  m.positionNode = billboard(corner());
+  const col = attribute('iB', 'vec4');
+  const density = glow ? pow(puff(atlas), 1.4) : puff(atlas);
+  const share = col.a
+    .mul(density)
+    .mul(visible(glow))
+    .mul(glow ? 1.5 : 1);
+  const behind = surfaceDistance();
+  const own = positionView.z.negate();
+  const opacity = clamp(share, 0, 1).mul(behind.lessThan(cameraFar.mul(0.95)).select(1, 0));
+  m.opacityNode = opacity;
+  m.alphaTestNode = float(0.02);
+  m.depthNode = Fn((_: [], builder: NodeBuilder) => {
+    const haze = (d: Node<'float'>) => float(1).sub(d.div(-HAZE_SCALE).exp());
+    const h = haze(own)
+      .mul(opacity)
+      .add(haze(behind).mul(float(1).sub(opacity)));
+    const d = float(1).sub(min(h, 0.9999)).log().mul(-HAZE_SCALE);
+    const viewZ = d.negate();
+    return builder.renderer.reversedDepthBuffer
+      ? viewZToReversedPerspectiveDepth(viewZ, cameraNear, cameraFar)
+      : viewZToPerspectiveDepth(viewZ, cameraNear, cameraFar);
+  })();
+  return m;
+}
 
 function fireMaterial(atlas: DataTexture, gain: Node<'float'>): Material {
   const m = new MeshBasicNodeMaterial();
   m.transparent = true;
   m.depthWrite = false;
-  m.blending = AdditiveBlending;
+  m.depthTest = false;
+  // Premultiplied: rgb is what the puff emits, alpha what it hides.
+  m.blending = CustomBlending;
+  m.blendSrc = OneFactor;
+  m.blendDst = OneMinusSrcAlphaFactor;
+  m.blendSrcAlpha = OneFactor;
+  m.blendDstAlpha = OneMinusSrcAlphaFactor;
   m.fog = false;
   m.positionNode = billboard(corner());
   const col = attribute('iB', 'vec4');
   // A hotter core: the density curve steepened.
-  const shape = pow(puff(atlas), 1.4);
-  m.colorNode = vec4(col.rgb.mul(gain), col.a.mul(shape).mul(softness()));
+  const amount = pow(puff(atlas), 1.4).mul(col.a).mul(visible(true));
+  m.colorNode = vec4(col.rgb.mul(gain).mul(amount), amount.mul(OCCLUSION));
   return m;
 }
 
@@ -385,15 +491,19 @@ function smokeMaterial(atlas: DataTexture): Material {
   const m = new MeshPhysicalNodeMaterial({ roughness: 1, metalness: 0, specularIntensity: 0 });
   m.transparent = true;
   m.depthWrite = false;
+  m.depthTest = false;
   m.fog = false;
   const rc = corner();
   m.positionNode = billboard(rc);
   const col = attribute('iB', 'vec4');
   m.colorNode = col.rgb;
-  m.opacityNode = col.a.mul(puff(atlas)).mul(softness());
-  // A sphere's normal over the quad (view space: the quad faces the camera along +z).
+  m.opacityNode = col.a.mul(puff(atlas)).mul(visible(false));
+  // A sphere's normal over the quad (view space: the quad faces the camera along +z), bent
+  // towards the sky: light scatters many times inside a puff, so it is lit like its top
+  // rather than like a wall facing the camera (white spray would read grey in a high sun).
   const q = rc.mul(1.7);
   const nz = sqrt(max(float(0.08), float(1).sub(dot(q, q))));
-  m.normalNode = normalize(vec3(q.x, q.y, nz));
+  const skyward = cameraViewMatrix.mul(vec4(0, 1, 0, 0)).xyz;
+  m.normalNode = normalize(vec3(q.x, q.y, nz).mul(0.6).add(skyward.mul(0.9)));
   return m;
 }

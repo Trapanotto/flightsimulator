@@ -35,7 +35,7 @@ export class WreckFx {
     this.atlas = puffAtlas();
     this.fire = new ParticleSystem(low ? 360 : 1000, 'fire', this.atlas, this.gain);
     this.smoke = new ParticleSystem(low ? 260 : 800, 'smoke', this.atlas, this.gain);
-    this.object.add(this.smoke.mesh, this.fire.mesh);
+    this.object.add(this.smoke.mesh, this.fire.mesh, this.smoke.hazeMesh, this.fire.hazeMesh);
     if (low) this.light = null;
     else {
       this.light = new PointLight(0xff9a3c, 0, 0, 2);

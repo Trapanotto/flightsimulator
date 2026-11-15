@@ -58,6 +58,12 @@ export interface WreckEnv {
   groundY(x: number, z: number): number | undefined;
   /** Wind at the ground in render space, m/s (drifts the smoke). Read every update. */
   wind?: Vec3Like;
+  /**
+   * Whether the surface at x, z (render space) is water: pieces landing there sink, and an
+   * impact there throws up a splash instead of a fireball. Without it only a crash reported
+   * as 'water' counts as one.
+   */
+  waterAt?(x: number, z: number): boolean;
 }
 
 export interface WreckOptions {
@@ -81,6 +87,8 @@ interface Piece {
   burnUntil: number;
   /** Seconds since the last re-seat check while at rest. */
   check: number;
+  /** Went into water: it sinks out of sight. */
+  sinking: boolean;
 }
 
 interface PartGeometry {
@@ -112,6 +120,8 @@ const LUX_PER_UNIT = 1e5;
  * light grow without end as the night gets darker.
  */
 const LIGHT_EXPOSURE_MAX = 400;
+/** How long a wreck smokes, s (the app clears it away after `done`). */
+const SMOKE_TIME = 90;
 /** Beyond this distance from the camera (m) no new particles are made. */
 const FAR = 6000;
 
@@ -174,11 +184,11 @@ export class Wreck {
       options.seed ??
         1 + Math.abs(Math.round(impact.speed * 977 + impact.sink * 131 + impact.bank * 7919)),
     );
-    this.water = impact.reason === 'water';
     fx.reset();
     const root = visual.object;
     root.updateMatrixWorld(true);
     this.centre.copy(root.getWorldPosition(tmpV));
+    this.water = impact.reason === 'water' || !!env.waterAt?.(this.centre.x, this.centre.z);
     const level = levelOnScreen(root);
     const parts = this.collect(level, root.matrixWorld);
     const layout = this.layoutOf(root.name, parts);
@@ -188,6 +198,9 @@ export class Wreck {
     this.severity = this.plan.severity;
     this.boomK = this.severity === 2 ? this.k * 0.65 : this.k;
     this.breakUp(parts, root, layout, velocity);
+    // The main fire (the airframe, or the largest piece) feeds the column of smoke to the end.
+    const main = this.mainPiece();
+    if (main && this.severity > 1 && !this.water) main.burnUntil = SMOKE_TIME;
     // The model goes out of sight (its lights are left alone: removing one would rebuild
     // every shader).
     for (const c of root.children) {
@@ -215,16 +228,26 @@ export class Wreck {
   }
 
   /**
-   * Where the camera should look: the airframe if it stayed together (it slides on), else the
-   * middle of the large pieces (they fly on along the track for a while).
+   * Where the camera should look: the airframe if it held together (it slides on), else the
+   * largest piece, whose fire burns longest and feeds the column of smoke.
    */
   get focus(): Vector3 {
-    const hull = this.pieces.find((p) => p.kind === 'hull');
-    if (hull) return hull.obj.position;
-    return this.middle(this.focusPoint);
+    return this.mainPiece()?.obj.position ?? this.centre;
   }
 
-  private readonly focusPoint = new Vector3();
+  /** The airframe if it held together, else the largest piece. */
+  private mainPiece(): Piece | undefined {
+    let best: Piece | undefined;
+    for (const p of this.pieces)
+      if (p.kind === 'hull') return p;
+      else if (!best || p.radius > best.radius) best = p;
+    return best;
+  }
+
+  /** Surface at x, z is water. */
+  private waterAt(x: number, z: number): boolean {
+    return this.env.waterAt ? this.env.waterAt(x, z) : this.water;
+  }
 
   /** The middle of the wreckage, weighted by size (small debris hardly counts). */
   private middle(out: Vector3): Vector3 {
@@ -446,6 +469,7 @@ export class Wreck {
       low: -size.y / 2,
       burnUntil,
       check: 0,
+      sinking: false,
     });
   }
 
@@ -485,20 +509,16 @@ export class Wreck {
     const r = this.rnd;
     const c = this.centre;
     const drift = new Vector3(velocity.x, velocity.y, velocity.z).multiplyScalar(0.25).setY(0);
-    // Soil thrown up at the ground, spray on water; broken up in the air, a grey cloud of
-    // fragments and fuel mist.
     const gy = this.env.groundY(c.x, c.z);
     const aloft = gy !== undefined && c.y - gy > 6 * k;
-    const col0 = this.water
-      ? ([0.75, 0.78, 0.8, 0.7] as const)
-      : aloft
-        ? ([0.3, 0.3, 0.3, 0.5] as const)
-        : ([0.3, 0.26, 0.21, 0.6] as const);
-    const col1 = this.water
-      ? ([0.85, 0.87, 0.9, 0] as const)
-      : aloft
-        ? ([0.45, 0.45, 0.45, 0] as const)
-        : ([0.42, 0.38, 0.33, 0] as const);
+    if (this.water && !aloft) {
+      this.splash(c, Math.hypot(velocity.x, velocity.y, velocity.z), this.k, drift);
+      return;
+    }
+    // Soil thrown up at the ground; broken up in the air, a grey cloud of fragments and fuel
+    // mist.
+    const col0 = aloft ? ([0.3, 0.3, 0.3, 0.5] as const) : ([0.3, 0.26, 0.21, 0.6] as const);
+    const col1 = aloft ? ([0.45, 0.45, 0.45, 0] as const) : ([0.42, 0.38, 0.33, 0] as const);
     for (let i = 0; i < this.n(40); i++) {
       const dir = this.dir(0.4);
       this.emitSmoke({
@@ -513,7 +533,6 @@ export class Wreck {
         lift: 0.6,
       });
     }
-    if (this.water) return;
     for (let i = 0; i < this.n(50); i++) {
       const dir = this.dir(0.3);
       this.emitFire({
@@ -522,10 +541,57 @@ export class Wreck {
         life: 0.4 + r() * 0.8,
         size0: 0.35 * k,
         size1: 0.1 * k,
-        color0: [7, 4.5, 2, 1],
-        color1: [3, 1, 0.2, 0],
+        color0: [4, 2.2, 0.8, 1],
+        color1: [2, 0.6, 0.1, 0],
         drag: 0.6,
         lift: -9.81,
+      });
+    }
+  }
+
+  /**
+   * Something hits water at `at` with `speed` (m/s): a white column of water thrown up that
+   * falls back, and a ring of spray rolling outwards over the surface. `k` scales it.
+   */
+  private splash(at: Vector3, speed: number, k: number, drift = new Vector3()) {
+    const r = this.rnd;
+    const power = Math.min(1.5, Math.max(0.25, speed / 60));
+    const column = this.n(Math.round(50 * power * Math.min(1, k)) + 6);
+    for (let i = 0; i < column; i++) {
+      const dir = new Vector3(r() - 0.5, 0, r() - 0.5)
+        .multiplyScalar(0.7)
+        .addScaledVector(UP, 1)
+        .normalize();
+      this.emitSmoke({
+        pos: at.clone().add(new Vector3((r() - 0.5) * 2 * k, 0, (r() - 0.5) * 2 * k)),
+        vel: dir.multiplyScalar((8 + r() * 22) * power * Math.sqrt(k)).add(drift),
+        life: 2 + r() * 2.5,
+        size0: 1.2 * k,
+        size1: (5 + r() * 6) * k * power,
+        color0: [0.9, 0.92, 0.94, 1],
+        color1: [0.92, 0.94, 0.96, 0],
+        drag: 0.4,
+        // Water falls back: most of g, less what the air holds up of the finest spray.
+        lift: -7,
+      });
+    }
+    const ring = this.n(Math.round(24 * power * Math.min(1, k)) + 4);
+    for (let i = 0; i < ring; i++) {
+      const a = r() * Math.PI * 2;
+      const out = new Vector3(Math.sin(a), 0, Math.cos(a));
+      this.emitSmoke({
+        pos: at.clone().addScaledVector(out, k),
+        vel: out
+          .multiplyScalar((5 + r() * 8) * power * Math.sqrt(k))
+          .add(drift)
+          .setY(1 + r()),
+        life: 3 + r() * 3,
+        size0: 2 * k,
+        size1: (8 + r() * 6) * k * power,
+        color0: [0.88, 0.9, 0.92, 0.75],
+        color1: [0.9, 0.92, 0.94, 0],
+        drag: 1,
+        lift: 0.3,
       });
     }
   }
@@ -536,20 +602,25 @@ export class Wreck {
     const c = this.centre;
     const drift = velocity.clone().multiplyScalar(0.15).setY(0);
     const sphere = () => new Vector3(r() - 0.5, r() - 0.5, r() - 0.5).normalize();
-    // Fireball: a hot core, expanding and rising.
-    for (let i = 0; i < this.n(70); i++) {
+    // Fireball: a hot core, expanding and rising. The slow puffs stay in the middle and are
+    // the hottest (yellow), the fast ones make the rim (deep orange, red); a quarter are sooty,
+    // dark patches of burning fuel that give the ball its structure.
+    for (let i = 0; i < this.n(80); i++) {
       const dir = sphere();
       if (dir.y < 0) dir.y *= -0.4;
-      // From a yellow-white core to dull red at the rim of the ball.
-      const hot = r();
+      const fast = r();
+      const hot = (1 - fast) * (0.6 + 0.4 * r());
+      const soot = r() < 0.25;
       this.emitFire({
         pos: c.clone().addScaledVector(dir, r() * 2 * k),
-        vel: dir.multiplyScalar((6 + r() * 22) * k).add(drift),
+        vel: dir.multiplyScalar((6 + fast * 22) * k).add(drift),
         life: 0.7 + r() * 1.3,
         size0: (2.5 + r() * 3) * k,
         size1: (9 + r() * 9) * k,
-        color0: [2.2 + 1.6 * hot, 0.7 + 1.1 * hot, 0.15 + 0.35 * hot, 0.6],
-        color1: [0.7, 0.12, 0.02, 0],
+        color0: soot
+          ? [0.35, 0.09, 0.015, 1]
+          : [0.9 + 0.45 * hot, 0.3 + 0.38 * hot, 0.05 + 0.1 * hot, 0.9],
+        color1: soot ? [0.05, 0.02, 0.01, 0] : [0.4, 0.06, 0.01, 0],
         drag: 2.2,
         lift: 7,
       });
@@ -563,8 +634,8 @@ export class Wreck {
         life: 1 + r() * 2,
         size0: 0.5 * k,
         size1: 0.2 * k,
-        color0: [6, 3, 1, 1],
-        color1: [2.4, 0.5, 0.08, 0],
+        color0: [3.5, 1.8, 0.6, 1],
+        color1: [1.6, 0.4, 0.06, 0],
         drag: 0.35,
         lift: -9.81,
       });
@@ -590,13 +661,16 @@ export class Wreck {
   // ---------------------------------------------------------------------------------------
   // Every frame
 
-  /** Lowest point of a piece below its centre, as it is turned now. */
-  private lowestBelowCentre(p: Piece): number {
+  /**
+   * Lowest point of a piece below its centre, as it is turned now (`sign` -1: minus the
+   * highest point above it).
+   */
+  private lowestBelowCentre(p: Piece, sign = 1): number {
     const b = p.box;
     let low = Infinity;
     for (let i = 0; i < 8; i++) {
       tmpV.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z);
-      low = Math.min(low, tmpV.applyQuaternion(p.obj.quaternion).y);
+      low = Math.min(low, sign * tmpV.applyQuaternion(p.obj.quaternion).y);
     }
     return low;
   }
@@ -631,7 +705,9 @@ export class Wreck {
     if (!light) return;
     const since = age - this.boomAt;
     // Candela: a flash for a moment, then the flickering glow of the fire.
-    const flash = since >= 0 ? Math.exp(-since * 6) * 3e6 : 0;
+    // The flash grows with the fireball's size, not its area (a big one is mostly hidden in
+    // its own smoke), so it does not burn the wreckage white.
+    const flash = since >= 0 ? (Math.exp(-since * 6) * 1.2e6) / this.boomK : 0;
     const glow =
       since >= 0 && age < 50
         ? 4e4 *
@@ -647,6 +723,7 @@ export class Wreck {
 
   private move(p: Piece, dt: number) {
     if (p.resting) {
+      if (p.sinking) return;
       // The terrain under it may still sharpen: sit on the new surface.
       p.check += dt;
       if (p.check > 0.5) {
@@ -666,8 +743,28 @@ export class Wreck {
       );
     const gy = this.env.groundY(p.obj.position.x, p.obj.position.z);
     if (gy === undefined) return;
+    if (p.sinking) {
+      this.sink(p, gy, dt);
+      return;
+    }
     const low = this.lowestBelowCentre(p);
     if (p.obj.position.y + low > gy) return;
+    if (this.waterAt(p.obj.position.x, p.obj.position.z)) {
+      // Into the water: a splash, the fire goes out, and it goes down.
+      const speed = p.vel.length();
+      if (speed > 3)
+        this.splash(
+          p.obj.position.clone().setY(gy),
+          speed,
+          Math.min(this.k, Math.max(0.3, p.radius / 3)),
+        );
+      if (this._age < p.burnUntil && this._age > this.boomAt)
+        this.steam(p.obj.position, gy, p.radius);
+      p.burnUntil = 0;
+      p.sinking = true;
+      p.vel.multiplyScalar(0.25);
+      return;
+    }
     // On the ground.
     p.obj.position.y = gy - low;
     p.low = low;
@@ -712,6 +809,45 @@ export class Wreck {
     }
   }
 
+  /**
+   * Under water: drag stops it within a second or so and it goes down until it is out of
+   * sight below the surface; a large piece (air trapped in a fuselage) takes many seconds.
+   */
+  private sink(p: Piece, surface: number, dt: number) {
+    const rate = Math.min(0.7, Math.max(0.08, 0.7 / Math.sqrt(p.radius)));
+    // Gravity above was already applied; in water it is buoyancy and drag that decide.
+    p.vel.y += 9.81 * dt;
+    const k = Math.exp(-3 * dt);
+    p.vel.x *= k;
+    p.vel.z *= k;
+    p.vel.y = -rate + (p.vel.y + rate) * k;
+    p.spin.multiplyScalar(Math.exp(-2 * dt));
+    const top = -this.lowestBelowCentre(p, -1);
+    if (p.obj.position.y + top < surface - 0.5) {
+      p.obj.visible = false;
+      p.resting = true;
+      p.vel.set(0, 0, 0);
+    }
+  }
+
+  /** A burning piece quenched: a puff of white steam. */
+  private steam(at: Vector3, surface: number, radius: number) {
+    const r = this.rnd;
+    const rr = Math.min(radius, 4 * this.k);
+    for (let i = 0; i < this.n(8); i++)
+      this.emitSmoke({
+        pos: new Vector3(at.x + (r() - 0.5) * rr, surface + 0.5, at.z + (r() - 0.5) * rr),
+        vel: new Vector3(0, 2 + r() * 2, 0),
+        life: 4 + r() * 4,
+        size0: rr,
+        size1: rr * 4 + 4,
+        color0: [0.8, 0.8, 0.8, 0.5],
+        color1: [0.85, 0.85, 0.85, 0],
+        drag: 0.8,
+        lift: 1,
+      });
+  }
+
   private char(age: number) {
     const depth = this.severity === 1 || this.water ? 0.3 : 0.92;
     const burn = Math.min(1, Math.max(0, (age - 0.3) / 3)) * depth;
@@ -721,20 +857,28 @@ export class Wreck {
     }
   }
 
-  /** Burning pieces: flames and smoke, less and less; a mild crash only smoulders. */
+  /**
+   * Burning pieces: flames and smoke, less and less; the main fire feeds a column of black
+   * smoke that rises, drifts with the wind and thins out over SMOKE_TIME. A mild crash only
+   * smoulders.
+   */
   private burn(dt: number, camera?: Vec3Like) {
     this.emitAcc += dt;
     const far = !!camera && tmpV.set(camera.x, camera.y, camera.z).distanceTo(this.centre) > FAR;
     const step = 0.05 / this.fx.budget;
     const r = this.rnd;
     const age = this._age;
+    // 0 by day .. 1 at night: the glow of a fire on its surroundings only shows in the dark.
+    const dark = Math.min(1, Math.max(0, Math.log(this.fx.exposure / 4.2) / Math.log(2e4)));
+    const main = this.mainPiece();
     while (this.emitAcc > step) {
       this.emitAcc -= step;
       if (far) continue;
+      if (main) this.column(main, step);
       for (const p of this.pieces) {
         const pos = p.obj.position;
         const rr = Math.min(p.radius, 4 * this.k);
-        if (this.severity === 1 && p.kind === 'hull' && !this.water && age < 25) {
+        if (this.severity === 1 && p.kind === 'hull' && !this.water && !p.sinking && age < 25) {
           // Smouldering engine: thin grey smoke, no flames.
           if (r() < 0.3 * (1 - age / 25))
             this.emitSmoke({
@@ -753,11 +897,14 @@ export class Wreck {
         if (age > p.burnUntil || age < this.boomAt) continue;
         const fade = 1 - age / p.burnUntil;
         // Flames: overlapping tongues licking up from all over the piece (many faint ones
-        // merge into one fire; few bright ones would read as separate blobs).
+        // merge into one fire; few bright ones would read as separate blobs). The main fire
+        // dies down to a smaller one but keeps burning.
+        const strength = p === main ? Math.max(0.35, fade) : fade;
         const tongues = rr > 1.5 ? 3 : 2;
         for (let f = 0; f < tongues; f++)
-          if (r() < 0.8 * fade + 0.2) {
+          if (r() < 0.8 * strength + 0.2) {
             const hot = r();
+            const sz = rr * (0.5 + 0.5 * strength);
             this.emitFire({
               pos: pos.clone().add(
                 rand3(r)
@@ -766,29 +913,30 @@ export class Wreck {
               ),
               vel: new Vector3(p.vel.x, p.vel.y + 1.5 + r() * 2.5, p.vel.z),
               life: 0.5 + r() * 0.6,
-              size0: rr * (0.7 + r() * 0.6),
-              size1: rr * 0.25,
-              color0: [2 + 1.2 * hot, 0.75 + 0.7 * hot, 0.15 + 0.2 * hot, 0.5],
-              color1: [1, 0.16, 0.02, 0],
+              size0: sz * (0.7 + r() * 0.6),
+              size1: sz * 0.25,
+              color0: [0.95 + 0.5 * hot, 0.36 + 0.34 * hot, 0.06 + 0.07 * hot, 0.75],
+              color1: [0.5, 0.08, 0.01, 0],
               drag: 1,
               lift: 6,
               stretch: 2,
             });
           }
-        // The glow of the fire in its own smoke, around its base.
-        if (r() < 0.25 * fade)
+        // The glow of the fire in its own smoke and on the ground around it: a soft ball of
+        // light that only shows in the dark (where the device has no fire light too).
+        if (r() < 0.3 * strength && dark > 0.05)
           this.emitFire({
-            pos: pos.clone().add(new Vector3(0, rr * 0.5, 0)),
-            vel: new Vector3(0, 1, 0),
-            life: 1 + r(),
-            size0: rr * 2.5,
-            size1: rr * 3.5,
-            color0: [0.5, 0.17, 0.03, 0.4],
-            color1: [0.3, 0.06, 0.01, 0],
+            pos: pos.clone().add(new Vector3(0, rr * 0.2, 0)),
+            vel: new Vector3(0, 0.5, 0),
+            life: 1.2 + r(),
+            size0: rr * (this.fx.light ? 3 : 5),
+            size1: rr * (this.fx.light ? 4 : 7),
+            color0: [3, 0.85, 0.12, 0.035 * dark],
+            color1: [2.4, 0.5, 0.06, 0],
             drag: 1,
-            lift: 1,
+            lift: 0,
           });
-        if (r() < 0.35 * fade + 0.1) {
+        if (p !== main && r() < 0.2 * fade + 0.05) {
           this.emitSmoke({
             pos: pos.clone().add(new Vector3(0, rr * 0.6, 0)),
             vel: new Vector3(0, 3 + r() * 3, 0),
@@ -802,6 +950,44 @@ export class Wreck {
           });
         }
       }
+    }
+  }
+
+  private columnAcc = 0;
+
+  /**
+   * The column over the main fire: big dark puffs rising at a few metres a second, taking the
+   * wind's speed as they go up and growing wide; fewer and fainter as the fire dies down, so
+   * it reads from the circling camera and from kilometres away for the whole time.
+   */
+  private column(main: Piece, step: number) {
+    const age = this._age;
+    if (this.severity === 1 || this.water || main.sinking || age < this.boomAt) return;
+    if (age > SMOKE_TIME) return;
+    const since = age - this.boomAt;
+    const strength =
+      Math.min(1, since / 2) * (age < 12 ? 1 : Math.max(0.15, Math.exp(-(age - 12) / 45)));
+    // Puffs per second: up to 8 on a desktop, fewer on a phone (WreckFx.budget via step).
+    this.columnAcc += step * this.fx.budget * 8 * (0.5 + 0.5 * strength);
+    const r = this.rnd;
+    const k = Math.sqrt(this.k);
+    const rr = Math.min(main.radius, 4 * this.k);
+    while (this.columnAcc >= 1) {
+      this.columnAcc -= 1;
+      this.emitSmoke({
+        pos: main.obj.position
+          .clone()
+          .add(new Vector3((r() - 0.5) * rr, rr * 0.5 + r() * rr * 0.5, (r() - 0.5) * rr)),
+        vel: new Vector3((r() - 0.5) * 1.5, 4 + r() * 3, (r() - 0.5) * 1.5),
+        life: 30 + r() * 14,
+        size0: Math.max(2.5, rr * 1.2),
+        size1: (30 + r() * 24) * k * (0.6 + 0.4 * strength),
+        color0: [0.035, 0.033, 0.031, 0.55 + 0.4 * strength],
+        color1: [0.1, 0.097, 0.094, 0],
+        // Rises at about lift / drag over the wind.
+        drag: 0.35,
+        lift: 2.1,
+      });
     }
   }
 
