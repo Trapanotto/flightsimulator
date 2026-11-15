@@ -8,10 +8,10 @@ import type { AvionicsUnit } from './avionicsTypes';
 import type { AircraftId, AircraftInfo, ControlInput, SimAircraft } from './types';
 
 /**
- * Every type the menus offer. The A320 and the F/A-18 can be created already but join the
- * list with their 3D models.
+ * Every type the menus offer. The F/A-18 can be created already but joins the list with
+ * its 3D model.
  */
-export const AIRCRAFT: AircraftInfo[] = [C172.info, PC12.info];
+export const AIRCRAFT: AircraftInfo[] = [C172.info, PC12.info, A320.info];
 
 /**
  * A new aircraft of the type, to be placed with reset(). `avionics` is the unit its radios,

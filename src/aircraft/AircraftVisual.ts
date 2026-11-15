@@ -119,6 +119,10 @@ export async function loadAircraftVisual(
       const { loadPC12 } = await import('./PC12Visual');
       return loadPC12(options);
     }
+    case 'a320': {
+      const { loadA320 } = await import('./A320Visual');
+      return loadA320(options);
+    }
     default:
       throw new Error(`loadAircraftVisual('${String(id)}'): no model for this type`);
   }
