@@ -526,13 +526,18 @@ export const FA18: AircraftDefinition = {
     vfe: [Infinity, 250 * KT, 250 * KT],
     egt: 885 + 273.15 + 30,
   },
+  // A carrier aircraft's gear: designed for a sink rate of about 24 ft/s (1440 ft/min) at
+  // the landing mass, with long strokes (reconstructed: 0.6 m main, 0.45 m nose) and recoil
+  // damping that keeps a firm arrival on the deck. A field landing at 700 ft/min uses half
+  // the main stroke; well beyond the design sink the nose strut breaks first.
   wheels: [
     {
       name: 'nose',
       position: v(4.77, 0, 1.95),
-      travel: 0.3,
+      travel: 0.45,
       spring: 140_000,
       damper: 16_000,
+      rebound: 3,
       // Low gain ±16°; the high gain (±75°) is the type's systems' steering scale.
       steering: 16 * DEG,
       breakingForce: 300_000,
@@ -540,9 +545,10 @@ export const FA18: AircraftDefinition = {
     {
       name: 'left',
       position: v(-0.65, -1.555, 1.95),
-      travel: 0.35,
-      spring: 450_000,
-      damper: 45_000,
+      travel: 0.6,
+      spring: 400_000,
+      damper: 50_000,
+      rebound: 3,
       brake: 'left',
       brakeForce: 32_000,
       breakingForce: 700_000,
@@ -550,9 +556,10 @@ export const FA18: AircraftDefinition = {
     {
       name: 'right',
       position: v(-0.65, 1.555, 1.95),
-      travel: 0.35,
-      spring: 450_000,
-      damper: 45_000,
+      travel: 0.6,
+      spring: 400_000,
+      damper: 50_000,
+      rebound: 3,
       brake: 'right',
       brakeForce: 32_000,
       breakingForce: 700_000,

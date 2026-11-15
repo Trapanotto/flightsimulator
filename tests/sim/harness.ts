@@ -224,27 +224,35 @@ export class RudderFeet {
   constructor(
     private readonly ac: SimAircraft,
     private readonly integral = 1,
+    /** As the helper's: 1 for a light propeller aircraft, 0.15 for the jets. */
+    private readonly groundGain = 1,
+    /** Off for types whose flight controls coordinate their turns themselves. */
+    private readonly coordinate = true,
   ) {}
   step(dt: number) {
     const t = this.ac.telemetry;
     let want = 0;
     if (t.onGround) {
+      if (this.hold === undefined) this.bias = 0;
       if (t.groundSpeed < 1) {
         this.hold = t.headingDeg;
         this.bias = 0;
       } else {
         this.hold ??= t.headingDeg;
+        const g = this.groundGain;
         const error = headingError(this.hold, t.headingDeg);
-        this.bias = clamp(this.bias + 0.5 * error * dt, -0.7, 0.7);
+        this.bias = clamp(this.bias + 0.5 * g * error * dt, -0.7, 0.7);
         const k = clamp(20 / t.groundSpeed, 0.2, 1);
         const rate = this.ac.state.angularVelocity.z / DEG;
-        want = clamp(k * (0.35 * error - 0.08 * rate) + this.bias, -1, 1);
+        want = clamp(g * k * (0.35 * error - 0.08 * rate) + this.bias, -1, 1);
       }
     } else {
       if (this.hold !== undefined) this.bias = 0;
       this.hold = undefined;
-      this.bias = clamp(this.bias + this.integral * t.beta * dt, -0.6, 0.6);
-      want = clamp(4 * t.beta + this.bias, -1, 1);
+      if (this.coordinate) {
+        this.bias = clamp(this.bias + this.integral * t.beta * dt, -0.6, 0.6);
+        want = clamp(4 * t.beta + this.bias, -1, 1);
+      }
     }
     this.command += clamp(want - this.command, -4 * dt, 4 * dt);
     this.ac.controls.yaw = this.command;

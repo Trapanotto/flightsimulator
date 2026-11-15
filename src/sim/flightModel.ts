@@ -1283,7 +1283,11 @@ export class FlightModel implements SimAircraft {
     const n = plane.normal;
     this.pointVelocity(arm, pv);
     const rate = -dot(pv, n);
-    let normal = wheel.spring * Math.min(depth, wheel.travel) + wheel.damper * rate;
+    // Orifice damping grows with the square of the stroke rate; on the way back out the
+    // recoil orifice brakes the strut harder.
+    const orifice = wheel.orificeSpeed ? Math.abs(rate) / wheel.orificeSpeed : 1;
+    const strut = wheel.damper * rate * orifice * (rate < 0 ? (wheel.rebound ?? 1) : 1);
+    let normal = wheel.spring * Math.min(depth, wheel.travel) + strut;
     // Bottoming out: the tyre and the structure take over, much stiffer.
     if (depth > wheel.travel)
       normal += 20 * wheel.spring * (depth - wheel.travel) + 4 * wheel.damper * rate;

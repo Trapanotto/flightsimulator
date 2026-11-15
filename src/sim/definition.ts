@@ -140,6 +140,18 @@ export interface WheelDef {
   /** Strut force (N) that breaks the gear. */
   breakingForce: number;
   /**
+   * Damping of the strut extending again, a multiple of `damper` (default 1). An oleo's
+   * recoil orifice is much smaller than its compression orifice: the strut gives back little
+   * of the energy of a firm arrival instead of throwing the aircraft back into the air.
+   */
+  rebound?: number;
+  /**
+   * An oleo damps through an orifice, with a force that grows with the square of the stroke
+   * rate: given, `damper` is the damping at this rate (m/s, the design sink rate) and the
+   * strut is softer below it and stiffer above. Without it the damping is linear.
+   */
+  orificeSpeed?: number;
+  /**
    * Phase 4: the tyres' bristle stiffness (N/m) and damping (N s/m) where they differ from a
    * light aircraft's: an airliner's twin wheels corner and brake far stiffer.
    */
